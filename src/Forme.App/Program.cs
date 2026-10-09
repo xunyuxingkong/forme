@@ -91,7 +91,7 @@ internal sealed class DesktopHost : IDisposable
         _petWanted=true;if(expand&&_c.Preferences.DisplayMode!="pet")_c.SavePreferences(_c.Preferences with{DisplayMode="pet"});if(House is not null)return;
         _pet??=new(_c,ShowHouse,HidePet,()=>_ =Exit());_pet.Show();Changed();
     }
-    public void HidePet(){_petWanted=false;if(_c.Preferences.DisplayMode!="tray")_c.SavePreferences(_c.Preferences with{DisplayMode="tray"});_pet?.Close();_pet=null;if(House is not null)House.Close();Changed();_app.Dispatcher.BeginInvoke(()=>GC.Collect(2,GCCollectionMode.Forced,false),System.Windows.Threading.DispatcherPriority.ContextIdle);}
+    public void HidePet(){_petWanted=false;if(_c.Preferences.DisplayMode!="tray")_c.SavePreferences(_c.Preferences with{DisplayMode="tray"});_pet?.Close();_pet=null;if(House is not null)House.Close();Changed();}
     public async Task Exit()
     {
         if(_exit)return;_exit=true;_c.Cancel();

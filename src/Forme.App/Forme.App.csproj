@@ -10,7 +10,8 @@
     <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- Avoid decompressing framework assemblies into private memory on every launch. -->
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../Forme.Core/Forme.Core.csproj" /></ItemGroup>
