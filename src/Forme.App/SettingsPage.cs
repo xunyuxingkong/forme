@@ -95,7 +95,7 @@ internal sealed partial class MainWindow
             if(!Ui.Confirm(summary))return;_c.Store.Import(d);_c.AfterImport();Navigate("settings");Toast("导入完成，原数据恢复备份在数据目录中。");
         })));
         panel.Children.Add(Ui.Row(Ui.Button("取消导出",()=>exportRequest?.Cancel()),exportStatus));
-        panel.Children.Add(Ui.Button("删除应用恢复备份",()=>{if(File.Exists(_c.Store.BackupPath)&&Ui.Confirm("删除应用保留的恢复备份？")){File.Delete(_c.Store.BackupPath);Toast("恢复备份已删除。");}}));
+        panel.Children.Add(Ui.Button("删除应用恢复备份",()=>{if(Ui.Confirm("删除应用保留的导入与数据库升级备份？")){_c.Store.RemoveBackup();Toast("应用备份已删除。");}}));
         panel.Children.Add(Ui.Row(Ui.Button("清空聊天",()=>Clear("chat")),Ui.Button("清空心情",()=>Clear("moods")),Ui.Button("清空专注记录",()=>Clear("focus"))));
         panel.Children.Add(Ui.Button("清除全部个人数据",()=>
         {

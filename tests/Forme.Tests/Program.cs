@@ -11,6 +11,7 @@ async Task ThrowsAsync(Func<Task> action,string name){try{await action();}catch(
 string testRoot=Path.GetFullPath(Path.Combine("artifacts","test-data",Guid.NewGuid().ToString("N")));Directory.CreateDirectory(testRoot);
 try
 {
+    MigrationChecks.Run(testRoot,Check,Throws);
     var motion=new PetMotion();
     var breathing=motion.Sample(1);
     Check(breathing.ScaleY>1&&breathing.Expression=="idle","idle breathing is local normalized pose");

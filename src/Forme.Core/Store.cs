@@ -5,7 +5,8 @@ namespace Forme.Core;
 
 public sealed class Store : IDisposable
 {
-    public const int Version = 1;
+    public const int Version = DatabaseMigrator.CurrentVersion;
+    public const int ExportVersion = 1; // JSON compatibility evolves independently of SQLite indexes.
     private readonly SqliteConnection _db;
     public string DirectoryPath { get; }
     public string BackupPath => Path.Combine(DirectoryPath, "recovery.json");
@@ -22,12 +23,7 @@ public sealed class Store : IDisposable
             long version = Convert.ToInt64(Scalar("PRAGMA user_version"));
             if (version > Version) throw new InvalidDataException("数据来自较新版本，请使用相应版本打开。原数据未修改。");
             if(readOnly){if(version!=Version)throw new InvalidDataException("数据格式不支持只读导出。");return;}
-            if (version == 0)
-            {
-                using var tx = _db.BeginTransaction();
-                Exec("CREATE TABLE settings(k TEXT PRIMARY KEY,v TEXT NOT NULL); CREATE TABLE moods(id TEXT PRIMARY KEY,mood TEXT,note TEXT,created TEXT,updated TEXT); CREATE TABLE sessions(id TEXT PRIMARY KEY,title TEXT,created TEXT,endpoint TEXT); CREATE TABLE messages(id TEXT PRIMARY KEY,session TEXT,role TEXT,content TEXT,status TEXT,created TEXT); CREATE INDEX messages_session ON messages(session,created); CREATE TABLE focus(id TEXT PRIMARY KEY,kind TEXT,title TEXT,started TEXT,target INTEGER,elapsed REAL,result TEXT); CREATE TABLE growth(id TEXT PRIMARY KEY,type TEXT,day TEXT); PRAGMA user_version=1;", tx);
-                tx.Commit();
-            }
+            DatabaseMigrator.Upgrade(_db,DirectoryPath);
             Exec("PRAGMA journal_mode=DELETE; PRAGMA secure_delete=ON; PRAGMA busy_timeout=3000;");
             // Interrupted responses are not silently resumed or included as successful history.
             Exec("UPDATE messages SET status='stopped' WHERE status='streaming'");
@@ -116,7 +112,7 @@ public sealed class Store : IDisposable
     private static void ValidateMood(MoodEntry m) { if (string.IsNullOrWhiteSpace(m.Id) || m.Mood.Length > 30 || m.Note.Length > 1000) throw new InvalidDataException("心情记录格式错误。"); }
     public static void ValidateExport(ExportDocument d)
     {
-        if (d.SchemaVersion != Version) throw new InvalidDataException("不支持的导出版本，原数据未修改。");
+        if (d.SchemaVersion != ExportVersion) throw new InvalidDataException("不支持的导出版本，原数据未修改。");
         if ((d.Sessions is null) != (d.Messages is null)) throw new InvalidDataException("聊天数据不完整。");
         if (d.Sessions is null && d.Moods is null && d.Focus is null && d.Room is null) throw new InvalidDataException("文件没有可导入的数据。");
         void Unique(IEnumerable<string> ids) { var all = ids.ToList(); if (all.Any(string.IsNullOrWhiteSpace) || all.Distinct().Count()!=all.Count) throw new InvalidDataException("记录 ID 无效或重复。"); }
@@ -168,6 +164,11 @@ public sealed class Store : IDisposable
         Exec(category=="chat"?"DELETE FROM messages; DELETE FROM sessions;":$"DELETE FROM {category}"); RemoveBackup();
     }
     public void ResetAll() { Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM moods; DELETE FROM focus; DELETE FROM growth; DELETE FROM settings;"); RemoveBackup(); Exec("VACUUM"); }
-    private void RemoveBackup() { if(File.Exists(BackupPath)) File.Delete(BackupPath); if(File.Exists(BackupPath+".tmp")) File.Delete(BackupPath+".tmp"); }
+    public void RemoveBackup()
+    {
+        if(File.Exists(BackupPath))File.Delete(BackupPath);
+        if(File.Exists(BackupPath+".tmp"))File.Delete(BackupPath+".tmp");
+        foreach(var path in Directory.EnumerateFiles(DirectoryPath,"migration-v*.db*"))File.Delete(path);
+    }
     public void Dispose() => _db.Dispose();
 }
