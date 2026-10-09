@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace Forme.Core;
 
-public sealed class Store : IDisposable
+public sealed partial class Store : IDisposable
 {
     public const int Version = DatabaseMigrator.CurrentVersion;
     public const int ExportVersion = 1; // JSON compatibility evolves independently of SQLite indexes.
@@ -104,11 +104,6 @@ public sealed class Store : IDisposable
         }
         catch{Exec("ROLLBACK");throw;}
     }
-    public static ExportDocument ReadExport(string path)
-    {
-        if (new FileInfo(path).Length > 32 * 1024 * 1024) throw new InvalidDataException("导入文件超过 32MB，首版暂不支持。");
-        var d = JsonSerializer.Deserialize<ExportDocument>(File.ReadAllText(path)) ?? throw new InvalidDataException("文件为空。"); ValidateExport(d); return d;
-    }
     private static void ValidateMood(MoodEntry m) { if (string.IsNullOrWhiteSpace(m.Id) || m.Mood.Length > 30 || m.Note.Length > 1000) throw new InvalidDataException("心情记录格式错误。"); }
     public static void ValidateExport(ExportDocument d)
     {
@@ -140,7 +135,7 @@ public sealed class Store : IDisposable
         ValidateExport(d);
         var existingPreferences=LoadPreferences();
         // Backup is written before any mutation. Transaction prevents a half-import.
-        var temp = BackupPath + ".tmp"; File.WriteAllText(temp,JsonSerializer.Serialize(Export(true,true,true,true),JsonOptions)); File.Move(temp,BackupPath,true);
+        ExportFile(BackupPath,true,true,true,true);
         using var tx = _db.BeginTransaction();
         if(d.Sessions is not null)
         {

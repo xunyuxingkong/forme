@@ -33,6 +33,7 @@ internal static class Program
         Controller? controller=null;DesktopHost? host=null;
         try
         {
+            PreparedImport.CleanupAbandoned();
             controller=new Controller(data);host=new DesktopHost(app,controller,name,testing);
             app.DispatcherUnhandledException+=(_,e)=>{Ui.Error("操作未完成："+e.Exception.Message);e.Handled=true;};
             if(args.Contains("--smoke"))app.Dispatcher.BeginInvoke(async()=>await Smoke.Run(host,controller));
@@ -215,8 +216,10 @@ internal static class Smoke
                 if(!roomView.DefaultSceneFits())throw new Exception("Default camera clips scene in "+layout.Item3);
                 Save(host.House,"artifacts/screenshots/"+layout.Item3+".png");
             }
-            host.House.Width=1280;host.House.Height=850;host.House.Navigate("home");c.SavePreferences(c.Preferences with{Quiet=false});await Task.Delay(80);Save(host.House,"artifacts/screenshots/home.png");
-            if(!roomView.AnimationRunning)throw new Exception("Room pet idle did not start");
+            host.House.WindowState=WindowState.Normal;host.House.Show();host.House.Width=1280;host.House.Height=850;host.House.Navigate("home");c.SavePreferences(c.Preferences with{Quiet=false});
+            await host.House.Dispatcher.InvokeAsync(()=>host.House.UpdateLayout(),System.Windows.Threading.DispatcherPriority.ContextIdle);
+            Save(host.House,"artifacts/screenshots/home.png");
+            if(!roomView.AnimationRunning)throw new Exception($"Room pet idle did not start: visible={roomView.IsVisible}, loaded={roomView.IsLoaded}, motionVisible={roomView.MotionVisible}, previewQuiet={roomView.Preview?.Quiet}, quiet={c.Preferences.Quiet}, reduced={c.Preferences.ReducedMotion}, suspended={c.AnimationSuspended}, window={host.House.WindowState}");
             host.House.WindowState=WindowState.Minimized;await Task.Delay(100);if(roomView.AnimationRunning)throw new Exception("Minimized room kept animating");
             host.House.WindowState=WindowState.Normal;c.AnimationSuspended=true;c.Refresh();await Task.Delay(100);if(roomView.AnimationRunning)throw new Exception("Locked room kept animating");
             c.AnimationSuspended=false;c.Refresh();c.SavePreferences(c.Preferences with{ReducedMotion=true});if(roomView.AnimationRunning)throw new Exception("Reduced-motion room kept animating");

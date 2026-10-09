@@ -67,6 +67,7 @@ internal sealed partial class MainWindow
         CancellationTokenSource? exportRequest=null;var exportStatus=Ui.Text("",12,Ui.Muted);
         panel.Children.Add(Ui.Row(Ui.AsyncButton("导出所选数据",async()=>
         {
+            if(exportRequest is not null)throw new InvalidOperationException("请先等待或取消当前数据操作。");
             if(!(chat.IsChecked==true||moods.IsChecked==true||focus.IsChecked==true||room.IsChecked==true))throw new InvalidOperationException("至少选择一类数据。");
             if(!Ui.Confirm("导出文件可能包含私人内容，文件不会包含密钥。请选择安全的保存位置。"))return;
             var dialog=new Microsoft.Win32.SaveFileDialog{Filter="Forme 数据 (*.json)|*.json",FileName=$"Forme-{DateTime.Now:yyyyMMdd}.json"};
@@ -74,27 +75,44 @@ internal sealed partial class MainWindow
             {
                 bool includeChat=chat.IsChecked==true,includeMood=moods.IsChecked==true,includeFocus=focus.IsChecked==true,includeRoom=room.IsChecked==true;
                 var request=new CancellationTokenSource();exportRequest=request;exportStatus.Text="正在导出，可以取消…";string directory=_c.Store.DirectoryPath;
-                var temp=dialog.FileName+"."+Guid.NewGuid().ToString("N")+".tmp";
                 try
                 {
-                    await Task.Run(async()=>
+                    await Task.Run(()=>
                     {
-                        using var reader=new Store(directory,true);request.Token.ThrowIfCancellationRequested();
-                        var data=reader.Export(includeChat,includeMood,includeFocus,includeRoom);request.Token.ThrowIfCancellationRequested();
-                        using var output=File.Create(temp);await JsonSerializer.SerializeAsync(output,data,Store.JsonOptions,request.Token);
+                        using var reader=new Store(directory,true);
+                        reader.ExportFile(dialog.FileName,includeChat,includeMood,includeFocus,includeRoom,request.Token);
                     },request.Token);
-                    request.Token.ThrowIfCancellationRequested();File.Move(temp,dialog.FileName,true);exportStatus.Text="导出完成，不包含密钥。";
+                    exportStatus.Text="导出完成，不包含密钥。";
                 }
                 catch(OperationCanceledException){exportStatus.Text="已取消导出。";}
-                finally{if(File.Exists(temp))File.Delete(temp);exportRequest=null;request.Dispose();}
+                finally{exportRequest=null;request.Dispose();}
             }
-        }),Ui.Button("导入数据",()=>
+        }),Ui.AsyncButton("导入数据",async()=>
         {
             RequireIdle();var dialog=new Microsoft.Win32.OpenFileDialog{Filter="Forme 数据 (*.json)|*.json"};if(dialog.ShowDialog(this)!=true)return;
-            var d=Store.ReadExport(dialog.FileName);string summary=$"聊天：{(d.Sessions is null?"保留":$"替换为{d.Sessions.Count}个会话")}\n心情：{(d.Moods is null?"保留":$"替换为{d.Moods.Count}条")}\n专注：{(d.Focus is null?"保留":$"替换为{d.Focus.Count}条")}\n房间：{(d.Room is null?"保留":"替换")}\n\n原内容将备份到 {_c.Store.BackupPath}。只替换文件包含的类别，不覆盖密钥。确认导入？";
-            if(!Ui.Confirm(summary))return;_c.Store.Import(d);_c.AfterImport();Navigate("settings");Toast("导入完成，原数据恢复备份在数据目录中。");
+            await ImportFile(dialog.FileName);
         })));
-        panel.Children.Add(Ui.Row(Ui.Button("取消导出",()=>exportRequest?.Cancel()),exportStatus));
+        async Task ImportFile(string path)
+        {
+            if(exportRequest is not null)throw new InvalidOperationException("请先等待或取消当前数据操作。");
+            RequireIdle();var request=new CancellationTokenSource();exportRequest=request;exportStatus.Text="正在检查导入文件，可以取消…";
+            try
+            {
+                using var plan=await Task.Run(()=>Store.PrepareImport(path,request.Token),request.Token);
+                string summary=$"聊天：{(plan.HasChat?$"替换为{plan.Sessions}个会话 / {plan.Messages}条消息":"保留")}\n心情：{(plan.HasMoods?$"替换为{plan.Moods}条":"保留")}\n专注：{(plan.HasFocus?$"替换为{plan.Focus}条":"保留")}\n房间：{(plan.Room is null?"保留":"替换")}\n\n原内容将备份到 {_c.Store.BackupPath}。只替换文件包含的类别，不覆盖密钥。确认导入？";
+                RequireIdle();request.Token.ThrowIfCancellationRequested();
+                if(!Ui.Confirm(summary)){exportStatus.Text="未导入。";return;}
+                _c.Store.ApplyImport(plan);_c.AfterImport();Navigate("settings");Toast("导入完成，原数据恢复备份在数据目录中。");
+            }
+            catch(OperationCanceledException){exportStatus.Text="已取消导入。";}
+            finally{exportRequest=null;request.Dispose();}
+        }
+        panel.Children.Add(Ui.Row(Ui.Button("取消导入/导出",()=>exportRequest?.Cancel()),exportStatus));
+        panel.Children.Add(Ui.AsyncButton("从恢复备份恢复",async()=>
+        {
+            RequireIdle();if(!File.Exists(_c.Store.BackupPath))throw new InvalidDataException("没有可恢复的导入备份。");
+            await ImportFile(_c.Store.BackupPath);
+        }));
         panel.Children.Add(Ui.Button("删除应用恢复备份",()=>{if(Ui.Confirm("删除应用保留的导入与数据库升级备份？")){_c.Store.RemoveBackup();Toast("应用备份已删除。");}}));
         panel.Children.Add(Ui.Row(Ui.Button("清空聊天",()=>Clear("chat")),Ui.Button("清空心情",()=>Clear("moods")),Ui.Button("清空专注记录",()=>Clear("focus"))));
         panel.Children.Add(Ui.Button("清除全部个人数据",()=>
