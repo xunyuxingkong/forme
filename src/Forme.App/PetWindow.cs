@@ -14,8 +14,6 @@ internal sealed class PetWindow : Window
     private readonly Action _hide;
     private readonly Action _exit;
     private readonly Pet3DView _pet=new();
-    private readonly DispatcherTimer _blink=new(){Interval=TimeSpan.FromSeconds(7)};
-    private readonly DispatcherTimer _reset=new(){Interval=TimeSpan.FromMilliseconds(180)};
     private readonly Border _bubble;
     private readonly TextBlock _timerText=Ui.Text("",11);
     private readonly DispatcherTimer _bubbleTimeout=new(){Interval=TimeSpan.FromSeconds(8)};
@@ -47,20 +45,18 @@ internal sealed class PetWindow : Window
             var point=e.GetPosition(this);
             if(!_dragged && (Math.Abs(point.X-_start.X)>5 || Math.Abs(point.Y-_start.Y)>5))
             {
-                _dragged=true;_pet.ReleaseMouseCapture();_pet.State="thinking";_pet.InvalidateVisual();
+                _dragged=true;_pet.ReleaseMouseCapture();_pet.Drag(true);
                 try{DragMove();Clamp();var p=_c.Preferences with{PetX=Left,PetY=Top};_c.SavePreferences(p);}catch(InvalidOperationException){}
+                finally{_pet.Drag(false);}
                 Update();
             }
         };
-        _pet.MouseLeftButtonUp+=(_,_)=>{_pet.ReleaseMouseCapture();if(!_dragged){_bubble.Visibility=_bubble.IsVisible?Visibility.Collapsed:Visibility.Visible;_bubbleTimeout.Stop();_bubbleTimeout.Start();_pet.State="happy";_pet.InvalidateVisual();if(c.Preferences.Sounds&&!c.Preferences.Quiet)System.Media.SystemSounds.Asterisk.Play();}};
+        _pet.MouseLeftButtonUp+=(_,_)=>{_pet.ReleaseMouseCapture();if(!_dragged){_bubble.Visibility=_bubble.IsVisible?Visibility.Collapsed:Visibility.Visible;_bubbleTimeout.Stop();_bubbleTimeout.Start();_pet.Pat();if(c.Preferences.Sounds&&!c.Preferences.Quiet)System.Media.SystemSounds.Asterisk.Play();}};
         var menu=new ContextMenu();_menu=menu;
         void Item(string label,Action action){var i=new MenuItem{Header=label};i.Click+=(_,_)=>Ui.Guard(action);menu.Items.Add(i);}
         Item("打开小屋",()=>_open("home"));Item("聊一会儿",()=>_open("chat"));Item("开始专注",()=>_open("focus"));Item("安静模式开关",()=>_c.SavePreferences(_c.Preferences with{Quiet=!_c.Preferences.Quiet}));
         Item("置顶开关",()=>_c.SavePreferences(_c.Preferences with{Topmost=!_c.Preferences.Topmost}));Item("收起到边缘",CollapseToEdge);Item("收起到托盘",_hide);Item("退出",_exit);_pet.ContextMenu=menu;
-        _blink.Tick+=(_,_)=>{if(!_c.Preferences.ReducedMotion&&!_c.Preferences.Quiet){_pet.Blink=true;_pet.InvalidateVisual();_reset.Start();}};
-        _reset.Tick+=(_,_)=>{_reset.Stop();_pet.Blink=false;Update();};
         _bubbleTimeout.Tick+=(_,_)=>{_bubbleTimeout.Stop();if(!_c.Clock.Active){_bubble.Visibility=Visibility.Collapsed;_timerText.Text="";}Update();};
-        IsVisibleChanged+=(_,_)=>{if(IsVisible&&!c.Preferences.ReducedMotion)_blink.Start();else{_blink.Stop();_reset.Stop();}};
         SourceInitialized+=(_,_)=>
         {
             var handle=new WindowInteropHelper(this).Handle;
@@ -71,7 +67,7 @@ internal sealed class PetWindow : Window
         };
         c.Changed+=Update;
         c.Tick+=UpdateTimer;
-        Closed+=(_,_)=>{c.Changed-=Update;c.Tick-=UpdateTimer;_blink.Stop();_reset.Stop();_bubbleTimeout.Stop();_pet.Release();};
+        Closed+=(_,_)=>{c.Changed-=Update;c.Tick-=UpdateTimer;_bubbleTimeout.Stop();_pet.Release();};
         Update();
     }
     private IntPtr Hook(IntPtr hwnd,int msg,IntPtr w,IntPtr l,ref bool handled)
@@ -98,7 +94,7 @@ internal sealed class PetWindow : Window
     }
     public void CollapseToEdge()
     {
-        _edge=true;_blink.Stop();_bubbleTimeout.Stop();var tab=Ui.Button("团",ExpandFromEdge,true);tab.Margin=new Thickness(0);tab.ContextMenu=_menu;tab.ToolTip="点击恢复伙伴，右键打开菜单";Content=tab;Width=44;Height=60;
+        _edge=true;_bubbleTimeout.Stop();var tab=Ui.Button("团",ExpandFromEdge,true);tab.Margin=new Thickness(0);tab.ContextMenu=_menu;tab.ToolTip="点击恢复伙伴，右键打开菜单";Content=tab;Width=44;Height=60;
         Dispatcher.BeginInvoke(()=>{if(!IsVisible||!_edge)return;Clamp();var handle=new WindowInteropHelper(this).Handle;if(GetWindowRect(handle,out var rect)){var area=System.Windows.Forms.Screen.FromHandle(handle).WorkingArea;SetWindowPos(handle,IntPtr.Zero,area.Right-(rect.Right-rect.Left),rect.Top,0,0,0x15);}_c.SavePreferences(_c.Preferences with{DisplayMode="edge",PetX=Left,PetY=Top});});
     }
     public void ExpandFromEdge(){_edge=false;Content=_normalContent;_c.SavePreferences(_c.Preferences with{DisplayMode="pet"});Update();Dispatcher.BeginInvoke(Clamp);}
@@ -106,7 +102,7 @@ internal sealed class PetWindow : Window
     {
         Topmost=_c.Preferences.Topmost;if(!_edge){Width=190*_c.Preferences.PetScale;Height=260*_c.Preferences.PetScale;}
         _pet.State=_c.Clock.Active?(_c.Clock.Running&&_c.Clock.Activity!.Kind=="focus"?"focus":"rest"):_c.Busy?"thinking":_c.Preferences.Quiet?"quiet":"idle";_pet.InvalidateVisual();
-        if(_edge||_c.Preferences.ReducedMotion||_c.Preferences.Quiet)_blink.Stop();else if(IsVisible)_blink.Start();
+        _pet.MotionSettings(_c.Preferences.ReducedMotion,_c.Preferences.Quiet,_c.AnimationSuspended);
         if(_c.Clock.Active){_bubble.Visibility=Visibility.Visible;UpdateTimer();}else if(_timerText.Text.StartsWith("专注")||_timerText.Text.StartsWith("休息")){_timerText.Text="";_bubble.Visibility=Visibility.Collapsed;}
     }
     private void UpdateTimer()

@@ -11,6 +11,37 @@ async Task ThrowsAsync(Func<Task> action,string name){try{await action();}catch(
 string testRoot=Path.GetFullPath(Path.Combine("artifacts","test-data",Guid.NewGuid().ToString("N")));Directory.CreateDirectory(testRoot);
 try
 {
+    var motion=new PetMotion();
+    var breathing=motion.Sample(1);
+    Check(breathing.ScaleY>1&&breathing.Expression=="idle","idle breathing is local normalized pose");
+    Check(motion.Sample(6.7).Blink&&!motion.Sample(6.9).Blink,"blink ends without renderer callbacks");
+    motion.Play(PetAction.Pat,10);var pat=motion.Sample(10.45);
+    Check(pat.Expression=="happy"&&pat.Lift>0,"pat produces bounded happy jump");
+    motion.Play(PetAction.Rub,10.5);
+    Check(motion.Sample(10.7).Blink&&motion.Sample(10.7).ScaleY<1,"new action replaces previous action");
+    motion.Drag(true,11);motion.Play(PetAction.Pat,11.1);
+    Check(motion.Sample(11.2).Expression=="thinking"&&motion.Reacting,"drag has priority over pat");
+    motion.Drag(false,12);Check(motion.Sample(12.2).ScaleY<1,"release produces landing");
+    Check(motion.Sample(12.6).Expression=="idle"&&!motion.Reacting,"finite action returns to base state");
+    motion.State="focus";Check(!motion.Sample(6.7).Blink&&motion.Sample(5.5).Yaw==0,"focus excludes playful idle actions");
+    motion.State="quiet";Check(motion.Sample(40)==PetPose.Neutral("quiet"),"quiet idle stays still");
+    motion.Play(PetAction.Pat,41);motion.Reset();Check(!motion.Reacting&&motion.Sample(41.2)==PetPose.Neutral("quiet"),"suspend cancels pending actions");
+    Throws(()=>motion.Sample(double.NaN),"invalid time rejected");
+    Throws(()=>motion.Play(PetAction.Pat,double.PositiveInfinity),"invalid action start rejected");
+    Throws(()=>motion.Play((PetAction)999,0),"unknown action rejected");
+    var sparse=new PetMotion();var dense=new PetMotion();sparse.Play(PetAction.Pat,0);dense.Play(PetAction.Pat,0);
+    for(int i=0;i<20;i++)dense.Sample(i*.02);
+    Check(sparse.Sample(.45)==dense.Sample(.45),"action timing independent of frame frequency");
+    foreach(var action in Enum.GetValues<PetAction>())
+    {
+        motion.State="idle";motion.Play(action,0);
+        for(int i=0;i<=120;i++)
+        {
+            var pose=motion.Sample(i*.01);
+            if(pose.ScaleX is <.85 or >1.15||pose.ScaleY is <.85 or >1.15||pose.Lift is <0 or >.08||Math.Abs(pose.Yaw)>10||Math.Abs(pose.Lean)>8)throw new Exception("Motion exceeded normalized bounds");
+        }
+    }
+    Check(true,"all action samples stay inside motion bounds");
     double time=100;var clock=new FocusClock(()=>time);clock.Start("focus",5,"test");time+=31;
     Check(clock.Elapsed==31,"monotonic elapsed");clock.Pause();time+=400;Check(clock.Elapsed==31,"pause excludes absence");clock.Resume();time+=20;Check(clock.Elapsed==51,"resume uses fresh anchor");
     var snapshot=clock.Snapshot()!;var restored=new FocusClock(()=>time);restored.Restore(snapshot);time+=800;Check(!restored.Running&&restored.Elapsed==51,"crash recovery stays paused");clock.Pause();clock.Resume();time+=400;Check(clock.Complete&&clock.Elapsed==300,"completion clamps elapsed");Check(clock.Finish().Result=="completed","completed status");Throws(()=>clock.Start("focus",0,""),"invalid duration rejected");

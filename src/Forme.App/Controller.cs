@@ -23,6 +23,7 @@ internal sealed class Controller : IDisposable
     public string LiveReply { get; private set; } = "";
     public string ChatStatus { get; private set; } = "";
     public bool Busy => _request is not null;
+    public bool AnimationSuspended { get; set; }
     public bool Waiting => Busy && LiveReply.Length==0 && DateTimeOffset.UtcNow-_requestedAt>TimeSpan.FromSeconds(5);
     private CancellationTokenSource? _request;
     private int _epoch;

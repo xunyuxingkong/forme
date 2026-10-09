@@ -28,6 +28,7 @@ internal sealed partial class MainWindow : Window
     private int _focusOffset,_moodOffset,_chatOffset,_sessionOffset;
     private readonly Dictionary<string,Button> _navigation=new();
     private DispatcherTimer? _relaxTimer;
+    private Pet3DView? _relaxPet;
     private bool _relaxFinished;
     public string CurrentPage=>_page;
     public MainWindow(Controller c,Action settingsChanged)
@@ -36,7 +37,7 @@ internal sealed partial class MainWindow : Window
         var shell=new Grid();shell.RowDefinitions.Add(new(){Height=GridLength.Auto});shell.RowDefinitions.Add(new());shell.RowDefinitions.Add(new(){Height=GridLength.Auto});
         var header=new Grid{Margin=new Thickness(0,0,0,20)};header.ColumnDefinitions.Add(new());header.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
         header.Children.Add(Ui.Stack(Ui.Text("FORME   /   陪伴小屋",11,Ui.Muted,true),_petName));
-        var quiet=Ui.Button("安静模式",()=>c.SavePreferences(c.Preferences with{Quiet=!c.Preferences.Quiet}));quiet.ToolTip="关闭主动招呼和声音";
+        var quiet=Ui.Button("安静模式",()=>c.SavePreferences(c.Preferences with{Quiet=!c.Preferences.Quiet}));quiet.ToolTip="关闭声音、主动招呼和自动动作；点击仍会回应";
         _sceneToggle=Ui.Button("查看3D小屋",()=>{_compactScene=!_compactScene;ApplyLayout();});_sceneToggle.Visibility=Visibility.Collapsed;
         var right=Ui.Stack(Ui.Row(quiet,Ui.Button("设置",()=>Navigate("settings")),_sceneToggle),_status);Grid.SetColumn(right,1);header.Children.Add(right);shell.Children.Add(header);
         _body.ColumnDefinitions.Add(new(){Width=new GridLength(0.56,GridUnitType.Star)});_body.ColumnDefinitions.Add(new(){Width=new GridLength(24)});_body.ColumnDefinitions.Add(new(){Width=new GridLength(0.44,GridUnitType.Star)});
@@ -47,6 +48,7 @@ internal sealed partial class MainWindow : Window
         {var b=Ui.Button(label,()=>Navigate(id));_navigation[id]=b;footer.Children.Add(b);}
         Grid.SetRow(footer,2);shell.Children.Add(footer);Content=new Border{Background=Ui.Cream,Padding=new Thickness(26),Child=shell};
         SizeChanged+=(_,_)=>ApplyLayout();
+        StateChanged+=(_,_)=>UpdateMotion();
         c.Changed+=OnChanged;c.Tick+=OnTick;c.Notice+=Toast;
         _toastTimer.Tick+=(_,_)=>{_toastTimer.Stop();_toast.Text="";};
         Closed+=(_,_)=>{c.Changed-=OnChanged;c.Tick-=OnTick;c.Notice-=Toast;_toastTimer.Stop();StopRelax();_room.Release();};
@@ -80,8 +82,14 @@ internal sealed partial class MainWindow : Window
     private void OnChanged()
     {
         UpdateHeader();_room.Refresh();
+        UpdateMotion();
         if(_page is "home" or "chat" or "focus" or "plant")RenderPage(_page,true);
         _settingsChanged();
+    }
+    private void UpdateMotion()
+    {
+        _room.MotionVisible=WindowState!=WindowState.Minimized;
+        _relaxPet?.MotionSettings(_c.Preferences.ReducedMotion,_c.Preferences.Quiet,_c.AnimationSuspended||WindowState==WindowState.Minimized);
     }
     private void UpdateHeader()
     {
@@ -178,7 +186,7 @@ internal sealed partial class MainWindow : Window
         theme.SelectionChanged+=(_,_)=>Preview();rug.SelectionChanged+=(_,_)=>Preview();ornament.SelectionChanged+=(_,_)=>Preview();
         return Ui.Stack(Ui.Text("把这里布置成你喜欢的样子",24,null,true),Ui.Text("基础功能一直开放，装饰只是相处留下的小纪念。",13,Ui.Muted),Ui.Card(Ui.Stack(Ui.Text("窗外"),theme,Ui.Text("地毯"),rug,Ui.Text("桌面摆件"),ornament,Ui.Row(Ui.Button("保存布置",()=>{Preview();var v=_room.Preview!;_c.SavePreferences(_c.Preferences with{Theme=v.Theme,Rug=v.Rug,Ornament=v.Ornament});Toast("布置已保存。");Navigate("home");},true),Ui.Button("取消",()=>Navigate("home"))))),Ui.Text("当前预览未保存。切换页面时将恢复保存的布置。",12,Ui.Muted));
     }
-    private void StopRelax(){_relaxTimer?.Stop();_relaxTimer=null;}
+    private void StopRelax(){_relaxTimer?.Stop();_relaxTimer=null;_relaxPet?.Release();_relaxPet=null;}
     private UIElement Relax()
     {
         var p=Ui.Stack(Ui.Text("先松一口气",25,null,true),Ui.Text("没有分数，也没有必须完成的目标。随时结束。",13,Ui.Muted));
@@ -190,7 +198,7 @@ internal sealed partial class MainWindow : Window
             void Completed(){if(_relaxFinished)return;_relaxFinished=true;_c.Store.CompleteRelaxation();Toast("这段放松留下了一朵小云装饰。想继续或返回小屋都可以。");}
             if(type=="pet")
             {
-                var pet=new Pet3DView{State="idle"};var count=0;var info=Ui.Text("按住或轻划，揉揉这个立体的小伙伴。",13,Ui.Muted);
+                var pet=new Pet3DView{State="idle"};_relaxPet=pet;UpdateMotion();var count=0;var info=Ui.Text("按住或轻划，揉揉这个立体的小伙伴。",13,Ui.Muted);
                 void Rub(){pet.Rub(_c.Preferences.ReducedMotion);info.Text=++count%2==0?"它眯起眼睛，像一团软软的云。":"收到啦，慢慢来就好。";if(_c.Preferences.Sounds&&!_c.Preferences.Quiet)System.Media.SystemSounds.Asterisk.Play();Completed();}
                 DateTimeOffset lastRub=DateTimeOffset.MinValue;
                 pet.MouseLeftButtonDown+=(_,_)=>{pet.CaptureMouse();Rub();};pet.MouseMove+=(_,e)=>{if(pet.IsMouseCaptured&&e.LeftButton==MouseButtonState.Pressed&&DateTimeOffset.UtcNow-lastRub>TimeSpan.FromMilliseconds(350)){lastRub=DateTimeOffset.UtcNow;pet.Turn(4);Rub();}};pet.MouseLeftButtonUp+=(_,_)=>pet.ReleaseMouseCapture();

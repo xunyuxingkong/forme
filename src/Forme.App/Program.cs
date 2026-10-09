@@ -58,6 +58,7 @@ internal sealed class DesktopHost : IDisposable
     private bool _exit;
     private bool _petWanted=true;
     private bool _locked;
+    private bool _sleeping;
     private string? _pendingNotice;
     private readonly bool _smoke;
     public DesktopHost(Application app,Controller c,string pipeName,bool smoke)
@@ -127,11 +128,19 @@ internal sealed class DesktopHost : IDisposable
         _pet?.Greet(text);
         Ui.Guard(()=>_c.SavePreferences(p with{GreetingDay=day,GreetingCount=count+1,LastGreeting=now}));
     }
-    private void Power(object? sender,PowerModeChangedEventArgs e){if(e.Mode==PowerModes.Suspend)_app.Dispatcher.Invoke(()=>Ui.Guard(()=>{if(_c.Clock.Running){_c.Pause();House?.Toast("系统即将休眠，计时已暂停。");}}));}
+    private void Power(object? sender,PowerModeChangedEventArgs e)
+    {
+        if(e.Mode is PowerModes.Suspend or PowerModes.Resume)_app.Dispatcher.Invoke(()=>Ui.Guard(()=>
+        {
+            _sleeping=e.Mode==PowerModes.Suspend;_c.AnimationSuspended=_locked||_sleeping;
+            if(_sleeping&&_c.Clock.Running){_c.Pause();House?.Toast("系统即将休眠，计时已暂停。");}
+            _c.Refresh();
+        }));
+    }
     private void Session(object? sender,SessionSwitchEventArgs e)
     {
         if(e.Reason is SessionSwitchReason.SessionLock or SessionSwitchReason.SessionUnlock)
-            _app.Dispatcher.Invoke(()=>Ui.Guard(()=>{_locked=e.Reason==SessionSwitchReason.SessionLock;if(_locked&&_c.Clock.Running)_c.Pause();Changed();}));
+            _app.Dispatcher.Invoke(()=>Ui.Guard(()=>{_locked=e.Reason==SessionSwitchReason.SessionLock;_c.AnimationSuspended=_locked||_sleeping;if(_locked&&_c.Clock.Running)_c.Pause();_c.Refresh();Changed();}));
     }
     private void Displays(object? sender,EventArgs e)=>_app.Dispatcher.BeginInvoke(()=>_pet?.Clamp());
     private async Task Listen(string name)
@@ -161,6 +170,7 @@ internal static class Smoke
         try
         {
             Directory.CreateDirectory("artifacts/screenshots");
+            await PetAnimationChecks.Run();
             IconAsset.Ensure();
             c.SavePreferences(new Preferences{Onboarded=true});
             host.ShowHouse("home");await Task.Delay(300);
@@ -170,6 +180,7 @@ internal static class Smoke
                 if(roomView.ObjectAt(new Point(x,y)) is {} page){hitPages.Add(page);if(page=="mood"){moodTargets++;if(exactHit.Invoke(roomView,[new Point(x,y)]) as string=="mood")exactMoodTargets++;}}
             if(!new[]{"chat","focus","relax","plant","room","mood"}.All(hitPages.Contains))throw new Exception("3D object picking incomplete: "+string.Join(",",hitPages));
             if(moodTargets<=exactMoodTargets)throw new Exception("Notebook click target was not enlarged");
+            PetAnimationChecks.CheckRoomReplacement(roomView);
             foreach(string page in new[]{"home","chat","focus","mood","relax","plant","room","settings"})
             {
                 host.House!.Navigate(page);await Task.Delay(80);Save(host.House,$"artifacts/screenshots/{page}.png");
@@ -205,6 +216,11 @@ internal static class Smoke
                 Save(host.House,"artifacts/screenshots/"+layout.Item3+".png");
             }
             host.House.Width=1280;host.House.Height=850;host.House.Navigate("home");c.SavePreferences(c.Preferences with{Quiet=false});await Task.Delay(80);Save(host.House,"artifacts/screenshots/home.png");
+            if(!roomView.AnimationRunning)throw new Exception("Room pet idle did not start");
+            host.House.WindowState=WindowState.Minimized;await Task.Delay(100);if(roomView.AnimationRunning)throw new Exception("Minimized room kept animating");
+            host.House.WindowState=WindowState.Normal;c.AnimationSuspended=true;c.Refresh();await Task.Delay(100);if(roomView.AnimationRunning)throw new Exception("Locked room kept animating");
+            c.AnimationSuspended=false;c.Refresh();c.SavePreferences(c.Preferences with{ReducedMotion=true});if(roomView.AnimationRunning)throw new Exception("Reduced-motion room kept animating");
+            c.SavePreferences(c.Preferences with{ReducedMotion=false});
             c.Start("focus",1,"测试任务");c.Pause();if(c.Clock.Running)throw new Exception("Pause failed");c.Resume();c.Finish();
             if(c.FocusDraft!="")throw new Exception("Started focus did not consume its task draft");
             if(c.Store.Focus().Count==0)throw new Exception("Focus record missing");
@@ -213,12 +229,13 @@ internal static class Smoke
             var memory=Process.GetCurrentProcess().PrivateMemorySize64/1024/1024;
             host.HidePet();host.ShowPet();await Task.Delay(150);Save(host.Pet!,"artifacts/screenshots/pet.png");
             var petSource=(HwndSource)PresentationSource.FromVisual(host.Pet)!;
+            var animatedPet=Descendants(host.Pet!).OfType<Pet3DView>().Single();if(!animatedPet.AnimationRunning)throw new Exception("Desktop pet idle did not start");
             var style=GetWindowLong(petSource.Handle,-20);if((style&0x08000000)==0)throw new Exception("Pet activates keyboard focus");
             var screenPoint=host.Pet!.PointToScreen(new Point(3,3));long packed=((long)(short)screenPoint.Y<<16)|((ushort)(short)screenPoint.X);
             if(SendMessage(petSource.Handle,0x0084,IntPtr.Zero,new IntPtr(packed))!=new IntPtr(-1))throw new Exception("Transparent area captures input");
-            host.Pet.CollapseToEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="edge"||host.Pet.Width>50)throw new Exception("Edge collapse not persisted");host.Pet.ExpandFromEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="pet"||host.Pet.Width<100)throw new Exception("Edge restore failed");
+            host.Pet.CollapseToEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="edge"||host.Pet.Width>50||animatedPet.AnimationRunning)throw new Exception("Edge collapse not persisted or animation active");host.Pet.ExpandFromEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="pet"||host.Pet.Width<100||!animatedPet.AnimationRunning)throw new Exception("Edge restore failed");
             host.HidePet();
-            File.WriteAllText("artifacts/smoke-result.txt",$"PASS: 8 pages rendered, 3D geometry picking for all 6 activities, four camera-fit layouts, compact scene retained on settings change, focus drafts retained on refresh and navigation, responsive layout, day/night and rug previews, unchanged room geometry reuse, mood UI save, room preview rollback, bubble UI reward, focus persistence, watering deduplication, DPAPI roundtrip, native pet HWND no-activate and transparent-area hit test.\nHouse private memory snapshot: {memory} MB\nTimestamp: {DateTimeOffset.Now:O}\n");
+            File.WriteAllText("artifacts/smoke-result.txt",$"PASS: interchangeable pet adapter, idle/pat/rub/drag/landing, reduced/quiet/hidden/edge/minimized/suspended animation cleanup, room model replacement picking, 8 pages rendered, 3D geometry picking for all 6 activities, four camera-fit layouts, compact scene retained on settings change, focus drafts retained on refresh and navigation, responsive layout, day/night and rug previews, unchanged room geometry reuse, mood UI save, room preview rollback, bubble UI reward, focus persistence, watering deduplication, DPAPI roundtrip, native pet HWND no-activate and transparent-area hit test.\nHouse private memory snapshot: {memory} MB\nTimestamp: {DateTimeOffset.Now:O}\n");
             Environment.ExitCode=0;
             if(File.Exists("artifacts/smoke-error.txt"))File.Delete("artifacts/smoke-error.txt");
         }

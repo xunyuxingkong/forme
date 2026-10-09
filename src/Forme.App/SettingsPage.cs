@@ -13,7 +13,7 @@ internal sealed partial class MainWindow
         var p=_c.Preferences;
         var content=Ui.Stack(Ui.Text("让陪伴更合你的习惯",24,null,true),Ui.Text("设置在本机保存。恢复偏好不会清空你的记录。",13,Ui.Muted));
         var name=Ui.Input(p.PetName,max:20);var user=Ui.Input(p.UserName,max:30);var style=Ui.Input(p.ReplyStyle,true,160);
-        var quiet=Ui.Check("安静模式（关闭声音和主动招呼）",p.Quiet);var reduced=Ui.Check("减少动效",p.ReducedMotion);var top=Ui.Check("桌面伙伴置顶",p.Topmost);
+        var quiet=Ui.Check("安静模式（关闭声音、主动招呼和自动动作）",p.Quiet);var reduced=Ui.Check("减少动效",p.ReducedMotion);var top=Ui.Check("桌面伙伴置顶",p.Topmost);
         var sound=Ui.Check("互动音效",p.Sounds);var timerSound=Ui.Check("计时完成提示音",p.TimerSounds);var notifications=Ui.Check("计时完成通知（不含私人内容）",p.Notifications);
         var greetings=Ui.Check("每日最多两次本地招呼",p.Greetings);var from=Ui.Input(p.GreetingStart.ToString(),max:2);var until=Ui.Input(p.GreetingEnd.ToString(),max:2);
         var scale=Ui.Select(new[]{"小","标准","大"},p.PetScale<.9?"小":p.PetScale>1.1?"大":"标准");

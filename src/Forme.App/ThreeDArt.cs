@@ -3,12 +3,11 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Media.Media3D;
 
 namespace Forme.App;
 
-// Actual local meshes and lights; no game engine, network assets, or render loop.
+// Shared local mesh primitives and lights; character geometry lives in its adapter.
 internal static class MeshArt
 {
     private static readonly MeshGeometry3D SphereMesh=Sphere();
@@ -71,32 +70,13 @@ internal static class MeshArt
     public static GeometryModel3D Ellipse(Model3DGroup group,string c,double x,double y,double z,double rx,double ry,double rz,double angle=0,Vector3D? axis=null)=>Shape(group,SphereMesh,c,x,y,z,rx,ry,rz,angle,axis);
     public static GeometryModel3D Box(Model3DGroup group,string c,double x,double y,double z,double w,double h,double depth,double angle=0)=>Shape(group,CubeMesh,c,x,y,z,w,h,depth,angle);
     private static GeometryModel3D SoftBox(Model3DGroup group,string c,double x,double y,double z,double w,double h,double depth,double angle=0)=>Shape(group,RoundedMesh,c,x,y,z,w,h,depth,angle);
-    public static Model3DGroup Pet(string state)
-    {
-        var g=new Model3DGroup();bool closed=state is "focus" or "rest" or "quiet" or "blink";
-        // Face points towards +Z. Different states remain the same sculpted character.
-        Ellipse(g,"#C9DCBB",0,.74,0,.65,.62,.53);
-        Ellipse(g,"#A7C49C",-.42,1.32,-.06,.16,.37,.13,-26);Ellipse(g,"#A7C49C",.42,1.32,-.06,.16,.37,.13,26);
-        Ellipse(g,"#BDD2AB",-.35,.19,.23,.23,.13,.25);Ellipse(g,"#BDD2AB",.35,.19,.23,.23,.13,.25);
-        Ellipse(g,"#B9CFAB",-.58,.56,.06,.14,.24,.15,-20);Ellipse(g,"#B9CFAB",.58,.56,.06,.14,.24,.15,20);
-        Ellipse(g,"#E5B9A1",-.34,.66,.451,.11,.048,.028);Ellipse(g,"#E5B9A1",.34,.66,.451,.11,.048,.028);
-        if(closed){Box(g,"#38503C",-.22,.86,.499,.12,.024,.024,-6);Box(g,"#38503C",.22,.86,.499,.12,.024,.024,6);}
-        else{Ellipse(g,"#38503C",-.22,.86,.501,.038,.06,.024);Ellipse(g,"#38503C",.22,.86,.501,.038,.06,.024);Ellipse(g,"#FFFFFF",-.212,.881,.522,.011,.013,.006);Ellipse(g,"#FFFFFF",.228,.881,.522,.011,.013,.006);}
-        if(state=="thinking")Ellipse(g,"#38503C",0,.65,.517,.032,.043,.02);
-        else{Box(g,"#38503C",-.033,.665,.517,.08,.018,.02,-22);Box(g,"#38503C",.033,.665,.517,.08,.018,.02,22);}
-        Box(g,"#6D935F",0,1.47,-.015,.034,.3,.034,-8);
-        Ellipse(g,"#83A96E",-.12,1.57,-.014,.17,.065,.085,-30);Ellipse(g,"#A0BE7F",.12,1.63,-.014,.17,.065,.085,27);
-        if(state=="focus"){Box(g,"#F3E5B8",0,.34,.54,.57,.055,.25);Box(g,"#BBAA81",0,.373,.54,.009,.008,.24);}
-        if(state=="happy"){Ellipse(g,"#E9C271",.69,1.3,.1,.055,.14,.055,25);Ellipse(g,"#E9C271",.69,1.3,.1,.14,.045,.045,25);}
-        return g;
-    }
     public static void Lights(Model3DGroup group,bool night=false)
     {
         group.Children.Add(new AmbientLight(Color.FromRgb(night?(byte)140:(byte)185,night?(byte)151:(byte)185,night?(byte)171:(byte)178)));
         group.Children.Add(new DirectionalLight(Color.FromRgb(255,243,214),new Vector3D(-3,-5,-4)));
         group.Children.Add(new DirectionalLight(Color.FromRgb(105,125,123),new Vector3D(2,-1,3)));
     }
-    public static Model3DGroup Room(Preferences p,string state,int points,Dictionary<Model3D,string> hits)
+    public static Model3DGroup Room(Preferences p,int points,Dictionary<Model3D,string> hits,Model3D petModel)
     {
         var g=new Model3DGroup();bool night=p.Theme=="night"||p.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7);
         // Room lighting keeps the geometry readable without washing out its colors.
@@ -155,7 +135,7 @@ internal static class MeshArt
         var gardenPlant=new Model3DGroup{Transform=new TranslateTransform3D(0,0,2.65)};
         foreach(var item in g.Children.Skip(plantStart).ToArray()){g.Children.Remove(item);gardenPlant.Children.Add(item);}
         Ellipse(g,"#C0B695",.12,.079,.86,.66,.008,.42);
-        var pet=Pet(state);pet.Transform=new TranslateTransform3D(.1,.078,.85);g.Children.Add(pet);foreach(var child in pet.Children)Mark(child,"chat");
+        var pet=new Model3DGroup{Transform=new TranslateTransform3D(.1,.078,.85)};pet.Children.Add(petModel);g.Children.Add(pet);
         // The larger indoor space opens directly onto a local outdoor garden.
         var world=new Model3DGroup();foreach(var light in g.Children.OfType<Light>().ToArray()){g.Children.Remove(light);world.Children.Add(light);}
         g.Transform=new ScaleTransform3D(1.1,1,1.1);world.Children.Add(g);
@@ -192,35 +172,44 @@ internal sealed class Pet3DView : Grid
 {
     private readonly Viewport3D _viewport=new();
     private readonly ModelVisual3D _model=new();
-    private readonly ScaleTransform3D _squash=new(1,1,1);
     private readonly AxisAngleRotation3D _rotation=new(new(0,1,0),-12);
+    private readonly Model3DGroup _character=new();
+    private readonly PetAnimator _animator;
     private string _state="idle";
-    private bool _blink;
-    public string State {get=>_state;set{if(_state==value)return;_state=value;Refresh();}}
-    public bool Blink {get=>_blink;set{if(_blink==value)return;_blink=value;Refresh();}}
-    public Pet3DView()
+    private bool _reduced,_quiet,_suspended,_released;
+    public string State {get=>_state;set{_state=value;Configure();}}
+    internal bool AnimationRunning=>_animator.Running;
+    public Pet3DView():this(new SproutPetFactory()){}
+    internal Pet3DView(IPetModelFactory factory)
     {
         Width=164;Height=168;Background=null;
         _viewport.Camera=new PerspectiveCamera(new Point3D(0,1.05,4.5),new Vector3D(0,-.05,-4.5),new Vector3D(0,1,0),31);
-        _viewport.Children.Add(_model);Children.Add(_viewport);Refresh();
+        var rig=factory.Create();_animator=new(rig);_character.Children.Add(rig.Root);
+        _character.Transform=new RotateTransform3D(_rotation,new Point3D(0,.75,0));
+        var group=new Model3DGroup();MeshArt.Lights(group);group.Children.Add(_character);_model.Content=group;
+        _viewport.Children.Add(_model);Children.Add(_viewport);
+        Loaded+=(_,_)=>Configure();Unloaded+=(_,_)=>_animator.Configure(_state,false,_reduced,_quiet,_suspended);
+        IsVisibleChanged+=(_,_)=>Configure();
     }
-    private void Refresh()
+    private void Configure(){if(!_released)_animator.Configure(_state,IsLoaded&&IsVisible,_reduced,_quiet,_suspended);}
+    public void MotionSettings(bool reduced,bool quiet,bool suspended)
     {
-        var group=new Model3DGroup();MeshArt.Lights(group);var pet=MeshArt.Pet(_blink?"blink":_state);
-        var transform=new Transform3DGroup();transform.Children.Add(_squash);transform.Children.Add(new RotateTransform3D(_rotation,new Point3D(0,.75,0)));pet.Transform=transform;group.Children.Add(pet);_model.Content=group;
+        _reduced=reduced;_quiet=quiet;_suspended=suspended;Configure();
     }
+    public void ReplaceModel(IPetModelFactory factory)
+    {var rig=factory.Create();_character.Children.Clear();_animator.Replace(rig);_character.Children.Add(rig.Root);}
     public bool HasMeshAt(Point local)
     {
         bool hit=false;VisualTreeHelper.HitTest(_viewport,null,result=>{if(result is RayMeshGeometry3DHitTestResult){hit=true;return HitTestResultBehavior.Stop;}return HitTestResultBehavior.Continue;},new PointHitTestParameters(local));return hit;
     }
     public void Rub(bool reduced)
     {
-        State="happy";if(reduced)return;
-        var animation=new DoubleAnimation(1,.9,TimeSpan.FromMilliseconds(180)){AutoReverse=true};Timeline.SetDesiredFrameRate(animation,30);_squash.BeginAnimation(ScaleTransform3D.ScaleYProperty,animation);
-        var wide=new DoubleAnimation(1,1.07,TimeSpan.FromMilliseconds(180)){AutoReverse=true};Timeline.SetDesiredFrameRate(wide,30);_squash.BeginAnimation(ScaleTransform3D.ScaleXProperty,wide);
+        _reduced=reduced;Configure();_animator.Play(PetAction.Rub);
     }
+    public void Pat()=>_animator.Play(PetAction.Pat);
+    public void Drag(bool dragging)=>_animator.Drag(dragging);
     public void Turn(double delta)=>_rotation.Angle=Math.Clamp(_rotation.Angle+delta,-65,65);
-    public void Release(){_squash.BeginAnimation(ScaleTransform3D.ScaleXProperty,null);_squash.BeginAnimation(ScaleTransform3D.ScaleYProperty,null);_model.Content=null;_viewport.Children.Clear();}
+    public void Release(){if(_released)return;_released=true;_animator.Dispose();_character.Children.Clear();_model.Content=null;_viewport.Children.Clear();}
 }
 
 internal sealed class Room3DView : Grid
@@ -229,6 +218,11 @@ internal sealed class Room3DView : Grid
     private readonly Action<string> _navigate;
     private readonly Viewport3D _viewport=new();
     private readonly ModelVisual3D _model=new();
+    private IPetModel _pet;
+    private readonly PetAnimator _animator;
+    private bool _motionVisible=true,_released;
+    internal bool AnimationRunning=>_animator.Running;
+    public bool MotionVisible {get=>_motionVisible;set{_motionVisible=value;Refresh();}}
     private readonly PerspectiveCamera _camera=new();
     private readonly Dictionary<Model3D,string> _hits=new();
     private readonly List<Point3D> _sceneCorners=new();
@@ -247,8 +241,9 @@ internal sealed class Room3DView : Grid
     private Preferences? _preview;
     private readonly System.Windows.Threading.DispatcherTimer _dayChange=new();
     public Preferences? Preview{get=>_preview;set{_preview=value;Refresh();}}
-    public Room3DView(Controller c,Action<string> navigate)
+    public Room3DView(Controller c,Action<string> navigate,IPetModelFactory? factory=null)
     {
+        _pet=(factory??new SproutPetFactory()).Create();_animator=new(_pet);
         _c=c;_navigate=navigate;Height=560;MinWidth=280;ClipToBounds=true;
         SizeChanged+=(_,_)=>{Clip=new RectangleGeometry(new Rect(RenderSize),18,18);Camera();};
         _viewport.Camera=_camera;_viewport.Children.Add(_model);Children.Add(_viewport);Camera();Refresh();
@@ -281,7 +276,8 @@ internal sealed class Room3DView : Grid
         _viewport.MouseLeave+=(_,_)=>{if(!_viewport.IsMouseCaptured)ShowHint(null);};
         _viewport.MouseWheel+=(_,e)=>{_zoom=Math.Clamp(_zoom-e.Delta/120*.08,.65,1.7);Camera();e.Handled=true;};
         _dayChange.Tick+=(_,_)=>{_dayChange.Stop();Refresh();};
-        IsVisibleChanged+=(_,_)=>{if(IsVisible)Refresh();else _dayChange.Stop();};
+        IsVisibleChanged+=(_,_)=>{Refresh();if(!IsVisible)_dayChange.Stop();};
+        Loaded+=(_,_)=>Refresh();Unloaded+=(_,_)=>_animator.Configure("idle",false,false,false,false);
         ToolTip="点击伙伴聊天、书桌专注、心情本记录、沙发放松、植物浇水；底部导航同样可用。";
     }
     private static string? PageOf(string? id)=>id=="garden"?"plant":id;
@@ -302,7 +298,11 @@ internal sealed class Room3DView : Grid
     {
         string? hit=null;VisualTreeHelper.HitTest(_viewport,null,result=>
         {
-            if(result is RayMeshGeometry3DHitTestResult mesh && _hits.TryGetValue(mesh.ModelHit,out var page)){hit=page;return HitTestResultBehavior.Stop;}
+            if(result is RayMeshGeometry3DHitTestResult mesh)
+            {
+                if(_pet.Contains(mesh.ModelHit)){hit="chat";return HitTestResultBehavior.Stop;}
+                if(_hits.TryGetValue(mesh.ModelHit,out var page)){hit=page;return HitTestResultBehavior.Stop;}
+            }
             // Frontmost unmarked walls or furniture should not select objects behind them.
             return result is RayMeshGeometry3DHitTestResult?HitTestResultBehavior.Stop:HitTestResultBehavior.Continue;
         },new PointHitTestParameters(point));return hit;
@@ -350,12 +350,14 @@ internal sealed class Room3DView : Grid
     internal bool DefaultSceneFits()=>_sceneCorners.Count>0&&_sceneCorners.All(corner=>Project(corner) is {} p&&p.X>=0&&p.X<=ActualWidth&&p.Y>=0&&p.Y<=ActualHeight);
     public void Refresh()
     {
+        if(_released)return;
         string state=_c.Clock.Active?(_c.Clock.Running&&_c.Clock.Activity!.Kind=="focus"?"focus":"rest"):_c.Busy?"thinking":_c.Preferences.Quiet?"quiet":"idle";
         var p=_preview??_c.Preferences;int points=_c.Store.PlantPoints;bool night=p.Theme=="night"||p.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7);
-        string appearance=$"{p.Theme}/{p.Rug}/{p.Ornament}/{state}/{points}/{night}";
+        _animator.Configure(state,IsLoaded&&IsVisible&&_motionVisible,p.ReducedMotion,p.Quiet,_c.AnimationSuspended);
+        string appearance=$"{p.Theme}/{p.Rug}/{p.Ornament}/{points}/{night}";
         if(_appearance!=appearance)
         {
-            _appearance=appearance;_hits.Clear();_model.Content=MeshArt.Room(p,state,points,_hits);
+            _appearance=appearance;_hits.Clear();_model.Content=MeshArt.Room(p,points,_hits,_pet.Root);
             _sceneCorners.Clear();CollectSceneCorners(_model.Content,Matrix3D.Identity);
             var backdrop=new LinearGradientBrush(Ui.Brush(night?"#D8E0E3":"#F1EDE1").Color,Ui.Brush(night?"#B7C6CD":"#DCE5D7").Color,new Point(0,0),new Point(1,1));backdrop.Freeze();Background=backdrop;
             Camera();
@@ -367,5 +369,9 @@ internal sealed class Room3DView : Grid
             _dayChange.Interval=next-now;_dayChange.Start();
         }
     }
-    public void Release(){_dayChange.Stop();_model.Content=null;_viewport.Children.Clear();_hits.Clear();_sceneCorners.Clear();_appearance=null;}
+    public void ReplaceModel(IPetModelFactory factory)
+    {
+        var rig=factory.Create();_animator.Replace(rig);_pet=rig;_appearance=null;Refresh();
+    }
+    public void Release(){if(_released)return;_released=true;_animator.Dispose();_dayChange.Stop();_model.Content=null;_viewport.Children.Clear();_hits.Clear();_sceneCorners.Clear();_appearance=null;}
 }
