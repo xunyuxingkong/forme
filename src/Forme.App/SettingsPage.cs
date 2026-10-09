@@ -50,8 +50,7 @@ internal sealed partial class MainWindow
             var next=_c.Preferences with{Endpoint=endpoint.Text.Trim().TrimEnd('/'),Model=model.Text.Trim(),ReplyStyle=style.Text.Trim()};next.Validate();
             var previousKey=_c.Secrets.Read();string newKey=key.Password;
             if(next.Endpoint!=_c.Preferences.Endpoint && !Ui.Confirm("更换服务地址会新建对话，不自动分享旧历史。"+(newKey.Length==0&&previousKey.Length>0?"当前密钥将保留，请确认它适用于新服务；也可以取消后填写新密钥。":"")))return;
-            try{if(newKey.Length>0)_c.Secrets.Save(newKey);var changed=next.Endpoint!=_c.Preferences.Endpoint;_c.SavePreferences(next);if(changed)_c.NewSession();}
-            catch{_c.Secrets.Save(previousKey);throw;}
+            _c.SaveAiConfiguration(next,newKey);
             key.Clear();connectionStatus.Text=_c.Secrets.Exists?"配置已保存，密钥由 Windows 保护。":"配置已保存，请填写密钥后聊天。";Toast("AI 配置已保存。未自动发起请求。");
         },true));
         aiPanel.Children.Add(Ui.Button("删除已保存密钥",()=>{if(_c.Busy)throw new InvalidOperationException("请先停止并等待请求结束。");if(Ui.Confirm("删除本机保存的 AI 密钥？历史记录保留。")){_c.Secrets.Delete();key.Clear();connectionStatus.Text="密钥已删除。";}}));

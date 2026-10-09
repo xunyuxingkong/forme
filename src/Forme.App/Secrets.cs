@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Forme.App;
 
-internal sealed class Secrets(string directory)
+internal sealed class Secrets(string directory) : Forme.Core.ISecretStore
 {
     private string PathName => Path.Combine(directory,"ai.secret");
     [StructLayout(LayoutKind.Sequential)] private struct Blob { public int Length; public IntPtr Data; }

@@ -44,6 +44,12 @@ internal sealed class Controller : IDisposable
     {
         Store.SavePreferences(next); Preferences=next; Changed?.Invoke();
     }
+    public void SaveAiConfiguration(Preferences next,string? replacementKey)
+    {
+        if(Busy)throw new InvalidOperationException("请先停止并等待当前请求结束。");
+        var session=Store.SaveAiConfiguration(next,Session,Secrets,replacementKey);
+        Preferences=next;Session=session;LiveReply="";ChatStatus="";Changed?.Invoke();
+    }
     public void Start(string kind,int minutes,string title)
     {
         Clock.Start(kind,minutes,title);

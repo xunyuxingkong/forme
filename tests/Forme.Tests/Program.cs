@@ -12,6 +12,7 @@ string testRoot=Path.GetFullPath(Path.Combine("artifacts","test-data",Guid.NewGu
 try
 {
     MigrationChecks.Run(testRoot,Check,Throws);
+    AiConfigurationChecks.Run(testRoot,Check,Throws);
     TransferChecks.Run(testRoot,Check,Throws);
     TransferChecks.Large(testRoot,Check);
     var motion=new PetMotion();
