@@ -5,8 +5,10 @@
     <Nullable>disable</Nullable><AssemblyName>Forme-Setup</AssemblyName>
     <ApplicationManifest>../Forme.App/app.manifest</ApplicationManifest>
     <ApplicationIcon>../Forme.App/Assets/forme.ico</ApplicationIcon>
-    <Version>0.1.0</Version>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
+  </ItemGroup>
   <ItemGroup>
     <Reference Include="System.IO.Compression"/><Reference Include="System.IO.Compression.FileSystem"/>
     <Reference Include="Microsoft.CSharp"/>

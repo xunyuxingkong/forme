@@ -15,6 +15,7 @@ namespace Forme.Setup
     {
         internal static readonly string Programs=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Programs");
         internal static readonly string Target=Path.Combine(Programs,"Forme");
+        internal static readonly string Version=typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion??"0.0.0";
         private const string RegistryKeyName=@"Software\Microsoft\Windows\CurrentVersion\Uninstall\Forme";
         [STAThread]
         private static int Main(string[] args)
@@ -52,7 +53,7 @@ namespace Forme.Setup
                     Directory.CreateDirectory(Path.GetDirectoryName(path));entry.ExtractToFile(path,true);
                 }
             }
-            File.WriteAllText(Path.Combine(destination,".forme-install"),"Forme 0.1.0");
+            File.WriteAllText(Path.Combine(destination,".forme-install"),"Forme "+Version);
             using(var stream=Assembly.GetExecutingAssembly().GetManifestResourceStream("Forme.Uninstall"))
             using(var reader=new StreamReader(stream,System.Text.Encoding.UTF8))File.WriteAllText(Path.Combine(destination,"uninstall.ps1"),reader.ReadToEnd(),new System.Text.UTF8Encoding(true));
         }
@@ -77,7 +78,7 @@ namespace Forme.Setup
                 Shortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),"Forme.lnk"),Path.Combine(Target,"Forme.exe"),"");
                 using(var key=Registry.CurrentUser.CreateSubKey(RegistryKeyName))
                 {
-                    key.SetValue("DisplayName","Forme 陪伴小屋");key.SetValue("DisplayVersion","0.1.0");key.SetValue("InstallLocation",Target);key.SetValue("DisplayIcon",Path.Combine(Target,"Forme.exe"));
+                    key.SetValue("DisplayName","Forme 陪伴小屋");key.SetValue("DisplayVersion",Version);key.SetValue("InstallLocation",Target);key.SetValue("DisplayIcon",Path.Combine(Target,"Forme.exe"));
                     key.SetValue("UninstallString","\""+Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe")+"\" "+arguments);
                     key.SetValue("NoModify",1);key.SetValue("NoRepair",1);
                 }

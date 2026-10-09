@@ -25,6 +25,8 @@ internal sealed class PetAnimator : IDisposable
     private double _lastFrame;
     public Func<double,bool,PetPose?>? ExternalMotion {get;set;}
     public bool ExternalActive {get;set;}
+    public Func<bool>? ExternalMoving {get;set;}
+    public Action<double>? Frame {get;set;}
     public void StopAction(){_motion.Reset();Configure(_motion.State,_visible,_reduced,_quiet,_suspended);}
     public void AttachTravel(PetTravel travel,Action<GroundPoint,double> place){_travel?.Stop();_travel=travel;_place=place;place(travel.Position,travel.Heading);}
     public bool MoveTo(GroundPoint target)
@@ -67,9 +69,10 @@ internal sealed class PetAnimator : IDisposable
             var gait=travel.Advance(Math.Max(0,now-_lastFrame));_place?.Invoke(travel.Position,travel.Heading);
             if(travel.Moving)pose=gait;
         }
-        _lastFrame=now;_model.Apply(pose);
+        Frame?.Invoke(Math.Max(0,now-_lastFrame));_lastFrame=now;_model.Apply(pose);
         if(_quiet&&!_motion.Reacting&&_travel?.Moving!=true&&!ExternalActive){Stop();return;}
-        _timer.Interval=TimeSpan.FromMilliseconds(_motion.Reacting||_travel?.Moving==true||ExternalActive?1000d/30:_motion.State=="sleep"?200:1000d/15);
+        bool movingExternal=ExternalActive&&ExternalMoving?.Invoke()==true;
+        _timer.Interval=TimeSpan.FromMilliseconds(_motion.Reacting||_travel?.Moving==true||movingExternal?1000d/30:_motion.State=="sleep"||ExternalActive?200:1000d/15);
         _timer.Start();
     }
     private void Stop(){_timer.Stop();_time.Reset();_lastFrame=0;_travel?.Stop();_motion.Reset();_model.Apply(_motion.State=="sleep"?_motion.Sample(0):PetPose.Neutral(_motion.State));}

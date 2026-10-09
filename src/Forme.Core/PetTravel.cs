@@ -22,8 +22,9 @@ public sealed class PetTravel(double minX,double maxX,double minZ,double maxZ,IR
         int nx=(int)Math.Ceiling((maxX-minX)/Cell)+1,nz=(int)Math.Ceiling((maxZ-minZ)/Cell)+1;
         GroundPoint Point(int id)=>new(minX+id%nx*Cell,minZ+id/nx*Cell);
         int Id(GroundPoint p)=>Math.Clamp((int)Math.Round((p.Z-minZ)/Cell),0,nz-1)*nx+Math.Clamp((int)Math.Round((p.X-minX)/Cell),0,nx-1);
-        bool Clear(GroundPoint a,GroundPoint b){int steps=Math.Max(1,(int)Math.Ceiling(Distance(a,b)/.1));for(int i=1;i<=steps;i++)if(!Walkable(new(a.X+(b.X-a.X)*i/steps,a.Z+(b.Z-a.Z)*i/steps)))return false;return true;}
+        bool Clear(GroundPoint a,GroundPoint b){if(!Walkable(a))return false;int steps=Math.Max(1,(int)Math.Ceiling(Distance(a,b)/.1));for(int i=1;i<=steps;i++)if(!Walkable(new(a.X+(b.X-a.X)*i/steps,a.Z+(b.Z-a.Z)*i/steps)))return false;return true;}
         int start=Id(Position),end=Id(target);var open=new PriorityQueue<int,double>();var cost=new Dictionary<int,double>{{start,0}};var previous=new Dictionary<int,int>();open.Enqueue(start,0);
+        if(start==end&&!Clear(Position,target))return false;
         bool found=false;
         while(open.TryDequeue(out int current,out _))
         {

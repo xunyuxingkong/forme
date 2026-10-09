@@ -30,4 +30,14 @@ public class TravelTests
         Assert.IsFalse(travel.MoveTo(new(3,0)));Assert.IsTrue(travel.Moving);
         for(int i=0;i<100;i++)travel.Advance(.1);Assert.AreEqual(new GroundPoint(-2,0),travel.Position);
     }
+
+    [TestMethod,TestCategory("Motion")]
+    public void SameCellShortPathStillChecksClearance()
+    {
+        var travel=new PetTravel(-5,5,-5,5,[new(0,0,.01,.01)]);travel.Reset(new(.3,0));
+        Assert.AreEqual((int)Math.Round((.4+5)/.35),(int)Math.Round((travel.Position.X+5)/.35));
+        Assert.IsFalse(travel.MoveTo(new(.4,0)),"Same-cell shortcut must check its blocked starting point");
+        var clear=new PetTravel(-5,5,-5,5,[]);clear.Reset(new(0,0));
+        Assert.IsTrue(clear.MoveTo(new(.1,0)));Assert.IsTrue(clear.Moving);clear.Advance(1);Assert.AreEqual(new GroundPoint(.1,0),clear.Position);
+    }
 }

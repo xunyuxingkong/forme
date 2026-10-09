@@ -36,6 +36,11 @@ public sealed class CoreTests
     {
         MigrationChecks.Run(testRoot,Check,Throws);
     }
+    [TestMethod, TestCategory("Game")]
+    public void LocalProgressionRewardsAndBackup()
+    {
+        GameChecks.Run(testRoot,Check,Throws);
+    }
     [TestMethod, TestCategory("Privacy")]
     public void AiConfigurationFailureRecovery()
     {

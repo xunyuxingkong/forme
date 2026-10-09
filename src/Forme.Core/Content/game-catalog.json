@@ -1,0 +1,9 @@
+[
+  { "Id": "ball-yellow", "Name": "暖阳小球", "Kind": "toy", "Price": 0, "MaxOwned": 1 },
+  { "Id": "plant-pot", "Name": "薄荷花盆", "Kind": "decor", "Price": 2, "MaxOwned": 1 },
+  { "Id": "lamp-paper", "Name": "纸月灯", "Kind": "decor", "Price": 3, "MaxOwned": 1 },
+  { "Id": "rug-blue", "Name": "晴空地毯", "Kind": "rug", "Price": 4, "MaxOwned": 1 },
+  { "Id": "discovery-shell", "Name": "小小贝壳", "Kind": "discovery", "Price": 0, "MaxOwned": 1 },
+  { "Id": "discovery-leaf", "Name": "银杏叶", "Kind": "discovery", "Price": 0, "MaxOwned": 1 },
+  { "Id": "discovery-stone", "Name": "彩色石子", "Kind": "discovery", "Price": 0, "MaxOwned": 1 }
+]

@@ -1,0 +1,6 @@
+[
+  { "Id": "ball", "Title": "和伙伴玩一次小球", "Hint": "抛出小球，让伙伴跑去捡回来。", "RewardXp": 10, "RewardStars": 1 },
+  { "Id": "discover", "Title": "去户外看看", "Hint": "在户外场景里发现一件小东西。", "RewardXp": 10, "RewardStars": 1 },
+  { "Id": "relax", "Title": "一起休息片刻", "Hint": "完成一次轻松休息，不需要连续签到。", "RewardXp": 10, "RewardStars": 1 },
+  { "Id": "focus", "Title": "完成一段专注", "Hint": "专注 5 分钟或更久即可。", "RewardXp": 10, "RewardStars": 1 }
+]

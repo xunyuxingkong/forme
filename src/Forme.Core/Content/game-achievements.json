@@ -1,0 +1,8 @@
+[
+  { "Id": "task-ball", "Name": "第一次玩小球", "Description": "和伙伴完成一次小球互动。" },
+  { "Id": "task-discover", "Name": "第一次户外发现", "Description": "在户外完成一次发现。" },
+  { "Id": "task-relax", "Name": "第一次一起休息", "Description": "和伙伴完成一次放松。" },
+  { "Id": "task-focus", "Name": "第一次共同专注", "Description": "和伙伴专注一段时间。" },
+  { "Id": "first-discovery", "Name": "第一次户外收藏", "Description": "收藏第一件户外发现。" },
+  { "Id": "first-purchase", "Name": "第一次兑换家具", "Description": "使用星星兑换一件家具。" }
+]

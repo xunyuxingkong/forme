@@ -6,7 +6,7 @@ internal static class ChatRequests
     public static async Task Send(Controller c)
     {
         if(c.Busy)return;
-        if(c.Session is { } session&&session.Endpoint!=c.Preferences.Endpoint)
+        if(c.Session is { } session&&!Forme.Core.AiClient.SameEndpoint(session.Endpoint,c.Preferences.Endpoint))
         {
             if(!Ui.Confirm("此会话曾发送给另一地址。继续将把当前消息和有限历史发送给新服务："+c.Preferences.Endpoint+"。确认转移？"))return;
             c.Store.RebindSession(session.Id,c.Preferences.Endpoint);c.SelectSession(session with{Endpoint=c.Preferences.Endpoint});

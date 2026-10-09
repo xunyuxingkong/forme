@@ -44,7 +44,7 @@ internal sealed partial class MainWindow : Window
         _room=new(c,Navigate){MaxHeight=560,HorizontalAlignment=HorizontalAlignment.Stretch};_left.Children.Add(_room);_left.Children.Add(Ui.Text("你的节奏，就是这里的节奏。",13,Ui.Muted));_left.Children.Add(_toast);
         _body.Children.Add(_left);Grid.SetColumn(_panel,2);_body.Children.Add(_panel);Grid.SetRow(_body,1);shell.Children.Add(_body);
         var footer=new WrapPanel{Margin=new Thickness(0,16,0,0)};
-        foreach(var (id,label) in new[]{("home","⌂  小屋"),("chat","聊一会儿"),("focus","专注"),("relax","放松"),("mood","心情"),("room","布置")})
+        foreach(var (id,label) in new[]{("home","⌂  小屋"),("play","成长"),("chat","聊一会儿"),("focus","专注"),("relax","放松"),("mood","心情"),("room","布置")})
         {var b=Ui.Button(label,()=>Navigate(id));_navigation[id]=b;footer.Children.Add(b);}
         Grid.SetRow(footer,2);shell.Children.Add(footer);Content=new Border{Background=Ui.Cream,Padding=new Thickness(26),Child=shell};
         SizeChanged+=(_,_)=>ApplyLayout();
@@ -66,7 +66,7 @@ internal sealed partial class MainWindow : Window
         UpdateHeader();foreach(var (id,b) in _navigation)b.Background=id==page?Ui.Brush("#DDE8D7"):Ui.Brush("#EFF2EB");
         var content=page switch
         {
-            "welcome"=>Welcome(),"chat"=>Chat(),"focus"=>FocusPage(),"relax"=>Relax(),"mood"=>Mood(),"plant"=>Plant(),"room"=>Room(),"settings"=>Settings(),_=>Home()
+            "welcome"=>Welcome(),"chat"=>Chat(),"focus"=>FocusPage(),"relax"=>Relax(),"mood"=>Mood(),"plant"=>Plant(),"room"=>Room(),"play"=>Play(),"settings"=>Settings(),_=>Home()
         };
         _panel.Content=new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Padding=new Thickness(0,0,8,0)};
     }
@@ -115,7 +115,7 @@ internal sealed partial class MainWindow : Window
     }
     private UIElement Welcome()
     {
-        var name=Ui.Input(_c.Preferences.PetName,max:20);var user=Ui.Input("",max:30);
+        var name=Ui.Input(_c.Preferences.PetName,max:20,automationName:"伙伴名字");var user=Ui.Input("",max:30,automationName:"你的称呼，可留空");
         var quiet=Ui.Check("默认安静陪伴",true);
         return Ui.Stack(Ui.Text("很高兴在这里遇见你",26,null,true),Ui.Text("一个陪你专注、休息和聊天的小伙伴。先给它起个名字吧。",14,Ui.Muted),Ui.Card(Ui.Stack(Ui.Text("伙伴名字"),name,Ui.Text("怎么称呼你（可选）"),user,quiet,Ui.Button("进入我的小屋",()=>
         {
@@ -136,10 +136,10 @@ internal sealed partial class MainWindow : Window
         }
         else
         {
-            var title=Ui.Input(_c.FocusDraft,max:120);var duration=Ui.Input(_c.FocusDurationDraft??_c.Preferences.FocusMinutes.ToString(),max:3);
+            var title=Ui.Input(_c.FocusDraft,max:120,automationName:"本次专注内容");var duration=Ui.Input(_c.FocusDurationDraft??_c.Preferences.FocusMinutes.ToString(),max:3,automationName:"专注分钟数");
             title.TextChanged+=(_,_)=>_c.FocusDraft=title.Text;duration.TextChanged+=(_,_)=>_c.FocusDurationDraft=duration.Text;
             var presets=Ui.Row();foreach(int m in new[]{15,25,45})presets.Children.Add(Ui.Button(m+" 分钟",()=>duration.Text=m.ToString()));
-            var restDuration=Ui.Input(_c.RestDurationDraft??_c.Preferences.RestMinutes.ToString(),max:3);restDuration.TextChanged+=(_,_)=>_c.RestDurationDraft=restDuration.Text;var restPresets=Ui.Row();foreach(int m in new[]{5,10,15})restPresets.Children.Add(Ui.Button(m+" 分钟",()=>restDuration.Text=m.ToString()));
+            var restDuration=Ui.Input(_c.RestDurationDraft??_c.Preferences.RestMinutes.ToString(),max:3,automationName:"休息分钟数");restDuration.TextChanged+=(_,_)=>_c.RestDurationDraft=restDuration.Text;var restPresets=Ui.Row();foreach(int m in new[]{5,10,15})restPresets.Children.Add(Ui.Button(m+" 分钟",()=>restDuration.Text=m.ToString()));
             p.Children.Add(Ui.Card(Ui.Stack(Ui.Text("这次想做什么（可选）"),title,presets,Ui.Text("专注时长 · 1–180 分钟",12,Ui.Muted),duration,Ui.Button("开始专注",()=>_c.Start("focus",ReadMinutes(duration),title.Text),true),new Expander{Header="先休息一下",Content=Ui.Stack(restPresets,Ui.Text("休息时长 · 1–180 分钟",12,Ui.Muted),restDuration,Ui.Button("开始休息",()=>_c.Start("rest",ReadMinutes(restDuration),"")))})));
         }
         var records=_c.Store.Focus(_focusOffset,10);var list=Ui.Stack(Ui.Text("专注与休息记录",16,null,true));
@@ -155,7 +155,7 @@ internal sealed partial class MainWindow : Window
     }
     private UIElement Mood()
     {
-        var mood=Ui.Select(new[]{"愉快","平静","一般","低落","烦躁","不想分类"},"平静");var note=Ui.Input("",true,1000);string? editId=null;DateTimeOffset created=DateTimeOffset.Now;
+        var mood=Ui.Select(new[]{"愉快","平静","一般","低落","烦躁","不想分类"},"平静","当前心情");var note=Ui.Input("",true,1000,"心情备注");string? editId=null;DateTimeOffset created=DateTimeOffset.Now;
         var p=Ui.Stack(Ui.Text("今天的你，怎么样？",25,null,true),Ui.Text("没有正确答案，也不用每天记录。内容只保存在本机。",13,Ui.Muted));
         p.Children.Add(Ui.Card(Ui.Stack(mood,note,Ui.Button("保存心情",()=>
         {
@@ -176,15 +176,67 @@ internal sealed partial class MainWindow : Window
         int points=_c.Store.PlantPoints;
         return Ui.Stack(Ui.Text("慢慢长大，也挺好",25,null,true),Ui.Text("你忙的时候，它会等你。不会枯萎，也没有连续签到。",13,Ui.Muted),Ui.Card(Ui.Stack(Ui.Text(points>=5?"已经开花了 ✿":points>=2?"正在舒展叶子":"一颗小小的芽",24,Ui.Sage,true),Ui.Text($"累计浇水 {points} 次。每天浇水一次，2 次长叶、5 次开花。",14),Ui.Button("浇一点水",()=>{bool watered=_c.Store.Water(DateOnly.FromDateTime(DateTime.Now));_c.Refresh();Toast(watered?"喝到水啦。谢谢你来看看它。":"今天已经浇过水了，陪它待一会儿就好。");},true))),Ui.Button("看看装饰",()=>Navigate("room")));
     }
+    private UIElement Play()
+    {
+        var day=DateOnly.FromDateTime(DateTime.Now);var progress=_c.Store.GameProgress();
+        var panel=Ui.Stack(Ui.Text("一起慢慢长大",25,null,true),Ui.Text($"Lv.{progress.Level}  ·  陪伴值 {progress.Experience}  ·  ⭐ {progress.Stars}",17,Ui.Sage,true),Ui.Text(progress.Level>=20?"已经到达当前最高等级。":"距离下一级还差 "+GameProgression.ExperienceToNext(progress.Experience)+" 点陪伴值。每天最多获得 20 点，不需要连续签到。",12,Ui.Muted));
+        var tasks=Ui.Stack(Ui.Text("今天的小任务",17,null,true));
+        foreach(var task in _c.Store.GameTasks(day))tasks.Children.Add(Ui.Card(Ui.Stack(Ui.Text((task.Completed?"✓  ":"")+task.Title,15,null,true),Ui.Text(task.Hint+"  ·  完成得 "+task.RewardXp+" 陪伴值和 "+task.RewardStars+" 颗星。",12,Ui.Muted),task.Completed?Ui.Text("已经记下啦",12,Ui.Sage):Ui.Button(task.Id switch{"ball"=>"抛小球","discover"=>"去户外发现","relax"=>"开始放松","focus"=>"开始专注",_=>"完成"},()=>RunGameTask(task.Id,day),true))));
+        panel.Children.Add(tasks);
+        var inventory=Ui.Stack(Ui.Text("玩具与布置",17,null,true));var owned=_c.Store.GameInventory().ToDictionary(x=>x.ItemId,x=>x.Quantity,StringComparer.Ordinal);
+        foreach(var item in GameProgression.Catalog.Where(x=>x.Kind is "toy" or "decor" or "rug"))
+        {
+            int count=owned.GetValueOrDefault(item.Id);var row=Ui.Row(Ui.Text($"{item.Name}  ·  {count} 件  ·  {item.Price} 星",13),Ui.Button(count>=item.MaxOwned?"已拥有":"兑换",()=>{if(_c.Store.PurchaseGameItem(item.Id)){_c.Refresh();Navigate("play");Toast("物品已放入本机收藏。可在布置页选择摆放位置。");}else Toast("星星不足，慢慢来就好。");}));
+            inventory.Children.Add(row);
+        }
+        panel.Children.Add(Ui.Card(inventory));
+        var discoveries=_c.Store.GameDiscoveries();panel.Children.Add(Ui.Card(Ui.Stack(Ui.Text("户外收藏",17,null,true),Ui.Text(discoveries.Count==0?"还没有发现。去 20m × 20m 的户外场景逛逛吧。":string.Join("、",discoveries.Select(x=>GameProgression.Catalog.First(i=>i.Id==x.ItemId).Name)),13,Ui.Muted),Ui.Text("发现只保存在这台设备上。",11,Ui.Muted))));
+        var ownedIds=owned.Keys.ToHashSet(StringComparer.Ordinal);var collection=Ui.Stack(Ui.Text("收藏图鉴",17,null,true));
+        foreach(var item in GameProgression.Catalog.Where(x=>x.Kind is "discovery" or "decor" or "rug"))collection.Children.Add(Ui.Text((ownedIds.Contains(item.Id)?"✓  ":"○  ")+item.Name,12,ownedIds.Contains(item.Id)?Ui.Sage:Ui.Muted));
+        panel.Children.Add(Ui.Card(collection));
+        var achievements=_c.Store.GameAchievements().Select(x=>x.Id).ToHashSet(StringComparer.Ordinal);var unlockedAchievements=GameProgression.AchievementsCatalog.Where(x=>achievements.Contains(x.Id)).Select(x=>x.Name).ToArray();
+        panel.Children.Add(Ui.Card(Ui.Stack(Ui.Text("小小纪念",17,null,true),unlockedAchievements.Length==0?Ui.Text("完成任务后会留下纪念。没有连续签到或错过惩罚。",12,Ui.Muted):Ui.Text(string.Join("、",unlockedAchievements),12,Ui.Sage))));
+        return panel;
+    }
+    private void RunGameTask(string taskId,DateOnly day)
+    {
+        if((taskId is "ball" or "discover")&&!_room.IsVisible&&ActualWidth<940)
+        {
+            _compactScene=true;ApplyLayout();Dispatcher.BeginInvoke(new Action(()=>RunGameTask(taskId,day)));return;
+        }
+        if(taskId=="ball")
+        {
+            _room.SwitchScene(false);if(!_room.PlayBall()){_room.SwitchScene(true);if(!_room.PlayBall())return;}
+            _c.Store.RecordBallPlay(day);Toast("小球滚出去啦，伙伴正跑去捡。");
+        }
+        else if(taskId=="discover")
+        {
+            _room.SwitchScene(true);bool newItem=_c.Store.GameDiscoveries().Count<3;
+            if(!_c.Store.DiscoverOutdoor(day)){Toast("今天已经记下这个发现啦，明天再来看看。");return;}
+            Toast(newItem?"发现了一件小东西，已经放进收藏里。":"伙伴记下了今天的户外散步。");
+        }
+        else {Navigate(taskId=="relax"?"relax":"focus");return;}
+        _c.Refresh();if(_page=="play")RenderPage("play",true);
+    }
     private UIElement Room()
     {
-        var theme=Ui.Select(new[]{"跟随时间","白天","夜晚"},_c.Preferences.Theme=="auto"?"跟随时间":_c.Preferences.Theme=="day"?"白天":"夜晚");
-        var rug=Ui.Select(new[]{"奶油色","鼠尾草绿","柔和粉"},_c.Preferences.Rug=="cream"?"奶油色":_c.Preferences.Rug=="sage"?"鼠尾草绿":"柔和粉");
+        var theme=Ui.Select(new[]{"跟随时间","白天","夜晚"},_c.Preferences.Theme=="auto"?"跟随时间":_c.Preferences.Theme=="day"?"白天":"夜晚","窗外明暗主题");
+        var rug=Ui.Select(new[]{"奶油色","鼠尾草绿","柔和粉"},_c.Preferences.Rug=="cream"?"奶油色":_c.Preferences.Rug=="sage"?"鼠尾草绿":"柔和粉","地毯颜色");
         var names=new Dictionary<string,string>{{"none","无摆件"},{"star","小星星 · 完成一次至少5分钟专注"},{"cloud","小云朵 · 完成一次放松"},{"flower","小花 · 植物成熟"}};
-        var ornament=Ui.Select(names.Where(x=>_c.Store.Unlocked(x.Key)).Select(x=>x.Value),names[_c.Preferences.Ornament]);
+        var ornament=Ui.Select(names.Where(x=>_c.Store.Unlocked(x.Key)).Select(x=>x.Value),names[_c.Preferences.Ornament],"桌面摆件");
         void Preview(){_room.Preview=_c.Preferences with{Theme=theme.SelectedIndex==0?"auto":theme.SelectedIndex==1?"day":"night",Rug=rug.SelectedIndex==0?"cream":rug.SelectedIndex==1?"sage":"rose",Ornament=names.FirstOrDefault(x=>x.Value==ornament.SelectedItem?.ToString()).Key??"none"};}
         theme.SelectionChanged+=(_,_)=>Preview();rug.SelectionChanged+=(_,_)=>Preview();ornament.SelectionChanged+=(_,_)=>Preview();
-        return Ui.Stack(Ui.Text("把这里布置成你喜欢的样子",24,null,true),Ui.Text("基础功能一直开放，装饰只是相处留下的小纪念。",13,Ui.Muted),Ui.Card(Ui.Stack(Ui.Text("窗外"),theme,Ui.Text("地毯"),rug,Ui.Text("桌面摆件"),ornament,Ui.Row(Ui.Button("保存布置",()=>{Preview();var v=_room.Preview!;_c.SavePreferences(_c.Preferences with{Theme=v.Theme,Rug=v.Rug,Ornament=v.Ornament});Toast("布置已保存。");Navigate("home");},true),Ui.Button("取消",()=>Navigate("home"))))),Ui.Text("当前预览未保存。切换页面时将恢复保存的布置。",12,Ui.Muted));
+        var page=Ui.Stack(Ui.Text("把这里布置成你喜欢的样子",24,null,true),Ui.Text("基础功能一直开放，装饰只是相处留下的小纪念。",13,Ui.Muted),Ui.Card(Ui.Stack(Ui.Text("窗外"),theme,Ui.Text("地毯"),rug,Ui.Text("桌面摆件"),ornament,Ui.Row(Ui.Button("保存布置",()=>{Preview();var v=_room.Preview!;_c.SavePreferences(_c.Preferences with{Theme=v.Theme,Rug=v.Rug,Ornament=v.Ornament});Toast("布置已保存。");Navigate("home");},true),Ui.Button("取消",()=>Navigate("home"))))),Ui.Text("当前预览未保存。切换页面时将恢复保存的布置。",12,Ui.Muted));
+        var inventory=_c.Store.GameInventory().Where(x=>x.Quantity>0).Select(x=>x.ItemId).ToHashSet(StringComparer.Ordinal);
+        var place=Ui.Stack(Ui.Text("家具摆放",17,null,true),Ui.Text("从成长页兑换物品，再选一个位置摆放。",12,Ui.Muted));
+        foreach(var (slot,label) in new[]{("desk","书桌"),("shelf","墙边"),("garden","花园")})
+        {
+            var choices=GameProgression.Catalog.Where(x=>inventory.Contains(x.Id)&&(x.Kind is "decor" or "rug")).ToArray();
+            if(choices.Length==0){place.Children.Add(Ui.Text($"{label}：还没有可摆放的物品",12,Ui.Muted));continue;}
+            var select=Ui.Select(choices.Select(x=>x.Name),choices[0].Name,label+"摆放物品");
+            place.Children.Add(Ui.Row(Ui.Text(label,13),select,Ui.Button("摆放",()=>{var item=choices.First(x=>x.Name==select.SelectedItem?.ToString());if(_c.Store.PlaceGameItem(slot,item.Id)){_c.Refresh();Toast(item.Name+"已摆放。");Navigate("room");}})));
+        }
+        page.Children.Add(Ui.Card(place));return page;
     }
     private void StopRelax(){_relaxTimer?.Stop();_relaxTimer=null;_relaxPet?.Release();_relaxPet=null;}
     private UIElement Relax()
@@ -243,7 +295,7 @@ internal sealed partial class MainWindow : Window
         if(_c.Busy){_liveText=Ui.Text(_c.LiveReply.Length==0?"…":_c.LiveReply,14);transcript.Children.Add(Ui.Card(Ui.Stack(Ui.Text(_c.Preferences.PetName,11,Ui.Muted,true),_liveText)));}
         p.Children.Add(transcriptScroll);if(_chatOffset==0)transcriptScroll.Loaded+=(_,_)=>transcriptScroll.ScrollToEnd();
         _chatState=Ui.Text(_c.ChatStatus,12,Ui.Muted);p.Children.Add(_chatState);
-        var input=Ui.Input(_c.Draft,true);input.TextChanged+=(_,_)=>_c.Draft=input.Text;
+        var input=Ui.Input(_c.Draft,true,automationName:"聊天消息");input.TextChanged+=(_,_)=>_c.Draft=input.Text;
         async Task Send()
         {
             _chatOffset=0;await ChatRequests.Send(_c);

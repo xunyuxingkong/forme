@@ -4,7 +4,7 @@ namespace Forme.Core;
 
 internal static class DatabaseMigrator
 {
-    public const int CurrentVersion=2;
+    public const int CurrentVersion=3;
     internal static void Upgrade(SqliteConnection db,string directory,Action<int>? beforeStep=null)
     {
         using var versionCommand=db.CreateCommand();versionCommand.CommandText="PRAGMA user_version";
@@ -32,6 +32,7 @@ internal static class DatabaseMigrator
                 0=>"CREATE TABLE settings(k TEXT PRIMARY KEY,v TEXT NOT NULL); CREATE TABLE moods(id TEXT PRIMARY KEY,mood TEXT,note TEXT,created TEXT,updated TEXT); CREATE TABLE sessions(id TEXT PRIMARY KEY,title TEXT,created TEXT,endpoint TEXT); CREATE TABLE messages(id TEXT PRIMARY KEY,session TEXT,role TEXT,content TEXT,status TEXT,created TEXT); CREATE INDEX messages_session ON messages(session,created); CREATE TABLE focus(id TEXT PRIMARY KEY,kind TEXT,title TEXT,started TEXT,target INTEGER,elapsed REAL,result TEXT); CREATE TABLE growth(id TEXT PRIMARY KEY,type TEXT,day TEXT);",
                 // No column meanings change. These indexes support existing paged history queries.
                 1=>"CREATE INDEX moods_created ON moods(created DESC); CREATE INDEX focus_started ON focus(started DESC);",
+                2=>"CREATE TABLE game_progress(id INTEGER PRIMARY KEY CHECK(id=1),xp INTEGER NOT NULL DEFAULT 0,stars INTEGER NOT NULL DEFAULT 0); INSERT INTO game_progress(id) VALUES(1); CREATE TABLE game_inventory(item_id TEXT PRIMARY KEY,quantity INTEGER NOT NULL CHECK(quantity>=0)); INSERT INTO game_inventory VALUES('ball-yellow',1); CREATE TABLE game_tasks(day TEXT NOT NULL,task_id TEXT NOT NULL,completed INTEGER NOT NULL CHECK(completed IN(0,1)),PRIMARY KEY(day,task_id)); CREATE TABLE game_daily(day TEXT PRIMARY KEY,xp INTEGER NOT NULL DEFAULT 0); CREATE TABLE game_discoveries(item_id TEXT PRIMARY KEY,day TEXT NOT NULL); CREATE TABLE game_slots(slot_id TEXT PRIMARY KEY,item_id TEXT NOT NULL); CREATE TABLE game_achievements(id TEXT PRIMARY KEY,day TEXT NOT NULL);",
                 _=>throw new InvalidDataException("缺少对应的数据升级步骤。")
             };
             step.ExecuteNonQuery();step.CommandText=$"PRAGMA user_version={++version}";step.ExecuteNonQuery();

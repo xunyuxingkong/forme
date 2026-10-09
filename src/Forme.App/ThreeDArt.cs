@@ -204,6 +204,7 @@ internal sealed class Pet3DView : Grid
     public Pet3DView():this(new SproutPetFactory()){}
     internal Pet3DView(IPetModelFactory factory)
     {
+        System.Windows.Automation.AutomationProperties.SetName(this,"Forme 桌面伙伴，可点击互动或拖动移动");
         Width=164;Height=168;Background=null;
         _viewport.Camera=new PerspectiveCamera(new Point3D(0,1.05,4.5),new Vector3D(0,-.05,-4.5),new Vector3D(0,1,0),31);
         var rig=factory.Create();_animator=new(rig);_character.Children.Add(rig.Root);
@@ -231,7 +232,7 @@ internal sealed class Pet3DView : Grid
     public void Pat()=>_animator.Play(PetAction.Pat);
     public void Play(PetAction action)=>_animator.Play(action);
     public void StopAction()=>_animator.StopAction();
-    public void DesktopMotion(Func<double,bool,PetPose?> source,bool active){_animator.ExternalMotion=source;_animator.ExternalActive=active;Configure();}
+    public void DesktopMotion(Func<double,bool,PetPose?> source,bool active,Func<bool>? moving=null){_animator.ExternalMotion=source;_animator.ExternalActive=active;_animator.ExternalMoving=moving;Configure();}
     public void Drag(bool dragging)=>_animator.Drag(dragging);
     public void Turn(double delta)=>_rotation.Angle=Math.Clamp(_rotation.Angle+delta,-65,65);
     public void Release(){if(_released)return;_released=true;_animator.Dispose();_character.Children.Clear();_model.Content=null;_viewport.Children.Clear();}
@@ -243,6 +244,9 @@ internal sealed class Room3DView : Grid
     private readonly Action<string> _navigate;
     private readonly Viewport3D _viewport=new();
     private readonly ModelVisual3D _model=new();
+    private readonly Model3DGroup _ballGroup=new();
+    private readonly ModelVisual3D _ballVisual=new();
+    private readonly TranslateTransform3D _ballPosition=new();
     private IPetModel _pet;
     private readonly PetAnimator _animator;
     private readonly Model3DGroup _character=new();
@@ -277,12 +281,14 @@ internal sealed class Room3DView : Grid
     public Preferences? Preview{get=>_preview;set{_preview=value;Refresh();}}
     public Room3DView(Controller c,Action<string> navigate,IPetModelFactory? factory=null)
     {
+        System.Windows.Automation.AutomationProperties.SetName(this,"Forme 3D 小屋和户外场景；点击地面移动，点击物件打开活动");
         _pet=(factory??new SproutPetFactory()).Create();_animator=new(_pet);
         var characterTransform=new Transform3DGroup();characterTransform.Children.Add(new RotateTransform3D(_heading));characterTransform.Children.Add(_position);_character.Transform=characterTransform;
         MeshArt.Ellipse(_character,"#AFA68C",0,.015,0,.66,.006,.42);_character.Children.Add(_pet.Root);ResetTravel();
         _c=c;_navigate=navigate;Height=560;MinWidth=280;ClipToBounds=true;
         SizeChanged+=(_,_)=>{Clip=new RectangleGeometry(new Rect(RenderSize),18,18);Camera();};
-        _viewport.Camera=_camera;_viewport.Children.Add(_model);Children.Add(_viewport);Camera();Refresh();
+        MeshArt.Ellipse(_ballGroup,"#E7B84B",0,.22,0,.2,.2,.2);_ballGroup.Transform=_ballPosition;_ballVisual.Content=_ballGroup;
+        _viewport.Camera=_camera;_viewport.Children.Add(_model);_viewport.Children.Add(_ballVisual);_ballVisual.Content=null;Children.Add(_viewport);Camera();Refresh();
         _labels.Children.Add(_plantLabel);_labels.Children.Add(_gardenLabel);Children.Add(_labels);Loaded+=(_,_)=>Camera();
         var caption=Ui.Text("点击地面行走 · 远处奔跑 · 拖动旋转 · 滚轮缩放",11,Ui.Muted);caption.Margin=new Thickness(16);caption.VerticalAlignment=VerticalAlignment.Top;caption.IsHitTestVisible=false;Children.Add(caption);
         var scene=_sceneButton=Ui.Button("去户外 · 20m × 20m",()=>SwitchScene(!_outdoors));
@@ -327,6 +333,16 @@ internal sealed class Room3DView : Grid
     }
     internal void SwitchScene(bool outdoors){if(_outdoors==outdoors)return;_outdoors=outdoors;_sceneButton.Content=outdoors?"回到小屋":"去户外 · 20m × 20m";ResetTravel();_appearance=null;_azimuth=30;_elevation=32;_zoom=1;ShowHint(null);Refresh();}
     internal bool TryMove(GroundPoint point){bool moved=_animator.MoveTo(point);_hint.Text=moved?(_travel.Running?"伙伴正跑向那里":"伙伴正走向那里"):"这里被家具挡住了，请点击空地";return moved;}
+    internal bool PlayBall()
+    {
+        var targets=_outdoors?new[]{new GroundPoint(2,2),new(-2,2),new(0,-4),new(4,4)}:new[]{new GroundPoint(.2,-.3),new(-.8,1),new(1,1),new(-1,-1)};
+        foreach(var target in targets)
+        {
+            if(!_travel.Walkable(target)||!_animator.MoveTo(target))continue;
+            _ballPosition.OffsetX=target.X;_ballPosition.OffsetY=.22;_ballPosition.OffsetZ=target.Z;_ballVisual.Content=_ballGroup;_hint.Text="小球滚到了那里，伙伴跑去捡啦！";return true;
+        }
+        _hint.Text="周围有些拥挤，换个场景再玩小球吧。";return false;
+    }
     internal Point? ProjectGround(GroundPoint point)=>Project(new(point.X,.03,point.Z));
     internal bool ClickGround(Point point)=>Hit(point) is null&&GroundAt(point) is {} ground&&TryMove(ground);
     internal GroundPoint? GroundAt(Point point)
@@ -419,10 +435,19 @@ internal sealed class Room3DView : Grid
         string state=_c.Clock.Active?(_c.Clock.Running&&_c.Clock.Activity!.Kind=="focus"?"focus":"rest"):_c.Busy?"thinking":_c.Preferences.Quiet?"quiet":"idle";
         var p=_preview??_c.Preferences;int points=_c.Store.PlantPoints;bool night=p.Theme=="night"||p.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7);
         _animator.Configure(state,IsLoaded&&IsVisible&&_motionVisible,p.ReducedMotion,p.Quiet,_c.AnimationSuspended);
-        string appearance=$"{_outdoors}/{p.Theme}/{p.Rug}/{p.Ornament}/{points}/{night}";
+        string furniture=string.Join("/",_c.Store.GameSlots().OrderBy(x=>x.Key,StringComparer.Ordinal).Select(x=>$"{x.Key}:{x.Value}"));
+        string appearance=$"{_outdoors}/{p.Theme}/{p.Rug}/{p.Ornament}/{points}/{night}/{furniture}";
         if(_appearance!=appearance)
         {
             _appearance=appearance;_hits.Clear();_model.Content=_outdoors?MeshArt.Outdoors(p,_hits,_character):MeshArt.Room(p,points,_hits,_character);
+            if(!_outdoors&&_model.Content is Model3DGroup scene)
+            foreach(var (slot,item) in _c.Store.GameSlots())
+            {
+                var (x,z)=slot switch{"shelf"=>(2.15,-2.12),"garden"=>(2.25,1.65),_=>(-1.4,-.55)};
+                if(item=="plant-pot"){MeshArt.Ellipse(scene,"#B76D48",x,.20,z,.26,.20,.24);MeshArt.Ellipse(scene,"#6E9E72",x,.48,z,.22,.27,.21);}
+                else if(item=="lamp-paper"){MeshArt.Box(scene,"#80684F",x,.20,z,.055,.38,.055);MeshArt.Ellipse(scene,"#F3D88B",x,.51,z,.19,.22,.19);}
+                else if(item=="rug-blue")MeshArt.Ellipse(scene,"#A9C7D7",-.25,.035,1.45,1.05,.009,.54);
+            }
             _sceneCorners.Clear();CollectSceneCorners(_model.Content,Matrix3D.Identity);
             var backdrop=new LinearGradientBrush(Ui.Brush(night?"#D8E0E3":"#F1EDE1").Color,Ui.Brush(night?"#B7C6CD":"#DCE5D7").Color,new Point(0,0),new Point(1,1));backdrop.Freeze();Background=backdrop;
             Camera();

@@ -6,6 +6,8 @@ $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
 $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
 $formeRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location -LiteralPath $formeRoot
+$formeVersion = ([xml](Get-Content -LiteralPath 'Directory.Build.props' -Raw)).Project.PropertyGroup.FormeVersion
+if ($formeVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Directory.Build.props must define a numeric FormeVersion' }
 $formeSdk = Join-Path $formeRoot '.tools/dotnet/dotnet.exe'
 if (-not (Test-Path -LiteralPath $formeSdk)) { $formeSdk = (Get-Command dotnet).Source }
 function Invoke-FormeDotnet {
@@ -19,6 +21,7 @@ if ($Test) {
     Invoke-FormeDotnet test tests/Forme.Tests/Forme.Tests.csproj -c Release --no-restore --logger 'trx;LogFileName=core.trx' --collect 'XPlat Code Coverage' --results-directory artifacts/test-results
 }
 if ($Smoke) {
+    Invoke-FormeDotnet build src/Forme.App/Forme.App.csproj -c Release --no-restore --nologo '-p:FormeDevelopmentTools=true'
     Invoke-FormeDotnet src/Forme.App/bin/Release/net10.0-windows/Forme.dll --smoke
 }
 if ($Package) {
@@ -43,9 +46,10 @@ if ($Package) {
     Compress-Archive -Path (Join-Path $formePublish '*') -DestinationPath 'artifacts/payload.zip' -Force
     Invoke-FormeDotnet restore src/Forme.Setup/Forme.Setup.csproj --locked-mode
     Invoke-FormeDotnet build src/Forme.Setup/Forme.Setup.csproj -c Release --no-restore --nologo
-    Copy-Item -LiteralPath 'src/Forme.Setup/bin/Release/net48/Forme-Setup.exe' -Destination 'artifacts/Forme-Setup-0.1.0.exe' -Force
-    $formeInstaller = Start-Process -FilePath (Join-Path $formeRoot 'artifacts/Forme-Setup-0.1.0.exe') -ArgumentList '--self-test' -WindowStyle Hidden -PassThru -Wait
+    $formeInstallerName = "Forme-Setup-$formeVersion.exe"
+    Copy-Item -LiteralPath 'src/Forme.Setup/bin/Release/net48/Forme-Setup.exe' -Destination (Join-Path 'artifacts' $formeInstallerName) -Force
+    $formeInstaller = Start-Process -FilePath (Join-Path $formeRoot (Join-Path 'artifacts' $formeInstallerName)) -ArgumentList '--self-test' -WindowStyle Hidden -PassThru -Wait
     if ($formeInstaller.ExitCode -ne 0) { throw 'Installer payload verification failed' }
-    Get-FileHash 'artifacts/Forme-Setup-0.1.0.exe' -Algorithm SHA256 | Format-List | Out-File 'artifacts/sha256.txt' -Encoding UTF8
-    Write-Host 'Ready: artifacts/Forme-Setup-0.1.0.exe'
+    Get-FileHash (Join-Path 'artifacts' $formeInstallerName) -Algorithm SHA256 | Format-List | Out-File 'artifacts/sha256.txt' -Encoding UTF8
+    Write-Host "Ready: artifacts/$formeInstallerName"
 }

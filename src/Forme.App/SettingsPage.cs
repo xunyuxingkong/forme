@@ -1,6 +1,7 @@
 using Forme.Core;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -12,11 +13,11 @@ internal sealed partial class MainWindow
     {
         var p=_c.Preferences;
         var content=Ui.Stack(Ui.Text("让陪伴更合你的习惯",24,null,true),Ui.Text("设置在本机保存。恢复偏好不会清空你的记录。",13,Ui.Muted));
-        var name=Ui.Input(p.PetName,max:20);var user=Ui.Input(p.UserName,max:30);var style=Ui.Input(p.ReplyStyle,true,160);
+        var name=Ui.Input(p.PetName,max:20,automationName:"伙伴名字");var user=Ui.Input(p.UserName,max:30,automationName:"你的称呼");var style=Ui.Input(p.ReplyStyle,true,160,"AI 回复偏好");
         var quiet=Ui.Check("安静模式（关闭声音、主动招呼和自动动作）",p.Quiet);var reduced=Ui.Check("减少动效",p.ReducedMotion);var top=Ui.Check("桌面伙伴置顶",p.Topmost);
         var sound=Ui.Check("互动音效",p.Sounds);var timerSound=Ui.Check("计时完成提示音",p.TimerSounds);var notifications=Ui.Check("计时完成通知（不含私人内容）",p.Notifications);
         var greetings=Ui.Check("每日最多两次本地招呼",p.Greetings);var from=Ui.Input(p.GreetingStart.ToString(),max:2);var until=Ui.Input(p.GreetingEnd.ToString(),max:2);
-        var scale=Ui.Select(new[]{"小","标准","大"},p.PetScale<.9?"小":p.PetScale>1.1?"大":"标准");
+        var scale=Ui.Select(new[]{"小","标准","大"},p.PetScale<.9?"小":p.PetScale>1.1?"大":"标准","桌宠大小");
         var focus=Ui.Input(p.FocusMinutes.ToString(),max:3);var rest=Ui.Input(p.RestMinutes.ToString(),max:3);
         var startup=Ui.Check("登录 Windows 时启动",StartupLink.Exists);
         content.Children.Add(Ui.Card(Ui.Stack(Ui.Text("伙伴与显示",17,null,true),Ui.Text("伙伴名字"),name,Ui.Text("你的称呼（可选）"),user,Ui.Text("伙伴大小"),scale,quiet,reduced,top,sound,timerSound,notifications,greetings,new Expander{Header="主动招呼时段（本地时间）",Content=Ui.Stack(Ui.Text("开始小时 0–23"),from,Ui.Text("结束小时 1–24"),until)},startup)));
@@ -32,14 +33,14 @@ internal sealed partial class MainWindow
             if(!Ui.Confirm("恢复称呼、大小、动效、声音和计时默认值？历史、房间和 AI 凭据保留；开机启动将关闭。"))return;
             var d=new Preferences();StartupLink.Set(false);_c.SavePreferences(_c.Preferences with{PetName=d.PetName,UserName="",Quiet=d.Quiet,ReducedMotion=d.ReducedMotion,Topmost=false,Sounds=false,TimerSounds=false,Notifications=true,Greetings=false,GreetingStart=9,GreetingEnd=21,PetScale=1,FocusMinutes=25,RestMinutes=5});Navigate("settings");
         }));
-        var endpoint=Ui.Input(p.Endpoint,max:500);var model=Ui.Input(p.Model,max:100);
+        var endpoint=Ui.Input(p.Endpoint,max:500,automationName:"AI 服务地址");var model=Ui.Input(p.Model,max:100,automationName:"AI 模型名称");
         var key=new PasswordBox{Padding=new Thickness(12),Margin=new Thickness(0,0,0,12),MinHeight=40,MaxLength=512};
-        var connectionStatus=Ui.Text(_c.Secrets.Exists?"密钥已保存。留空保留现有密钥。":"尚未保存密钥。",12,Ui.Muted);
+        var connectionStatus=Ui.Text(_c.Secrets.Exists?"密钥已保存；切换服务商需要填写新密钥。":"尚未保存密钥。",12,Ui.Muted);
         const string siliconEndpoint="https://api.siliconflow.cn/v1";
         const string siliconModel="deepseek-ai/DeepSeek-V3.2";
         var defaults=new Preferences();
         var providers=new[]{"DeepSeek 官方","硅基流动 · DeepSeek","自定义兼容服务"};
-        var provider=Ui.Select(providers,p.Endpoint.TrimEnd('/')==siliconEndpoint?providers[1]:p.Endpoint.TrimEnd('/')==defaults.Endpoint?providers[0]:providers[2]);
+        var provider=Ui.Select(providers,p.Endpoint.TrimEnd('/')==siliconEndpoint?providers[1]:p.Endpoint.TrimEnd('/')==defaults.Endpoint?providers[0]:providers[2],"AI 服务预设");
         provider.SelectionChanged+=(_,_)=>
         {
             if(provider.SelectedIndex==2)return;
@@ -51,8 +52,9 @@ internal sealed partial class MainWindow
         var aiPanel=Ui.Stack(Ui.Text("AI 连接",17,null,true),Ui.Text("自由对话会联网，可能产生费用。房间、专注和放松一直在本地运行。",12,Ui.Muted),Ui.Text("服务预设"),provider,Ui.Text("硅基流动预设：DeepSeek-V3.2，关闭深度思考。使用硅基流动平台的密钥，可在高级设置修改模型；可用性和价格以平台为准。",11,Ui.Muted),Ui.Text("API Key"),key,connectionStatus,advanced,Ui.Text("回复偏好（发送消息时一起提供给 AI）",12),style);
         aiPanel.Children.Add(Ui.Row(Ui.AsyncButton("测试连接",async()=>
         {
-            if(endpoint.Text.Trim().TrimEnd('/')!=_c.Preferences.Endpoint.TrimEnd('/')&&key.Password.Length==0)
-                throw new OperationFailureException("测试新服务前请填写该服务的 API Key，旧服务密钥不会自动发送。先前配置未改变。");
+            if(!Forme.Core.AiClient.SameEndpoint(endpoint.Text.Trim(),_c.Preferences.Endpoint)&&key.Password.Length==0&&
+                !Forme.Core.AiClient.ProviderIdentity(endpoint.Text.Trim()).Equals(Forme.Core.AiClient.ProviderIdentity(_c.Preferences.Endpoint),StringComparison.OrdinalIgnoreCase))
+                throw new OperationFailureException("测试新服务商前请填写该服务的 API Key，旧服务密钥不会自动发送。先前配置未改变。");
             if(!Ui.Confirm("将向填写的服务发送固定测试文字，不含私人记录。可能产生少量费用。继续？"))return;
             connectionStatus.Text="正在测试，可以点击停止。";
             try {await _c.TestConnection(endpoint.Text.Trim(),model.Text.Trim(),key.Password.Length>0?key.Password:_c.Secrets.Read());connectionStatus.Text="连接成功。点击保存后用于聊天。";}
@@ -61,16 +63,17 @@ internal sealed partial class MainWindow
         aiPanel.Children.Add(Ui.Button("保存 AI 配置",()=>
         {
             if(_c.Busy)throw new OperationFailureException("请先停止并等待当前请求结束。");
-            var next=_c.Preferences with{Endpoint=endpoint.Text.Trim().TrimEnd('/'),Model=model.Text.Trim(),ReplyStyle=style.Text.Trim()};next.Validate();
+            var next=_c.Preferences with{Endpoint=Forme.Core.AiClient.NormalizeEndpoint(endpoint.Text.Trim()),Model=model.Text.Trim(),ReplyStyle=style.Text.Trim()};next.Validate();
             var previousKey=_c.Secrets.Read();string newKey=key.Password;
-            if(next.Endpoint!=_c.Preferences.Endpoint && !Ui.Confirm("更换服务地址会新建对话，不自动分享旧历史。"+(newKey.Length==0&&previousKey.Length>0?"当前密钥将保留，请确认它适用于新服务；也可以取消后填写新密钥。":"")))return;
+            if(!Forme.Core.AiClient.SameEndpoint(next.Endpoint,_c.Preferences.Endpoint) && !Ui.Confirm("更换服务地址会新建对话，不自动分享旧历史。"))return;
             _c.SaveAiConfiguration(next,newKey);
             key.Clear();connectionStatus.Text=_c.Secrets.Exists?"配置已保存，密钥由 Windows 保护。":"配置已保存，请填写密钥后聊天。";Toast("AI 配置已保存。未自动发起请求。");
         },true));
         aiPanel.Children.Add(Ui.Button("删除已保存密钥",()=>{if(_c.Busy)throw new OperationFailureException("请先停止并等待请求结束。");if(Ui.Confirm("删除本机保存的 AI 密钥？历史记录保留。")){_c.Secrets.Delete();key.Clear();connectionStatus.Text="密钥已删除。";}}));
         aiPanel.Children.Add(Ui.Text("每次请求输出最多512 tokens，上下文受保守预算限制。不自动重试，不后台推理。账单以服务商为准，请在服务商处设置额度。",11,Ui.Muted));content.Children.Add(Ui.Card(aiPanel));
         content.Children.Add(DataSettings());
-        content.Children.Add(Ui.Card(Ui.Stack(Ui.Text("关于 Forme",17,null,true),Ui.Text("v0.1.0 · Windows x64\n没有账号、云同步或遥测。连接预设依据官方协议；真实服务可用性由你的测试连接确认。",12,Ui.Muted),Ui.Text("本地数据："+_c.Store.DirectoryPath,11,Ui.Muted),Ui.Button("打开数据目录",()=>Process.Start(new ProcessStartInfo{FileName=_c.Store.DirectoryPath,UseShellExecute=true})))));
+        string version=typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion??"未知";
+        content.Children.Add(Ui.Card(Ui.Stack(Ui.Text("关于 Forme",17,null,true),Ui.Text($"v{version} · Windows x64\n没有账号、云同步或遥测。连接预设依据官方协议；真实服务可用性由你的测试连接确认。",12,Ui.Muted),Ui.Text("本地数据："+_c.Store.DirectoryPath,11,Ui.Muted),Ui.Button("打开数据目录",()=>Process.Start(new ProcessStartInfo{FileName=_c.Store.DirectoryPath,UseShellExecute=true})))));
         return content;
     }
     private UIElement DataSettings()

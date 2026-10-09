@@ -54,7 +54,8 @@ public sealed partial class Store
                     if(room)
                     {
                         var p=LoadPreferences();writer.WriteStartObject();writer.WriteString("PetName",p.PetName);writer.WriteString("Theme",p.Theme);writer.WriteString("Rug",p.Rug);writer.WriteString("Ornament",p.Ornament);
-                        Array("Events",true,Enumerate("SELECT * FROM growth",r=>new GrowthEvent(r.GetString(0),r.GetString(1),r.GetString(2))));writer.WriteEndObject();
+                        Array("Events",true,Enumerate("SELECT * FROM growth",r=>new GrowthEvent(r.GetString(0),r.GetString(1),r.GetString(2))));
+                        writer.WritePropertyName("Game");JsonSerializer.Serialize(writer,GameExportData());writer.WriteEndObject();
                     }
                     else writer.WriteNullValue();
                     writer.WriteEndObject();writer.Flush();Exec("COMMIT");
@@ -81,6 +82,7 @@ public sealed partial class Store
                 prefs=prefs with{PetName=room.PetName,Theme=room.Theme,Rug=room.Rug,Ornament=room.Ornament};
                 Exec("INSERT INTO settings VALUES('preferences',$0) ON CONFLICT(k) DO UPDATE SET v=excluded.v",tx,JsonSerializer.Serialize(prefs));
                 Exec("DELETE FROM growth; INSERT INTO growth SELECT * FROM staged.growth;",tx);
+                if(room.Game is {} game)ReplaceGame(game,tx);
             }
             tx.Commit();
         }

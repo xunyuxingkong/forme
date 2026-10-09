@@ -6,7 +6,7 @@ namespace Forme.Core;
 public sealed partial class Store : IDisposable
 {
     public const int Version = DatabaseMigrator.CurrentVersion;
-    public const int ExportVersion = 1; // JSON compatibility evolves independently of SQLite indexes.
+    public const int ExportVersion = 2; // JSON compatibility evolves independently of SQLite indexes.
     private readonly SqliteConnection _db;
     public string DirectoryPath { get; }
     public string BackupPath => Path.Combine(DirectoryPath, "recovery.json");
@@ -69,13 +69,20 @@ public sealed partial class Store : IDisposable
     {
         using var tx = _db.BeginTransaction();
         Exec("INSERT OR IGNORE INTO focus VALUES($0,$1,$2,$3,$4,$5,$6)",tx,f.Id,f.Kind,f.Title,Date(f.Started),f.TargetSeconds,f.ElapsedSeconds,f.Result);
-        if (f.Kind == "focus" && f.Result == "completed" && f.ElapsedSeconds >= 300) Grant("unlock:star","unlock", "",tx);
+        if (f.Kind == "focus" && f.ElapsedSeconds >= 300)
+        {
+            if(f.Result=="completed")Grant("unlock:star","unlock", "",tx);
+            CompleteGameTask(tx,DateOnly.FromDateTime(DateTime.Now),"focus");
+        }
         Exec("DELETE FROM settings WHERE k='activity'",tx); tx.Commit();
     }
     private void Grant(string id, string type, string day, SqliteTransaction? tx = null) => Exec("INSERT OR IGNORE INTO growth VALUES($0,$1,$2)",tx,id,type,day);
     public List<GrowthEvent> Growth() => Query("SELECT * FROM growth", r => new GrowthEvent(r.GetString(0),r.GetString(1),r.GetString(2)));
     public bool Unlocked(string name) => name == "none" || Convert.ToInt64(Scalar("SELECT count(*) FROM growth WHERE id=$0","unlock:"+name)) > 0;
-    public void CompleteRelaxation() => Grant("unlock:cloud","unlock", "");
+    public void CompleteRelaxation()
+    {
+        using var tx=_db.BeginTransaction();Grant("unlock:cloud","unlock", "",tx);CompleteGameTask(tx,DateOnly.FromDateTime(DateTime.Now),"relax");tx.Commit();
+    }
     public bool Water(DateOnly day)
     {
         using var tx = _db.BeginTransaction(); var id = "water:" + day.ToString("yyyy-MM-dd");
@@ -98,7 +105,7 @@ public sealed partial class Store : IDisposable
                 Sessions = sessions,
                 Messages = sessions?.SelectMany(s=>Messages(s.Id,0,int.MaxValue)).ToList(),
                 Moods = moods ? Moods(0,int.MaxValue) : null, Focus = focus ? Focus(0,int.MaxValue) : null,
-                Room = room ? new(p.PetName,p.Theme,p.Rug,p.Ornament,Growth()) : null
+                Room = room ? new RoomExport(p.PetName,p.Theme,p.Rug,p.Ornament,Growth()){Game=GameExportData()} : null
             };
             Exec("COMMIT");return document;
         }
@@ -107,7 +114,7 @@ public sealed partial class Store : IDisposable
     private static void ValidateMood(MoodEntry m) { if (string.IsNullOrWhiteSpace(m.Id) || m.Mood.Length > 30 || m.Note.Length > 1000) throw new InvalidDataException("心情记录格式错误。"); }
     public static void ValidateExport(ExportDocument d)
     {
-        if (d.SchemaVersion != ExportVersion) throw new InvalidDataException("不支持的导出版本，原数据未修改。");
+        if (d.SchemaVersion is not (1 or ExportVersion)) throw new InvalidDataException("不支持的导出版本，原数据未修改。");
         if ((d.Sessions is null) != (d.Messages is null)) throw new InvalidDataException("聊天数据不完整。");
         if (d.Sessions is null && d.Moods is null && d.Focus is null && d.Room is null) throw new InvalidDataException("文件没有可导入的数据。");
         void Unique(IEnumerable<string> ids) { var all = ids.ToList(); if (all.Any(string.IsNullOrWhiteSpace) || all.Distinct().Count()!=all.Count) throw new InvalidDataException("记录 ID 无效或重复。"); }
@@ -126,7 +133,7 @@ public sealed partial class Store : IDisposable
         }
         if(d.Room is not null)
         {
-            new Preferences {PetName=d.Room.PetName,Theme=d.Room.Theme,Rug=d.Room.Rug,Ornament=d.Room.Ornament}.Validate(); Unique(d.Room.Events.Select(x=>x.Id));
+            new Preferences {PetName=d.Room.PetName,Theme=d.Room.Theme,Rug=d.Room.Rug,Ornament=d.Room.Ornament}.Validate(); Unique(d.Room.Events.Select(x=>x.Id));if(d.Room.Game is {} game)ValidateGameExport(game);
             if(d.Room.Events.Any(x=>x.Type=="water" ? !DateOnly.TryParseExact(x.Day,"yyyy-MM-dd",out _) || x.Id!="water:"+x.Day : x.Type!="unlock" || !new[]{"unlock:star","unlock:cloud","unlock:flower"}.Contains(x.Id))) throw new InvalidDataException("成长记录无效。");
         }
     }
@@ -150,6 +157,7 @@ public sealed partial class Store : IDisposable
             var p=existingPreferences with {}; p.PetName=d.Room.PetName; p.Theme=d.Room.Theme; p.Rug=d.Room.Rug; p.Ornament=d.Room.Ornament;
             Exec("INSERT INTO settings VALUES('preferences',$0) ON CONFLICT(k) DO UPDATE SET v=excluded.v",tx,JsonSerializer.Serialize(p));
             Exec("DELETE FROM growth",tx); foreach(var e in d.Room.Events) Grant(e.Id,e.Type,e.Day,tx);
+            if(d.Room.Game is {} game)ReplaceGame(game,tx);
         }
         tx.Commit();
     }
@@ -158,7 +166,7 @@ public sealed partial class Store : IDisposable
         if(category is not ("chat" or "moods" or "focus")) throw new ArgumentException("类别无效。");
         Exec(category=="chat"?"DELETE FROM messages; DELETE FROM sessions;":$"DELETE FROM {category}"); RemoveBackup();
     }
-    public void ResetAll() { Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM moods; DELETE FROM focus; DELETE FROM growth; DELETE FROM settings;"); RemoveBackup(); Exec("VACUUM"); }
+    public void ResetAll() { Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM moods; DELETE FROM focus; DELETE FROM growth; DELETE FROM settings; DELETE FROM game_progress; INSERT INTO game_progress(id,xp,stars) VALUES(1,0,0); DELETE FROM game_inventory; INSERT INTO game_inventory VALUES('ball-yellow',1); DELETE FROM game_tasks; DELETE FROM game_daily; DELETE FROM game_discoveries; DELETE FROM game_slots; DELETE FROM game_achievements;"); RemoveBackup(); Exec("VACUUM"); }
     public void RemoveBackup()
     {
         if(File.Exists(BackupPath))File.Delete(BackupPath);

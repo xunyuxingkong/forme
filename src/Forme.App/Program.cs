@@ -18,7 +18,11 @@ internal static class Program
     {
         var app=new Application {ShutdownMode=ShutdownMode.OnExplicitShutdown};Ui.InstallStyles(app);
         string data=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Forme");
+#if FORME_DEVELOPMENT_TOOLS
         bool testing=args.Contains("--smoke")||args.Contains("--probe")||args.Contains("--crash-test");
+#else
+        bool testing=false;
+#endif
         if(testing)data=Path.GetFullPath(Path.Combine("artifacts","ui-test-data",Guid.NewGuid().ToString("N")));
         int dataArg=Array.IndexOf(args,"--data-dir");if(dataArg>=0&&dataArg+1<args.Length)data=Path.GetFullPath(args[dataArg+1]);
         string name="Forme-"+Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(data)))[..16];
@@ -43,9 +47,11 @@ internal static class Program
                 e.Handled=true;Environment.ExitCode=1;app.Shutdown(1);
             };
             AppDomain.CurrentDomain.UnhandledException+=(_,e)=>{if(e.ExceptionObject is Exception error)CrashDiagnostics.Write(data,error);};
+#if FORME_DEVELOPMENT_TOOLS
             if(args.Contains("--crash-test"))app.Dispatcher.BeginInvoke(new Action(()=>throw new NullReferenceException("secret-token private-chat")));
             if(args.Contains("--smoke"))app.Dispatcher.BeginInvoke(async()=>await Smoke.Run(host,controller));
             if(args.Contains("--probe"))app.Dispatcher.BeginInvoke(async()=>await Probe.Run(host,controller));
+#endif
             app.Run();return Environment.ExitCode;
         }
         catch(Exception ex){CrashDiagnostics.Write(data,ex);if(!testing)Ui.Error("启动失败，原数据保留。"+(OperationErrors.Expected(ex)?OperationErrors.Message(ex):"请查看本机诊断。"));return 1;}
@@ -201,6 +207,7 @@ internal sealed class DesktopHost : IDisposable
     }
 }
 
+#if FORME_DEVELOPMENT_TOOLS
 internal static class Smoke
 {
     public static async Task Run(DesktopHost host,Controller c)
@@ -209,6 +216,10 @@ internal static class Smoke
         {
             Directory.CreateDirectory("artifacts/screenshots");
             await PetAnimationChecks.Run();
+            foreach(double scale in new[]{1d,1.25,1.5,2d})
+            {int px=ScreenCoordinateService.DipToPhysical(-123.5,scale);double dip=ScreenCoordinateService.PhysicalToDip(px,scale);if(Math.Abs(dip+123.5)>1/scale)throw new Exception("DPI coordinate conversion drifted");}
+            var clamped=ScreenCoordinateService.Clamp(new System.Drawing.Rectangle(-2200,-100,300,300),new System.Drawing.Rectangle(-1920,0,1920,1080));
+            if(clamped.Left!=-1920||clamped.Top!=0)throw new Exception("Physical-pixel work-area clamp failed");
             IconAsset.Ensure();
             c.SavePreferences(new Preferences{Onboarded=true});
             host.ShowHouse("home");await Task.Delay(300);
@@ -253,6 +264,11 @@ internal static class Smoke
             host.House!.Navigate("mood");Click(host.House,"保存心情");if(c.Store.Moods().Count==0)throw new Exception("Mood UI did not save");
             host.House.Navigate("room");host.House.UpdateLayout();var selectors=Descendants(host.House).OfType<System.Windows.Controls.ComboBox>().ToArray();selectors[0].SelectedIndex=2;
             if(c.Preferences.Theme!="auto")throw new Exception("Room preview mutated saved preferences");host.House.Navigate("home");if(c.Preferences.Theme!="auto")throw new Exception("Cancelled preview persisted");
+            host.House.Navigate("play");host.House.UpdateLayout();
+            if(host.House.CurrentPage!="play"||c.Store.GameTasks(DateOnly.FromDateTime(DateTime.Now)).Count!=3||!Descendants(host.House).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text=="收藏图鉴"))throw new Exception("Progression, daily tasks or collection UI missing");
+            Save(host.House,"artifacts/screenshots/game-play.png");
+            if(!roomView.PlayBall()||!roomView.PetMoving)throw new Exception("Ball interaction did not start pet travel");await Task.Delay(100);Save(host.House,"artifacts/screenshots/game-ball.png");
+            roomView.SwitchScene(true);roomView.SwitchScene(false);host.House.Navigate("home");
             host.House.Navigate("relax");Click(host.House,"戳泡泡");host.House.UpdateLayout();var bubbleButtons=Descendants(host.House).OfType<System.Windows.Controls.Button>().Where(x=>x.Content?.ToString()=="○").ToArray();if(bubbleButtons.Length!=20)throw new Exception("Expected 20 bubble controls");foreach(var b in bubbleButtons)b.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
             if(!c.Store.Unlocked("cloud"))throw new Exception("Bubble UI did not unlock reward");Save(host.House,"artifacts/screenshots/bubbles.png");
             host.House!.Width=780;host.House.Navigate("home");await Task.Delay(80);Save(host.House,"artifacts/screenshots/narrow.png");Click(host.House,"查看3D小屋");Save(host.House,"artifacts/screenshots/narrow-room.png");Click(host.House,"返回活动");
@@ -323,7 +339,7 @@ internal static class Smoke
             c.AnimationSuspended=false;c.Refresh();host.Pet.SetIdleMode("run");await Task.Delay(2600);
             host.Pet.Greet("待机模式与动作选择");await Task.Delay(100);Save(host.Pet,"artifacts/screenshots/pet-controls.png");
             var petSelectors=Descendants(host.Pet).OfType<System.Windows.Controls.ComboBox>().ToArray();
-            if(petSelectors.Length!=2||petSelectors[0].Items.Count!=4||petSelectors[1].Items.Count!=5)throw new Exception("Desktop choices missing");
+            if(petSelectors.Length!=2||petSelectors[0].Items.Count!=4||petSelectors[1].Items.Count!=5||System.Windows.Automation.AutomationProperties.GetName(petSelectors[0])!="桌宠待机模式")throw new Exception("Desktop choices or screen-reader names missing");
             petSelectors[1].SelectedIndex=4;Click(host.Pet,"执行");await Task.Delay(150);if(!animatedPet.AnimationRunning)throw new Exception("Selected dance did not play");
             Click(host.Pet,"停止动作");host.Pet.SetIdleMode("idle");
             host.Pet.CollapseToEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="edge"||host.Pet.Width>50||animatedPet.AnimationRunning)throw new Exception("Edge collapse not persisted or animation active");host.Pet.ExpandFromEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="pet"||host.Pet.Width<100||!animatedPet.AnimationRunning)throw new Exception("Edge restore failed");
@@ -373,3 +389,4 @@ internal static class Smoke
         var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using var stream=File.Create(path);encoder.Save(stream);
     }
 }
+#endif

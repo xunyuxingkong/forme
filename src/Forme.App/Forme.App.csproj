@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms>
-    <AssemblyName>Forme</AssemblyName><Version>0.1.0</Version>
+    <AssemblyName>Forme</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <StartupObject>Forme.App.Program</StartupObject>
     <ApplicationIcon>Assets/forme.ico</ApplicationIcon>
@@ -14,6 +14,12 @@
     <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(FormeDevelopmentTools)' == 'true'">
+    <DefineConstants>$(DefineConstants);FORME_DEVELOPMENT_TOOLS</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(FormeDevelopmentTools)' != 'true'">
+    <Compile Remove="Probe.cs;PetAnimationChecks.cs" />
+  </ItemGroup>
   <ItemGroup><ProjectReference Include="../Forme.Core/Forme.Core.csproj" /></ItemGroup>
   <ItemGroup><EmbeddedResource Include="Assets/forme.ico" LogicalName="Forme.Icon" /></ItemGroup>
   <ItemGroup><Using Include="System"/><Using Include="System.IO"/><Using Include="System.Linq"/><Using Include="System.Collections.Generic"/><Using Include="System.Threading"/><Using Include="System.Threading.Tasks"/></ItemGroup>

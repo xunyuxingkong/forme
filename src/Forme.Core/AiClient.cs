@@ -28,6 +28,19 @@ public sealed class AiClient : IDisposable
             throw new InvalidDataException("服务地址需要 HTTPS；仅本机地址允许 HTTP。不要在地址中填写密钥或查询参数。");
         return uri;
     }
+    public static string NormalizeEndpoint(string endpoint)
+    {
+        var uri=ValidateEndpoint(endpoint);
+        return uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+    }
+    public static string ProviderIdentity(string endpoint)
+    {
+        var uri=ValidateEndpoint(endpoint);
+        if(uri.Host.Equals("api.deepseek.com",StringComparison.OrdinalIgnoreCase))return "deepseek";
+        if(uri.Host.Equals("api.siliconflow.cn",StringComparison.OrdinalIgnoreCase))return "siliconflow";
+        return $"custom:{uri.Scheme}://{uri.Authority}";
+    }
+    public static bool SameEndpoint(string left,string right)=>NormalizeEndpoint(left).Equals(NormalizeEndpoint(right),StringComparison.OrdinalIgnoreCase);
     // UTF-8 byte count is deliberately conservative for byte-based text tokenizers.
     // Includes a framing allowance per turn; not an exact provider billing token count.
     public static int Estimate(AiTurn turn) => Encoding.UTF8.GetByteCount(turn.Content)+32;

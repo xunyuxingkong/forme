@@ -36,7 +36,9 @@ jobs:
       - name: Verify fatal error exits with private diagnostics
         shell: pwsh
         run: |
-          $process = Start-Process artifacts/publish/Forme.exe -ArgumentList '--crash-test','--data-dir','artifacts/crash-ci' -WindowStyle Hidden -PassThru
+          ./.tools/dotnet/dotnet.exe build src/Forme.App/Forme.App.csproj -c Release --no-restore '-p:FormeDevelopmentTools=true'
+          if ($LASTEXITCODE -ne 0) { throw 'Development test host build failed' }
+          $process = Start-Process .tools/dotnet/dotnet.exe -ArgumentList 'src/Forme.App/bin/Release/net10.0-windows/Forme.dll','--crash-test','--data-dir','artifacts/crash-ci' -WindowStyle Hidden -PassThru
           if (-not $process.WaitForExit(30000)) { $process.Kill(); throw 'Crash verification timed out' }
           if ($process.ExitCode -ne 1) { throw 'Unexpected crash exit code' }
           $diagnostics = Get-ChildItem artifacts/crash-ci/diagnostics/*.json | Get-Content -Raw
@@ -54,7 +56,7 @@ jobs:
         with:
           name: forme-windows-x64
           path: |
-            artifacts/Forme-Setup-0.1.0.exe
+            artifacts/Forme-Setup-*.exe
             artifacts/sha256.txt
           retention-days: 14
           if-no-files-found: error

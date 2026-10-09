@@ -4,7 +4,7 @@ Windows 上的 3D 桌面伙伴与陪伴小屋。可以和伙伴互动、在小�
 
 ## 启动与安装
 
-开发工作区中的安装包：`artifacts/Forme-Setup-0.1.0.exe`。双击安装到当前用户目录，创建桌面及开始菜单入口，无需管理员权限。卸载保留个人记录，可在应用设置中先清除。
+正式版安装包和 SHA-256 校验值请从 [GitHub Releases](https://github.com/xunyuxingkong/forme/releases/latest) 下载。双击安装到当前用户目录，创建桌面及开始菜单入口，无需管理员权限。卸载保留个人记录，可在应用设置中先清除。
 
 也可直接运行免安装版本：`artifacts/publish/Forme.exe`。此版本包含所需 .NET 运行时；首次启动无需安装 SDK。
 
@@ -52,12 +52,18 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Smoke
 # 生成自包含程序及安装包
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Package
 
-# 资源采样：默认预热2分钟、采样10分钟；正式比较需三种状态各自独立进程
+# 资源采样：默认预热2分钟、采样10分钟；比较时每个状态单独启动进程
+.tools/dotnet/dotnet.exe build src/Forme.App/Forme.App.csproj -c Release --no-restore '-p:FormeDevelopmentTools=true'
 .tools/dotnet/dotnet.exe src/Forme.App/bin/Release/net10.0-windows/Forme.dll --probe
+
+# 可选状态：pet-idle/pet-sleep/pet-walk/pet-run、house-indoor-idle/house-indoor-moving、
+# house-outdoor-idle/house-outdoor-moving、floating-chat-idle/floating-chat-streaming-mock、
+# tray-cold/tray-after-100-switches。流式模拟不会调用AI服务。
+.tools/dotnet/dotnet.exe src/Forme.App/bin/Release/net10.0-windows/Forme.dll --probe --probe-state house-outdoor-moving --probe-warmup 120 --probe-seconds 600
 ```
 
 检查数据与截图在 `artifacts`，与正式个人数据隔离。自动化检查不向真实 AI 服务发送请求。不要将私人的数据库、密钥或导出文件放入仓库。
 
 运行结构：WPF 展示与 Windows 集成、独立本地活动逻辑、SQLite 存储、独立流式 AI 接口。3D 几何由代码生成并复用，不加载外部模型，不使用常驻后端。
 
-标准测试可直接运行 dotnet test，按 TestCategory 筛选；TRX 和覆盖率在 artifacts/test-results。Windows CI 执行相同构建、测试、打包和安装包自检，界面与GPU/混合DPI检查在本机交互式桌面执行。审核整改进度见 [整改实施记录](docs/审核意见与下一步计划/整改实施记录.md)。
+标准测试可直接运行 dotnet test，按 TestCategory 筛选；TRX 和覆盖率在 artifacts/test-results。Windows CI 执行相同构建、测试、打包和安装包自检，界面与GPU/混合DPI检查在本机交互式桌面执行。审核整改进度见 [整改实施记录](docs/审核意见与下一步计划/整改实施记录.md) 和 [v2 执行记录](docs/审核意见与下一步计划/v2执行记录.md)。

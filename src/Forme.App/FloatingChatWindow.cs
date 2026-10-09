@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -16,10 +15,7 @@ internal sealed class FloatingChatWindow : Window
     private readonly TextBox _input;
     private readonly Button _send,_stop,_new;
     private TextBlock? _live;
-    private bool _transfer,_composing;
-    [StructLayout(LayoutKind.Sequential)] private struct NativeRect {public int Left,Top,Right,Bottom;}
-    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window,out NativeRect rect);
-    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window,IntPtr after,int x,int y,int width,int height,int flags);
+    private bool _transfer,_composing,_probeStreaming;
     public FloatingChatWindow(Controller c,PetWindow pet,Action<string> openHouse)
     {
         _c=c;Title="Forme · 聊一会儿";Width=380;Height=500;MinWidth=300;MinHeight=360;
@@ -49,13 +45,12 @@ internal sealed class FloatingChatWindow : Window
         {
             var handle=new WindowInteropHelper(this).Handle;
             var petHandle=new WindowInteropHelper(pet).Handle;
-            if(!GetWindowRect(petHandle,out var anchor)||!GetWindowRect(handle,out var rectangle))return;
-            var area=System.Windows.Forms.Screen.FromHandle(petHandle).WorkingArea;
-            int width=rectangle.Right-rectangle.Left,height=rectangle.Bottom-rectangle.Top;
-            int x=anchor.Right+12;if(x+width>area.Right)x=anchor.Left-width-12;
-            x=Math.Clamp(x,area.Left,Math.Max(area.Left,area.Right-width));
-            int y=Math.Clamp(anchor.Top,area.Top,Math.Max(area.Top,area.Bottom-height));
-            SetWindowPos(handle,IntPtr.Zero,x,y,Math.Min(width,area.Width),Math.Min(height,area.Height),0x14);
+            if(!ScreenCoordinateService.TryGetWindowRect(petHandle,out var anchor)||!ScreenCoordinateService.TryGetWindowRect(handle,out var rectangle))return;
+            var area=ScreenCoordinateService.WorkAreaAt(anchor);
+            int x=anchor.Right+12;if(x+rectangle.Width>area.Right)x=anchor.Left-rectangle.Width-12;
+            x=Math.Clamp(x,area.Left,Math.Max(area.Left,area.Right-rectangle.Width));
+            int y=Math.Clamp(anchor.Top,area.Top,Math.Max(area.Top,area.Bottom-rectangle.Height));
+            ScreenCoordinateService.SetBounds(handle,x,y,Math.Min(rectangle.Width,area.Width),Math.Min(rectangle.Height,area.Height));
         };
         c.Changed+=Render;c.Tick+=UpdateLive;
         Closing+=(_,_)=>{if(!_transfer&&c.Busy)c.StopReply();};
@@ -63,6 +58,11 @@ internal sealed class FloatingChatWindow : Window
         Render();Loaded+=(_,_)=>_input.Focus();
     }
     public void CloseForTransfer(){_transfer=true;Close();}
+    internal void StartProbeStreamingMock()
+    {
+        _probeStreaming=true;_live=Ui.Text("模拟生成中的回复 · 本机测试，不发送网络请求",13);
+        _messages.Children.Add(Ui.Card(Ui.Stack(Ui.Text("本机流式模拟",10,Ui.Muted),_live),new Thickness(10)));_scroll.ScrollToEnd();
+    }
     private void Render()
     {
         Topmost=_c.Preferences.Topmost;
@@ -86,7 +86,7 @@ internal sealed class FloatingChatWindow : Window
     }
     private void UpdateLive()
     {
-        if(_live is not null&&_c.Busy&&IsVisible&&WindowState!=WindowState.Minimized){_live.Text=_c.LiveReply.Length==0?"…":_c.LiveReply;_scroll.ScrollToEnd();}
+        if(_live is not null&&(_probeStreaming||_c.Busy)&&IsVisible&&WindowState!=WindowState.Minimized){_live.Text=_probeStreaming?"模拟生成中的回复 · 本机测试，不发送网络请求":_c.LiveReply.Length==0?"…":_c.LiveReply;_scroll.ScrollToEnd();}
         _status.Text=_c.Waiting?"正在等待服务，可随时停止。":_c.ChatStatus;
     }
 }

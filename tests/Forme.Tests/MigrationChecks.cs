@@ -13,17 +13,17 @@ internal static class MigrationChecks
         using(var seed=new Store(dir))
         {seed.SavePreferences(new(){PetName="历史伙伴"});seed.SaveMood(new("legacy","平静","旧数据",DateTimeOffset.Now,DateTimeOffset.Now));}
         string path=Path.Combine(dir,"forme.db");
-        Sql(path,"DROP INDEX moods_created; DROP INDEX focus_started; PRAGMA user_version=1;");
+        Sql(path,"DROP INDEX moods_created; DROP INDEX focus_started; DROP TABLE game_achievements; DROP TABLE game_slots; DROP TABLE game_discoveries; DROP TABLE game_daily; DROP TABLE game_tasks; DROP TABLE game_inventory; DROP TABLE game_progress; PRAGMA user_version=1;");
         using(var upgraded=new Store(dir))
         {
             check(upgraded.LoadPreferences().PetName=="历史伙伴"&&upgraded.Moods().Single().Note=="旧数据","v1 migration preserves records");
-            check(Scalar(path,"PRAGMA user_version")==2,"v1 migrates to v2");
+            check(Scalar(path,"PRAGMA user_version")==3,"v1 migrates through current schema");
             string backup=Path.Combine(dir,"migration-v1.db");
             check(File.Exists(backup)&&Scalar(backup,"PRAGMA user_version")==1,"upgrade backup remains readable v1");
-            check(upgraded.Export(false,true,false,false).SchemaVersion==1,"database migration keeps JSON compatibility");
+            check(upgraded.Export(false,true,false,false).SchemaVersion==Store.ExportVersion,"database migration keeps JSON compatibility");
             upgraded.DeleteMood("legacy");check(!File.Exists(backup),"deletion clears migration recovery data");
         }
-        using(var repeated=new Store(dir))check(Scalar(path,"PRAGMA user_version")==2,"migration is not repeated on current database");
+        using(var repeated=new Store(dir))check(Scalar(path,"PRAGMA user_version")==3,"migration is not repeated on current database");
         string failed=Path.Combine(root,"migration-failure");
         using(var seed=new Store(failed)){seed.SaveMood(new("safe","平静","kept",DateTimeOffset.Now,DateTimeOffset.Now));}
         path=Path.Combine(failed,"forme.db");Sql(path,"DROP INDEX moods_created; PRAGMA user_version=1;");

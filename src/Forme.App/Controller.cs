@@ -93,7 +93,7 @@ internal sealed class Controller : IDisposable
         if(Busy) return;
         var key=Secrets.Read(); if(string.IsNullOrEmpty(key)) throw new OperationFailureException("请先在设置中连接 AI；也可以继续使用本地活动。");
         Session??=Store.NewSession(Preferences.Endpoint);
-        if(Session.Endpoint!=Preferences.Endpoint) throw new OperationFailureException("此会话属于另一服务，请新建会话，或确认转移上下文后继续。");
+        if(!AiClient.SameEndpoint(Session.Endpoint,Preferences.Endpoint)) throw new OperationFailureException("此会话属于另一服务，请新建会话，或确认转移上下文后继续。");
         var history=Store.Messages(Session.Id,0,60);
         string input=Draft.Trim();
         if(retryId is not null)

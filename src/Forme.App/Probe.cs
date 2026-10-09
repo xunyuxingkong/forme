@@ -28,10 +28,29 @@ internal static class Probe
     }
     private static void Save(string file,object value)
     {Directory.CreateDirectory("artifacts");File.WriteAllText(Path.Combine("artifacts",file),JsonSerializer.Serialize(value,new JsonSerializerOptions{WriteIndented=true}));}
-    private static void Enter(DesktopHost host,string state)
+    private static async Task Enter(DesktopHost host,Controller c,string state)
     {
+        if(state=="tray-after-100-switches")
+        {
+            for(int n=0;n<100;n++){host.ShowHouse("home");await Task.Delay(8);host.HidePet();await Task.Delay(8);}
+            host.HidePet();return;
+        }
         host.HidePet();
-        if(state=="house")host.ShowHouse("home");else if(state=="pet")host.ShowPet();
+        if(state.StartsWith("house-",StringComparison.Ordinal))
+        {
+            host.ShowHouse("home");var room=Descendants(host.House!).OfType<Room3DView>().FirstOrDefault();
+            if(state.StartsWith("house-outdoor-",StringComparison.Ordinal))room?.SwitchScene(true);else room?.SwitchScene(false);
+            if(state.EndsWith("-moving",StringComparison.Ordinal))room?.TryMove(state.StartsWith("house-outdoor-",StringComparison.Ordinal)?new(3,3):new(0,1));
+        }
+        else if(state.StartsWith("pet-",StringComparison.Ordinal))
+        {
+            c.SavePreferences(c.Preferences with{PetIdleMode=state switch{"pet-sleep"=>"sleep","pet-walk"=>"walk","pet-run"=>"run",_=>"idle"}});host.ShowPet();
+        }
+        else if(state.StartsWith("floating-chat-",StringComparison.Ordinal))
+        {
+            host.ShowFloatingChat();if(state=="floating-chat-streaming-mock")host.FloatingChat?.StartProbeStreamingMock();
+        }
+        else host.HidePet();
     }
     public static async Task Run(DesktopHost host,Controller c)
     {
@@ -39,23 +58,24 @@ internal static class Probe
         {
             c.SavePreferences(new(){Onboarded=true});
             int cycles=Option("--probe-cycles",0,0,1000);
-            if(cycles>0){await Cycles(host,cycles);return;}
+            if(cycles>0){await Cycles(host,c,cycles);return;}
             int seconds=Option("--probe-seconds",600,10,28800),warmup=Option("--probe-warmup",120,0,600);
             var args=Environment.GetCommandLineArgs();int i=Array.IndexOf(args,"--probe-state");
-            string[] states=i>=0&&i+1<args.Length?[args[i+1]]:["house","pet","tray"];
-            if(states.Any(s=>s is not ("house" or "pet" or "tray")))throw new ArgumentException("Unknown probe state");
+            string[] states=i>=0&&i+1<args.Length?[args[i+1]]:["house-indoor-idle","pet-idle","tray-cold"];
+            var allowed=new HashSet<string>(StringComparer.Ordinal){"pet-idle","pet-sleep","pet-walk","pet-run","house-indoor-idle","house-indoor-moving","house-outdoor-idle","house-outdoor-moving","floating-chat-idle","floating-chat-streaming-mock","tray-cold","tray-after-100-switches"};
+            if(states.Any(s=>!allowed.Contains(s)))throw new ArgumentException("Unknown probe state");
             var reports=new List<object>();
             foreach(var state in states)
             {
-                Enter(host,state);await Task.Delay(TimeSpan.FromSeconds(warmup));
+                await Enter(host,c,state);await Task.Delay(TimeSpan.FromSeconds(warmup));
                 using var process=Process.GetCurrentProcess();var initial=Measure(process,0);var cpu=process.TotalProcessorTime;
                 GetProcessIoCounters(process.Handle,out var before);var watch=Stopwatch.StartNew();var samples=new List<Sample>();
                 var presentation=new List<object>();int activeSamples=0;
                 for(int n=0;n<seconds;n++)
                 {
                     await Task.Delay(1000);samples.Add(Measure(process,watch.Elapsed.TotalSeconds));
-                    var window=(Window?)host.House??host.Pet;
-                    bool active=state=="tray"?window is null:window is {IsVisible:true,WindowState:WindowState.Normal};
+                    var window=state.StartsWith("floating-chat-",StringComparison.Ordinal)?(Window?)host.FloatingChat:state.StartsWith("tray-",StringComparison.Ordinal)?null:(Window?)host.House??host.Pet;
+                    bool active=state.StartsWith("tray-",StringComparison.Ordinal)?window is null:window is {IsVisible:true,WindowState:WindowState.Normal};
                     if(active)activeSamples++;
                     presentation.Add(new{Seconds=watch.Elapsed.TotalSeconds,Active=active,Visible=window?.IsVisible,WindowState=window?.WindowState.ToString(),RoomAnimation=host.House is {} house?Descendants(house).OfType<Room3DView>().FirstOrDefault()?.AnimationRunning:null});
                 }
@@ -94,15 +114,15 @@ internal static class Probe
             }
         }
     }
-    private static async Task Cycles(DesktopHost host,int count)
+    private static async Task Cycles(DesktopHost host,Controller c,int count)
     {
         using var process=Process.GetCurrentProcess();var watch=Stopwatch.StartNew();var samples=new List<Sample>();
         var references=new List<(string Type,WeakReference Reference)>();
         for(int n=0;n<count;n++)
         {
-            Enter(host,"house");await Task.Delay(70);Track(host.House!,references);
-            Enter(host,"pet");await Task.Delay(70);Track(host.Pet!,references);
-            Enter(host,"tray");await Task.Delay(70);
+            await Enter(host,c,"house-indoor-idle");await Task.Delay(70);Track(host.House!,references);
+            await Enter(host,c,"pet-idle");await Task.Delay(70);Track(host.Pet!,references);
+            await Enter(host,c,"tray-cold");await Task.Delay(70);
             if(n%10==9)samples.Add(Measure(process,watch.Elapsed.TotalSeconds));
         }
         await Task.Delay(1000);

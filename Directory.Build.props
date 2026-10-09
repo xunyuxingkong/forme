@@ -5,5 +5,9 @@
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <FormeVersion>0.1.0</FormeVersion>
+    <Version>$(FormeVersion)</Version>
+    <InformationalVersion>$(FormeVersion)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 </Project>
