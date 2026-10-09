@@ -246,17 +246,7 @@ internal sealed partial class MainWindow : Window
         var input=Ui.Input(_c.Draft,true);input.TextChanged+=(_,_)=>_c.Draft=input.Text;
         async Task Send()
         {
-            if(_c.Session is { } s && s.Endpoint!=_c.Preferences.Endpoint)
-            {
-                if(!Ui.Confirm("此会话曾发送给另一地址。继续将把当前消息和有限历史发送给新服务："+_c.Preferences.Endpoint+"。确认转移？"))return;
-                _c.Store.RebindSession(s.Id,_c.Preferences.Endpoint);_c.SelectSession(s with{Endpoint=_c.Preferences.Endpoint});
-            }
-            if(_c.Store.Get<string>("ai-consent")!=_c.Preferences.Endpoint)
-            {
-                if(!Ui.Confirm("消息、有限会话上下文、称呼和回复偏好将发送至 "+_c.Preferences.Endpoint+"。调用可能收费；删除本地记录无法删除服务商留存。确认使用此服务？"))return;
-                _c.Store.Set("ai-consent",_c.Preferences.Endpoint);
-            }
-            _chatOffset=0;await _c.Send();
+            _chatOffset=0;await ChatRequests.Send(_c);
         }
         input.PreviewKeyDown+=async(_,e)=>
         {

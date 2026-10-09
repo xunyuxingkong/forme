@@ -69,6 +69,8 @@ public sealed class AiClient : IDisposable
             var uri=new Uri(baseUri.AbsoluteUri.TrimEnd('/')+"/chat/completions");
             var payload=new Dictionary<string,object> { ["model"]=settings.Model,["messages"]=turns.Select(t=>new {role=t.Role,content=t.Content}),["stream"]=true,["max_tokens"]=512 };
             if(baseUri.Host.Equals("api.deepseek.com",StringComparison.OrdinalIgnoreCase)) payload["thinking"]=new {type="disabled"};
+            if(baseUri.Host.Equals("api.siliconflow.cn",StringComparison.OrdinalIgnoreCase)&&
+                settings.Model is "deepseek-ai/DeepSeek-V3.2" or "Pro/deepseek-ai/DeepSeek-V3.2")payload["enable_thinking"]=false;
             using var request=new HttpRequestMessage(HttpMethod.Post,uri);
             request.Headers.Authorization=new AuthenticationHeaderValue("Bearer",key);
             request.Content=new StringContent(JsonSerializer.Serialize(payload),Encoding.UTF8,"application/json");

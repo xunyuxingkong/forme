@@ -57,6 +57,10 @@ internal static class PetAnimationChecks
             if(cube.Pose.Expression!="thinking")throw new Exception("Adapter drag missing");
             pet.Drag(false);await Task.Delay(120);
             if(cube.Pose.ScaleY>=1)throw new Exception("Adapter landing missing");
+            pet.Play(PetAction.DanceSpin);await Task.Delay(300);
+            if(cube.Pose.Expression!="happy"||cube.Pose.Yaw<=0)throw new Exception("Adapter dance missing");
+            pet.StopAction();
+            if(cube.Pose.Expression!="idle")throw new Exception("Stopped dance did not restore idle");
             pet.MotionSettings(false,true,false);await Task.Delay(500);
             if(pet.AnimationRunning)throw new Exception("Quiet idle kept ticking");
             pet.Pat();await Task.Delay(150);if(!pet.AnimationRunning||cube.Pose.Expression!="happy")throw new Exception("Quiet explicit interaction missing");
@@ -81,14 +85,15 @@ internal static class PetAnimationChecks
             {
                 sprout.Apply(PetPose.Neutral(state) with{Blink=blink});
                 foreach(var mesh in sprout.Root.Children.OfType<Model3DGroup>())
-                    if(!mesh.Children.All(sprout.Contains))throw new Exception("Expression geometry lost picking ownership");
+                    if(!Shapes(mesh).All(sprout.Contains))throw new Exception("Expression geometry lost picking ownership");
             }
             using var other=new SproutPetModel();
             if(ReferenceEquals(sprout.Root,other.Root)||!ReferenceEquals(sprout.Root.Children[0],other.Root.Children[0]))throw new Exception("Mutable roots must be independent and frozen bodies shared");
             var states=new[]{"idle","focus","thinking","happy","rest","quiet"};
             for(int i=0;i<10000;i++)sprout.Apply(PetPose.Neutral(states[i%6]) with{Blink=(i/6)%2==0});
-            if(sprout.ExpressionCount>7||sprout.Root.Children.Count!=2||!ReferenceEquals(geometry,sprout.Root.Children[0]))throw new Exception("10000 expression swaps grew geometry cache or duplicated body");
+            if(sprout.ExpressionCount>7||sprout.Root.Children.Count!=3||!ReferenceEquals(geometry,sprout.Root.Children[0]))throw new Exception("10000 expression swaps grew geometry cache or duplicated body");
         }
         finally{pet.Release();window.Close();}
     }
+    private static IEnumerable<Model3D> Shapes(Model3DGroup group)=>group.Children.SelectMany(child=>child is Model3DGroup nested?Shapes(nested):[child]);
 }

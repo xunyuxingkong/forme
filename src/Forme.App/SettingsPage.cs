@@ -35,10 +35,24 @@ internal sealed partial class MainWindow
         var endpoint=Ui.Input(p.Endpoint,max:500);var model=Ui.Input(p.Model,max:100);
         var key=new PasswordBox{Padding=new Thickness(12),Margin=new Thickness(0,0,0,12),MinHeight=40,MaxLength=512};
         var connectionStatus=Ui.Text(_c.Secrets.Exists?"密钥已保存。留空保留现有密钥。":"尚未保存密钥。",12,Ui.Muted);
+        const string siliconEndpoint="https://api.siliconflow.cn/v1";
+        const string siliconModel="deepseek-ai/DeepSeek-V3.2";
+        var defaults=new Preferences();
+        var providers=new[]{"DeepSeek 官方","硅基流动 · DeepSeek","自定义兼容服务"};
+        var provider=Ui.Select(providers,p.Endpoint.TrimEnd('/')==siliconEndpoint?providers[1]:p.Endpoint.TrimEnd('/')==defaults.Endpoint?providers[0]:providers[2]);
+        provider.SelectionChanged+=(_,_)=>
+        {
+            if(provider.SelectedIndex==2)return;
+            endpoint.Text=provider.SelectedIndex==1?siliconEndpoint:defaults.Endpoint;
+            model.Text=provider.SelectedIndex==1?siliconModel:defaults.Model;
+            key.Clear();connectionStatus.Text="预设已填入，尚未保存。请填写该服务的 API Key；切换预设不会联网。";
+        };
         var advanced=new Expander{Header="高级：服务地址与模型",Content=Ui.Stack(Ui.Text("基础地址（不要包含 /chat/completions 或密钥）",12),endpoint,Ui.Text("模型名称",12),model),Margin=new Thickness(0,0,0,14)};
-        var aiPanel=Ui.Stack(Ui.Text("AI 连接 · DeepSeek 预设",17,null,true),Ui.Text("自由对话会联网，可能产生费用。房间、专注和放松一直在本地运行。",12,Ui.Muted),Ui.Text("API Key"),key,connectionStatus,advanced,Ui.Text("回复偏好（发送消息时一起提供给 AI）",12),style);
+        var aiPanel=Ui.Stack(Ui.Text("AI 连接",17,null,true),Ui.Text("自由对话会联网，可能产生费用。房间、专注和放松一直在本地运行。",12,Ui.Muted),Ui.Text("服务预设"),provider,Ui.Text("硅基流动预设：DeepSeek-V3.2，关闭深度思考。使用硅基流动平台的密钥，可在高级设置修改模型；可用性和价格以平台为准。",11,Ui.Muted),Ui.Text("API Key"),key,connectionStatus,advanced,Ui.Text("回复偏好（发送消息时一起提供给 AI）",12),style);
         aiPanel.Children.Add(Ui.Row(Ui.AsyncButton("测试连接",async()=>
         {
+            if(endpoint.Text.Trim().TrimEnd('/')!=_c.Preferences.Endpoint.TrimEnd('/')&&key.Password.Length==0)
+                throw new OperationFailureException("测试新服务前请填写该服务的 API Key，旧服务密钥不会自动发送。先前配置未改变。");
             if(!Ui.Confirm("将向填写的服务发送固定测试文字，不含私人记录。可能产生少量费用。继续？"))return;
             connectionStatus.Text="正在测试，可以点击停止。";
             try {await _c.TestConnection(endpoint.Text.Trim(),model.Text.Trim(),key.Password.Length>0?key.Password:_c.Secrets.Read());connectionStatus.Text="连接成功。点击保存后用于聊天。";}

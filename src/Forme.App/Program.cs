@@ -67,6 +67,7 @@ internal sealed class DesktopHost : IDisposable
     private PetWindow? _pet;
     public PetWindow? Pet => _pet;
     public MainWindow? House {get;private set;}
+    public FloatingChatWindow? FloatingChat {get;private set;}
     private readonly CancellationTokenSource _pipeCancel=new();
     private readonly System.Windows.Threading.DispatcherTimer _greetings=new(){Interval=TimeSpan.FromMinutes(1)};
     private bool _exit;
@@ -90,6 +91,7 @@ internal sealed class DesktopHost : IDisposable
     }
     public void ShowHouse(string page)
     {
+        FloatingChat?.CloseForTransfer();
         _pet?.Close();_pet=null;
         if(House is null)
         {
@@ -103,9 +105,20 @@ internal sealed class DesktopHost : IDisposable
     public void ShowPet(bool expand=true)
     {
         _petWanted=true;if(expand&&_c.Preferences.DisplayMode!="pet")_c.SavePreferences(_c.Preferences with{DisplayMode="pet"});if(House is not null)return;
-        _pet??=new(_c,ShowHouse,HidePet,()=>_ =Exit());_pet.Show();Changed();
+        _pet??=new(_c,page=>{if(page=="chat")ShowFloatingChat();else ShowHouse(page);},HidePet,()=>_ =Exit());_pet.Show();Changed();
     }
-    public void HidePet(){_petWanted=false;if(_c.Preferences.DisplayMode!="tray")_c.SavePreferences(_c.Preferences with{DisplayMode="tray"});_pet?.Close();_pet=null;if(House is not null)House.Close();Changed();}
+    public void ShowFloatingChat()
+    {
+        if(House is not null){ShowHouse("chat");return;}
+        ShowPet(false);if(_pet is null)return;
+        if(FloatingChat is null)
+        {
+            FloatingChat=new(_c,_pet,ShowHouse);FloatingChat.Closed+=(_,_)=>{FloatingChat=null;_pet?.ChatOpen(false);};
+        }
+        _pet.ChatOpen(true);if(_smoke)FloatingChat.ShowActivated=false;
+        FloatingChat.Show();FloatingChat.WindowState=WindowState.Normal;if(!_smoke)FloatingChat.Activate();
+    }
+    public void HidePet(){FloatingChat?.Close();_petWanted=false;if(_c.Preferences.DisplayMode!="tray")_c.SavePreferences(_c.Preferences with{DisplayMode="tray"});_pet?.Close();_pet=null;if(House is not null)House.Close();Changed();}
     public async Task Exit()
     {
         if(_exit)return;_exit=true;_c.Cancel();
@@ -206,9 +219,28 @@ internal static class Smoke
             if(!new[]{"chat","focus","relax","plant","room","mood"}.All(hitPages.Contains))throw new Exception("3D object picking incomplete: "+string.Join(",",hitPages));
             if(moodTargets<=exactMoodTargets)throw new Exception("Notebook click target was not enlarged");
             PetAnimationChecks.CheckRoomReplacement(roomView);
+            await CheckTravel(host,roomView,c);
             foreach(string page in new[]{"home","chat","focus","mood","relax","plant","room","settings"})
             {
                 host.House!.Navigate(page);await Task.Delay(80);Save(host.House,$"artifacts/screenshots/{page}.png");
+                if(page=="settings")
+                {
+                    var provider=Descendants(host.House).OfType<System.Windows.Controls.ComboBox>().Single(box=>box.Items.Contains("硅基流动 · DeepSeek"));
+                    var advanced=Descendants(host.House).OfType<System.Windows.Controls.Expander>().Single(expander=>Equals(expander.Header,"高级：服务地址与模型"));
+                    advanced.IsExpanded=true;host.House.UpdateLayout();
+                    var fields=Descendants(host.House).OfType<System.Windows.Controls.TextBox>().ToArray();
+                    var endpoint=fields.Single(field=>field.Text==c.Preferences.Endpoint);
+                    var model=fields.Single(field=>field.Text==c.Preferences.Model);
+                    var key=Descendants(host.House).OfType<System.Windows.Controls.PasswordBox>().Single();
+                    string previousEndpoint=endpoint.Text,previousModel=model.Text;int previousProvider=provider.SelectedIndex;
+                    provider.SelectedIndex=1;
+                    if(endpoint.Text!="https://api.siliconflow.cn/v1"||model.Text!="deepseek-ai/DeepSeek-V3.2"||c.Preferences.Endpoint!=previousEndpoint)throw new Exception("SiliconFlow preset missing or saved implicitly");
+                    key.Password="probe-only-key";provider.SelectedIndex=0;
+                    if(key.Password.Length!=0)throw new Exception("Provider change retained draft key");
+                    provider.SelectedIndex=1;provider.SelectedIndex=2;
+                    if(endpoint.Text!="https://api.siliconflow.cn/v1")throw new Exception("Custom provider erased draft");
+                    provider.SelectedIndex=previousProvider;endpoint.Text=previousEndpoint;model.Text=previousModel;advanced.IsExpanded=false;
+                }
             }
             host.House!.Navigate("home");
             var roomModel=(System.Windows.Media.Media3D.ModelVisual3D)roomView.Children.OfType<System.Windows.Controls.Viewport3D>().Single().Children[0];
@@ -239,6 +271,9 @@ internal static class Smoke
                 if(layout.Item1<940)Click(host.House,"查看3D小屋");host.House.UpdateLayout();
                 if(!roomView.DefaultSceneFits())throw new Exception("Default camera clips scene in "+layout.Item3);
                 Save(host.House,"artifacts/screenshots/"+layout.Item3+".png");
+                roomView.SwitchScene(true);host.House.UpdateLayout();
+                if(!roomView.DefaultSceneFits())throw new Exception("Outdoor camera clips scene in "+layout.Item3);
+                Save(host.House,"artifacts/screenshots/outdoors-"+layout.Item3+".png");roomView.SwitchScene(false);
             }
             host.House.WindowState=WindowState.Normal;host.House.Show();host.House.Width=1280;host.House.Height=850;host.House.Navigate("home");c.SavePreferences(c.Preferences with{Quiet=false});
             await host.House.Dispatcher.InvokeAsync(()=>host.House.UpdateLayout(),System.Windows.Threading.DispatcherPriority.ContextIdle);
@@ -258,8 +293,39 @@ internal static class Smoke
             var petSource=(HwndSource)PresentationSource.FromVisual(host.Pet)!;
             var animatedPet=Descendants(host.Pet!).OfType<Pet3DView>().Single();if(!animatedPet.AnimationRunning)throw new Exception("Desktop pet idle did not start");
             var style=GetWindowLong(petSource.Handle,-20);if((style&0x08000000)==0)throw new Exception("Pet activates keyboard focus");
+            c.NewSession();
+            c.Store.SaveMessage(new("floating-local-user",c.Session!.Id,"user","本地界面检查", "complete",DateTimeOffset.Now));
+            c.Store.SaveMessage(new("floating-local-reply",c.Session.Id,"assistant","小窗口也可以陪你聊一会儿。", "complete",DateTimeOffset.Now.AddTicks(1)));
+            c.Draft="尚未发送的草稿";
+            host.Pet!.Greet("聊一会儿");await Task.Delay(80);Click(host.Pet,"聊天");await Task.Delay(100);
+            var floating=host.FloatingChat??throw new Exception("Floating chat not created");
+            if(host.House is not null||host.Pet?.IsVisible!=true||!floating.IsVisible||floating.Width>420||c.Busy)throw new Exception("Floating chat opened house, hid pet or sent implicitly");
+            var floatingInput=Descendants(floating).OfType<System.Windows.Controls.TextBox>().Single();
+            if(floatingInput.Text!=c.Draft)throw new Exception("Floating draft missing");
+            floatingInput.Text="小窗口修改后的草稿";c.Refresh();
+            if(c.Draft!=floatingInput.Text)throw new Exception("Floating refresh discarded draft");
+            host.ShowFloatingChat();if(!ReferenceEquals(floating,host.FloatingChat))throw new Exception("Duplicate floating chat window");
+            Save(floating,"artifacts/screenshots/floating-chat.png");
+            floating.Close();if(host.FloatingChat is not null||host.Pet?.IsVisible!=true||c.Draft!="小窗口修改后的草稿")throw new Exception("Closing floating chat lost draft or pet");
+            host.ShowFloatingChat();Click(host.FloatingChat!,"完整聊天");await Task.Delay(100);
+            if(host.FloatingChat is not null||host.House?.CurrentPage!="chat"||host.Pet is not null||c.Draft!="小窗口修改后的草稿")throw new Exception("Floating chat transfer failed");
+            host.HidePet();host.ShowPet();await Task.Delay(100);
+            petSource=(System.Windows.Interop.HwndSource)PresentationSource.FromVisual(host.Pet!)!;
+            animatedPet=Descendants(host.Pet!).OfType<Pet3DView>().Single();
             var screenPoint=host.Pet!.PointToScreen(new Point(3,3));long packed=((long)(short)screenPoint.Y<<16)|((ushort)(short)screenPoint.X);
             if(SendMessage(petSource.Handle,0x0084,IntPtr.Zero,new IntPtr(packed))!=new IntPtr(-1))throw new Exception("Transparent area captures input");
+            host.Pet.SetIdleMode("sleep");await Task.Delay(120);Save(host.Pet,"artifacts/screenshots/pet-sleep.png");
+            host.Pet.SetIdleMode("walk");var start=new Point(host.Pet.Left,host.Pet.Top);
+            for(int frame=0;frame<60&&(new Point(host.Pet.Left,host.Pet.Top)-start).Length<1;frame++)await Task.Delay(100);
+            if((new Point(host.Pet.Left,host.Pet.Top)-start).Length<1)throw new Exception($"Random desktop walk failed: visible={host.Pet.IsVisible}, animator={animatedPet.AnimationRunning}, mode={c.Preferences.PetIdleMode}, floating={host.FloatingChat is not null}, eligible={typeof(PetWindow).GetProperty("CanWander",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.GetValue(host.Pet)}");
+            c.AnimationSuspended=true;c.Refresh();start=new(host.Pet.Left,host.Pet.Top);await Task.Delay(180);
+            if(animatedPet.AnimationRunning||new Point(host.Pet.Left,host.Pet.Top)!=start)throw new Exception("Suspended desktop wander continued");
+            c.AnimationSuspended=false;c.Refresh();host.Pet.SetIdleMode("run");await Task.Delay(2600);
+            host.Pet.Greet("待机模式与动作选择");await Task.Delay(100);Save(host.Pet,"artifacts/screenshots/pet-controls.png");
+            var petSelectors=Descendants(host.Pet).OfType<System.Windows.Controls.ComboBox>().ToArray();
+            if(petSelectors.Length!=2||petSelectors[0].Items.Count!=4||petSelectors[1].Items.Count!=5)throw new Exception("Desktop choices missing");
+            petSelectors[1].SelectedIndex=4;Click(host.Pet,"执行");await Task.Delay(150);if(!animatedPet.AnimationRunning)throw new Exception("Selected dance did not play");
+            Click(host.Pet,"停止动作");host.Pet.SetIdleMode("idle");
             host.Pet.CollapseToEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="edge"||host.Pet.Width>50||animatedPet.AnimationRunning)throw new Exception("Edge collapse not persisted or animation active");host.Pet.ExpandFromEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="pet"||host.Pet.Width<100||!animatedPet.AnimationRunning)throw new Exception("Edge restore failed");
             host.HidePet();
             File.WriteAllText("artifacts/smoke-result.txt",$"PASS: interchangeable pet adapter, idle/pat/rub/drag/landing, reduced/quiet/hidden/edge/minimized/suspended animation cleanup, room model replacement picking, 8 pages rendered, 3D geometry picking for all 6 activities, four camera-fit layouts, compact scene retained on settings change, focus drafts retained on refresh and navigation, responsive layout, day/night and rug previews, unchanged room geometry reuse, mood UI save, room preview rollback, bubble UI reward, focus persistence, watering deduplication, DPAPI roundtrip, native pet HWND no-activate and transparent-area hit test.\nHouse private memory snapshot: {memory} MB\nTimestamp: {DateTimeOffset.Now:O}\n");
@@ -268,6 +334,31 @@ internal static class Smoke
         }
         catch(Exception ex){Directory.CreateDirectory("artifacts");File.WriteAllText("artifacts/smoke-error.txt",ex.ToString());Environment.ExitCode=1;}
         await host.Exit();
+    }
+    private static async Task CheckTravel(DesktopHost host,Room3DView room,Controller c)
+    {
+        host.House!.WindowState=WindowState.Normal;host.House.UpdateLayout();
+        var point=room.ProjectGround(new(1.05,1.25))??throw new Exception("Ground projection failed");
+        var goal=room.GroundAt(point)??throw new Exception("Room floor hit failed");
+        if(!room.ClickGround(point))throw new Exception("Room click did not start movement");
+        await Task.Delay(1300);if(room.PetMoving||room.PetPosition!=goal)throw new Exception("Room walk failed to arrive");
+        if(room.TryMove(new(-2.25,-2.29)))throw new Exception("Desk collision allowed");
+        Click(host.House,"去户外 · 20m × 20m");await Task.Delay(80);host.House.UpdateLayout();
+        if(!room.Outdoors||!room.DefaultSceneFits())throw new Exception("Outdoor switch or camera fit failed");
+        Save(host.House,"artifacts/screenshots/outdoors.png");
+        host.House.WindowState=WindowState.Normal;host.House.Show();
+        await host.House.Dispatcher.InvokeAsync(()=>host.House.UpdateLayout(),System.Windows.Threading.DispatcherPriority.ContextIdle);
+        point=room.ProjectGround(new(4,4))??throw new Exception("Outdoor projection failed");
+        if(!room.ClickGround(point)||!room.PetMoving)throw new Exception($"Outdoor click did not start run: window={host.House.WindowState}, motionVisible={room.MotionVisible}, visible={room.IsVisible}, hit={room.ObjectAt(point)}, ground={room.GroundAt(point)}");
+        await Task.Delay(120);var position=room.PetPosition;
+        host.House.WindowState=WindowState.Minimized;await Task.Delay(120);
+        if(room.PetMoving||room.AnimationRunning||room.PetPosition!=position)throw new Exception("Minimized travel did not stop");
+        host.House.WindowState=WindowState.Normal;await Task.Delay(80);
+        c.SavePreferences(c.Preferences with{ReducedMotion=true});
+        if(!room.TryMove(new(3,3))||room.PetMoving||room.PetPosition!=new GroundPoint(3,3))throw new Exception("Reduced motion travel failed");
+        c.SavePreferences(c.Preferences with{ReducedMotion=false});
+        Click(host.House,"回到小屋");await Task.Delay(80);
+        if(room.Outdoors||room.PetMoving||room.PetPosition!=new GroundPoint(.15,1.25))throw new Exception("Scene switch retained previous route");
     }
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr window,int index);
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr window,int msg,IntPtr w,IntPtr l);

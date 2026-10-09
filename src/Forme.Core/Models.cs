@@ -23,6 +23,7 @@ public sealed record Preferences
     public double PetX { get; set; } = -1;
     public double PetY { get; set; } = -1;
     public string DisplayMode { get; set; } = "pet";
+    public string PetIdleMode { get; set; } = "idle";
     public string Theme { get; set; } = "auto";
     public string Rug { get; set; } = "cream";
     public string Ornament { get; set; } = "none";
@@ -38,7 +39,7 @@ public sealed record Preferences
             PetScale is < 0.7 or > 1.6 || !double.IsFinite(PetX) || !double.IsFinite(PetY) ||
             GreetingStart is < 0 or > 23 || GreetingEnd is < 1 or > 24 || GreetingEnd <= GreetingStart)
             throw new InvalidDataException("时长、尺寸或允许时段无效。");
-        if (!new[] { "pet", "tray", "edge" }.Contains(DisplayMode) || !new[] { "auto", "day", "night" }.Contains(Theme) ||
+        if (!new[] { "idle", "sleep", "walk", "run" }.Contains(PetIdleMode) || !new[] { "pet", "tray", "edge" }.Contains(DisplayMode) || !new[] { "auto", "day", "night" }.Contains(Theme) ||
             !new[] { "cream", "sage", "rose" }.Contains(Rug) ||
             !new[] { "none", "star", "cloud", "flower" }.Contains(Ornament))
             throw new InvalidDataException("房间选项无效。");

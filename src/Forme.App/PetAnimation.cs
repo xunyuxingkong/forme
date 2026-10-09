@@ -20,6 +20,19 @@ internal sealed class PetAnimator : IDisposable
     private readonly DispatcherTimer _timer=new(DispatcherPriority.Background);
     private readonly PetMotion _motion=new();
     private IPetModel _model;
+    private PetTravel? _travel;
+    private Action<GroundPoint,double>? _place;
+    private double _lastFrame;
+    public Func<double,bool,PetPose?>? ExternalMotion {get;set;}
+    public bool ExternalActive {get;set;}
+    public void StopAction(){_motion.Reset();Configure(_motion.State,_visible,_reduced,_quiet,_suspended);}
+    public void AttachTravel(PetTravel travel,Action<GroundPoint,double> place){_travel?.Stop();_travel=travel;_place=place;place(travel.Position,travel.Heading);}
+    public bool MoveTo(GroundPoint target)
+    {
+        if(_disposed||!_visible||_suspended||_travel is null||!_travel.MoveTo(target,_reduced))return false;
+        _place?.Invoke(_travel.Position,_travel.Heading);
+        if(!_reduced){_time.Start();Step();}return true;
+    }
     private bool _visible,_reduced,_quiet,_suspended,_disposed;
     public bool Running=>_timer.IsEnabled;
     public PetAnimator(IPetModel model){_model=model;_timer.Tick+=Tick;}
@@ -28,7 +41,7 @@ internal sealed class PetAnimator : IDisposable
         if(_disposed)return;
         _motion.State=state;_visible=visible;_reduced=reduced;_quiet=quiet;_suspended=suspended;
         if(!visible||reduced||suspended){Stop();return;}
-        if(quiet&&!_motion.Reacting){Stop();return;}
+        if(quiet&&!_motion.Reacting&&_travel?.Moving!=true&&!ExternalActive){Stop();return;}
         if(!_time.IsRunning)_time.Start();
         Step();
     }
@@ -47,12 +60,19 @@ internal sealed class PetAnimator : IDisposable
     private void Step()
     {
         if(_disposed)return;
-        _model.Apply(_motion.Sample(_time.Elapsed.TotalSeconds));
-        if(_quiet&&!_motion.Reacting){Stop();return;}
-        _timer.Interval=TimeSpan.FromMilliseconds(_motion.Reacting?1000d/30:1000d/15);
+        double now=_time.Elapsed.TotalSeconds;var pose=_motion.Sample(now);
+        if(ExternalMotion?.Invoke(Math.Max(0,now-_lastFrame),_motion.Reacting) is {} external&&!_motion.Reacting)pose=external;
+        if(_travel is {} travel)
+        {
+            var gait=travel.Advance(Math.Max(0,now-_lastFrame));_place?.Invoke(travel.Position,travel.Heading);
+            if(travel.Moving)pose=gait;
+        }
+        _lastFrame=now;_model.Apply(pose);
+        if(_quiet&&!_motion.Reacting&&_travel?.Moving!=true&&!ExternalActive){Stop();return;}
+        _timer.Interval=TimeSpan.FromMilliseconds(_motion.Reacting||_travel?.Moving==true||ExternalActive?1000d/30:_motion.State=="sleep"?200:1000d/15);
         _timer.Start();
     }
-    private void Stop(){_timer.Stop();_time.Reset();_motion.Reset();_model.Apply(PetPose.Neutral(_motion.State));}
+    private void Stop(){_timer.Stop();_time.Reset();_lastFrame=0;_travel?.Stop();_motion.Reset();_model.Apply(_motion.State=="sleep"?_motion.Sample(0):PetPose.Neutral(_motion.State));}
     public void Replace(IPetModel model)
     {
         Stop();_model.Dispose();_model=model;Configure(_motion.State,_visible,_reduced,_quiet,_suspended);

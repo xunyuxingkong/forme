@@ -91,7 +91,7 @@ public sealed class CoreTests
         for(int i=0;i<=120;i++)
         {
             var pose=motion.Sample(i*.01);
-            if(pose.ScaleX is <.85 or >1.15||pose.ScaleY is <.85 or >1.15||pose.Lift is <0 or >.08||Math.Abs(pose.Yaw)>10||Math.Abs(pose.Lean)>8)throw new Exception("Motion exceeded normalized bounds");
+            if(pose.ScaleX is <.85 or >1.15||pose.ScaleY is <.85 or >1.15||pose.Lift is <0 or >.08||Math.Abs(pose.Yaw)>(action==PetAction.DanceSpin?1080:10)||Math.Abs(pose.Lean)>8)throw new Exception("Motion exceeded normalized bounds");
         }
     }
     Check(true,"all action samples stay inside motion bounds");

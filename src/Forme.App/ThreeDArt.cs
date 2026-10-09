@@ -134,11 +134,9 @@ internal static class MeshArt
         MarkRange(plantStart,"plant");
         var gardenPlant=new Model3DGroup{Transform=new TranslateTransform3D(0,0,2.65)};
         foreach(var item in g.Children.Skip(plantStart).ToArray()){g.Children.Remove(item);gardenPlant.Children.Add(item);}
-        Ellipse(g,"#C0B695",.12,.079,.86,.66,.008,.42);
-        var pet=new Model3DGroup{Transform=new TranslateTransform3D(.1,.078,.85)};pet.Children.Add(petModel);g.Children.Add(pet);
         // The larger indoor space opens directly onto a local outdoor garden.
         var world=new Model3DGroup();foreach(var light in g.Children.OfType<Light>().ToArray()){g.Children.Remove(light);world.Children.Add(light);}
-        g.Transform=new ScaleTransform3D(1.1,1,1.1);world.Children.Add(g);
+        g.Transform=new ScaleTransform3D(1.45,1,1.45);world.Children.Add(g);world.Children.Add(petModel);
         SoftBox(world,"#98AA7D",0,-.15,4.22,6.65,.28,3.0);
         Box(world,night?"#7F9A88":"#A8C28F",0,.003,4.22,6.58,.024,2.96);
         // Low borders and a stone path keep the view into the house open.
@@ -165,6 +163,30 @@ internal static class MeshArt
             foreach(var model in shrub.Children)Mark(model,"garden");world.Children.Add(shrub);
         }
         return world;
+    }
+    public static Model3DGroup Outdoors(Preferences p,Dictionary<Model3D,string> hits,Model3D petModel)
+    {
+        var g=new Model3DGroup();Lights(g,p.Theme=="night"||p.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7));
+        SoftBox(g,"#81966B",0,-.18,0,20,.35,20);Box(g,"#ADC68F",0,.006,0,20,.025,20);
+        // A 20m square lawn, low perimeter and sparse fixed geometry.
+        foreach(double side in new[]{-10d,10d})
+        {Box(g,"#CDBB99",side,.18,0,.12,.35,20);Box(g,"#CDBB99",0,.18,side,20,.35,.12);}
+        for(int i=-4;i<=4;i++)SoftBox(g,"#E3D9BE",i*1.2,.027,2,1,.025,.65);
+        foreach(var (x,z) in new[]{(-7d,-7d),(7d,-7d),(-8d,6d),(8d,6d)})
+        {
+            Box(g,"#A58866",x,1.1,z,.24,2.2,.24);Ellipse(g,"#739766",x,2.9,z,1.25,1.65,1.25);Ellipse(g,"#96B17C",x-.6,2.8,z+.2,.9,1.1,.9);
+        }
+        foreach(double x in new[]{-5d,5d})
+        {
+            int start=g.Children.Count;SoftBox(g,"#C1A17A",x,.5,-1,2,.15,.75);Box(g,"#B3936E",x,.95,-1.4,2,.7,.12);
+            foreach(double offset in new[]{-.75,.75})Box(g,"#94795D",x+offset,.24,-1,.12,.48,.55);
+            foreach(var shape in g.Children.Skip(start))hits[shape]="relax";
+        }
+        int planter=g.Children.Count;SoftBox(g,"#B3936E",-4,.16,5,2,.3,2);Box(g,"#806C50",-4,.32,5,1.8,.025,1.8);
+        foreach(double x in new[]{-4.5,-3.5})foreach(double z in new[]{4.5,5.5})
+        {Box(g,"#779867",x,.6,z,.03,.55,.03);Ellipse(g,"#DDA6A0",x,.9,z,.15,.15,.08);Ellipse(g,"#91AD7D",x-.1,.6,z,.19,.055,.08);}
+        foreach(var shape in g.Children.Skip(planter))hits[shape]="garden";
+        foreach(var shape in g.Children)shape.Freeze();g.Children.Add(petModel);return g;
     }
 }
 
@@ -207,6 +229,9 @@ internal sealed class Pet3DView : Grid
         _reduced=reduced;Configure();_animator.Play(PetAction.Rub);
     }
     public void Pat()=>_animator.Play(PetAction.Pat);
+    public void Play(PetAction action)=>_animator.Play(action);
+    public void StopAction()=>_animator.StopAction();
+    public void DesktopMotion(Func<double,bool,PetPose?> source,bool active){_animator.ExternalMotion=source;_animator.ExternalActive=active;Configure();}
     public void Drag(bool dragging)=>_animator.Drag(dragging);
     public void Turn(double delta)=>_rotation.Angle=Math.Clamp(_rotation.Angle+delta,-65,65);
     public void Release(){if(_released)return;_released=true;_animator.Dispose();_character.Children.Clear();_model.Content=null;_viewport.Children.Clear();}
@@ -220,6 +245,15 @@ internal sealed class Room3DView : Grid
     private readonly ModelVisual3D _model=new();
     private IPetModel _pet;
     private readonly PetAnimator _animator;
+    private readonly Model3DGroup _character=new();
+    private readonly TranslateTransform3D _position=new();
+    private readonly AxisAngleRotation3D _heading=new(new(0,1,0),0);
+    private readonly Button _sceneButton;
+    private PetTravel _travel=null!;
+    private bool _outdoors;
+    internal bool Outdoors=>_outdoors;
+    internal GroundPoint PetPosition=>_travel.Position;
+    internal bool PetMoving=>_travel.Moving;
     private bool _motionVisible=true,_released;
     internal bool AnimationRunning=>_animator.Running;
     public bool MotionVisible {get=>_motionVisible;set{_motionVisible=value;Refresh();}}
@@ -237,18 +271,22 @@ internal sealed class Room3DView : Grid
     private readonly Canvas _labels=new(){IsHitTestVisible=false};
     private readonly Border _plantLabel=Badge("成长盆栽");
     private readonly Border _gardenLabel=Badge("装饰花坛");
-    private static readonly Point3D MoodAnchor=new(-1.83*1.1,1.071,-1.37*1.1);
+    private static readonly Point3D MoodAnchor=new(-1.83*1.45,1.071,-1.37*1.45);
     private Preferences? _preview;
     private readonly System.Windows.Threading.DispatcherTimer _dayChange=new();
     public Preferences? Preview{get=>_preview;set{_preview=value;Refresh();}}
     public Room3DView(Controller c,Action<string> navigate,IPetModelFactory? factory=null)
     {
         _pet=(factory??new SproutPetFactory()).Create();_animator=new(_pet);
+        var characterTransform=new Transform3DGroup();characterTransform.Children.Add(new RotateTransform3D(_heading));characterTransform.Children.Add(_position);_character.Transform=characterTransform;
+        MeshArt.Ellipse(_character,"#AFA68C",0,.015,0,.66,.006,.42);_character.Children.Add(_pet.Root);ResetTravel();
         _c=c;_navigate=navigate;Height=560;MinWidth=280;ClipToBounds=true;
         SizeChanged+=(_,_)=>{Clip=new RectangleGeometry(new Rect(RenderSize),18,18);Camera();};
         _viewport.Camera=_camera;_viewport.Children.Add(_model);Children.Add(_viewport);Camera();Refresh();
         _labels.Children.Add(_plantLabel);_labels.Children.Add(_gardenLabel);Children.Add(_labels);Loaded+=(_,_)=>Camera();
-        var caption=Ui.Text("拖动旋转 · 滚轮缩放",11,Ui.Muted);caption.Margin=new Thickness(16);caption.VerticalAlignment=VerticalAlignment.Top;caption.IsHitTestVisible=false;Children.Add(caption);
+        var caption=Ui.Text("点击地面行走 · 远处奔跑 · 拖动旋转 · 滚轮缩放",11,Ui.Muted);caption.Margin=new Thickness(16);caption.VerticalAlignment=VerticalAlignment.Top;caption.IsHitTestVisible=false;Children.Add(caption);
+        var scene=_sceneButton=Ui.Button("去户外 · 20m × 20m",()=>SwitchScene(!_outdoors));
+        scene.FontSize=11;scene.Padding=new Thickness(10,6,10,6);scene.HorizontalAlignment=HorizontalAlignment.Right;scene.VerticalAlignment=VerticalAlignment.Top;scene.Margin=new Thickness(12,42,12,0);Children.Add(scene);
         var hintBorder=new Border{Child=_hint,Background=Ui.Brush("#F8F6EF"),CornerRadius=new CornerRadius(8),Padding=new Thickness(10,6,10,6),Margin=new Thickness(12),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom,IsHitTestVisible=false};Children.Add(hintBorder);
         var reset=Ui.Button("复位视角",()=>{_azimuth=30;_elevation=32;_zoom=1;Camera();});reset.FontSize=11;reset.Padding=new Thickness(8,5,8,5);reset.MinHeight=26;reset.HorizontalAlignment=HorizontalAlignment.Right;reset.VerticalAlignment=VerticalAlignment.Bottom;reset.Margin=new Thickness(8);Children.Add(reset);
         _viewport.MouseLeftButtonDown+=(_,e)=>
@@ -270,7 +308,8 @@ internal sealed class Room3DView : Grid
         _viewport.MouseLeftButtonUp+=(_,e)=>
         {
             var page=Hit(e.GetPosition(_viewport));bool activate=_viewport.IsMouseCaptured&&!_rotating&&page is not null&&page==_selected;
-            _viewport.ReleaseMouseCapture();ShowHint(page);if(activate)Ui.Guard(()=>_navigate(PageOf(page)!));e.Handled=true;
+            bool move=_viewport.IsMouseCaptured&&!_rotating&&page is null;var point=e.GetPosition(_viewport);
+            _viewport.ReleaseMouseCapture();ShowHint(page);if(activate)Ui.Guard(()=>_navigate(PageOf(page)!));else if(move)ClickGround(point);e.Handled=true;
         };
         _viewport.LostMouseCapture+=(_,_)=>_selected=null;
         _viewport.MouseLeave+=(_,_)=>{if(!_viewport.IsMouseCaptured)ShowHint(null);};
@@ -280,12 +319,38 @@ internal sealed class Room3DView : Grid
         Loaded+=(_,_)=>Refresh();Unloaded+=(_,_)=>_animator.Configure("idle",false,false,false,false);
         ToolTip="点击伙伴聊天、书桌专注、心情本记录、沙发放松、植物浇水；底部导航同样可用。";
     }
+    private void ResetTravel()
+    {
+        GroundObstacle[] obstacles=_outdoors?[new(-5,-1,2.2,1.2),new(5,-1,2.2,1.2),new(-4,5,2,2),new(-7,-7,1,1),new(7,-7,1,1),new(-8,6,1,1),new(8,6,1,1)]:[new(-2.25,-2.29,2.83,1.28),new(-2.32,-1.19,.8,.8),new(2.36,-2.1,3.25,1.7),new(-1.96,4.32,1.45,1.88),new(2.12,3.73,.75,.75),new(1.85,5.05,1.6,.6),new(-3.95,4.75,1.4,3.2),new(3.95,4.75,1.4,3.2)];
+        _travel=new(_outdoors?-10:-4.3,_outdoors?10:4.3,_outdoors?-10:-3.6,_outdoors?10:5.65,obstacles);_travel.Reset(new(.15,1.25));
+        _animator.AttachTravel(_travel,(point,heading)=>{_position.OffsetX=point.X;_position.OffsetY=.035;_position.OffsetZ=point.Z;_heading.Angle=heading;});
+    }
+    internal void SwitchScene(bool outdoors){if(_outdoors==outdoors)return;_outdoors=outdoors;_sceneButton.Content=outdoors?"回到小屋":"去户外 · 20m × 20m";ResetTravel();_appearance=null;_azimuth=30;_elevation=32;_zoom=1;ShowHint(null);Refresh();}
+    internal bool TryMove(GroundPoint point){bool moved=_animator.MoveTo(point);_hint.Text=moved?(_travel.Running?"伙伴正跑向那里":"伙伴正走向那里"):"这里被家具挡住了，请点击空地";return moved;}
+    internal Point? ProjectGround(GroundPoint point)=>Project(new(point.X,.03,point.Z));
+    internal bool ClickGround(Point point)=>Hit(point) is null&&GroundAt(point) is {} ground&&TryMove(ground);
+    internal GroundPoint? GroundAt(Point point)
+    {
+        GroundPoint? ground=null;VisualTreeHelper.HitTest(_viewport,null,result=>
+        {
+            if(result is not RayMeshGeometry3DHitTestResult hit)return HitTestResultBehavior.Continue;
+            // Ray hit positions use the mesh's local coordinates. Reconstruct the world ray instead.
+            var forward=_camera.LookDirection;forward.Normalize();var right=Vector3D.CrossProduct(forward,_camera.UpDirection);right.Normalize();var up=Vector3D.CrossProduct(right,forward);
+            double scale=2*Math.Tan(_camera.FieldOfView*Math.PI/360)/ActualWidth;
+            var ray=forward+right*((point.X-ActualWidth/2)*scale)+up*((ActualHeight/2-point.Y)*scale);
+            if(ray.Y>=-.0001)return HitTestResultBehavior.Stop;double distance=(.03-_camera.Position.Y)/ray.Y;var world=_camera.Position+ray*distance;
+            // Only a frontmost floor/rug hit qualifies; walls and furniture cannot command movement.
+            var bounds=hit.ModelHit.Bounds;
+            if(bounds.SizeY<.1)ground=new(world.X,world.Z);
+            return HitTestResultBehavior.Stop;
+        },new PointHitTestParameters(point));return ground;
+    }
     private static string? PageOf(string? id)=>id=="garden"?"plant":id;
     public string? ObjectAt(Point point)=>PageOf(Hit(point));
     private void ShowHint(string? page)
     {
         _viewport.Cursor=page is null?Cursors.Arrow:Cursors.Hand;
-        _hint.Text=page switch{"chat"=>"伙伴 · 点击聊一会儿","focus"=>"书桌 · 点击开始专注","mood"=>"心情本 · 点击记录心情","relax"=>"沙发 · 点击放松一下","plant"=>"成长盆栽 · 浇水会帮助它成长","garden"=>"装饰花草 · 点击查看植物照顾","room"=>"小屋布置 · 点击调整风格",_=>"点击物件，进入活动"};
+        _hint.Text=page switch{"chat"=>"伙伴 · 点击聊一会儿","focus"=>"书桌 · 点击开始专注","mood"=>"心情本 · 点击记录心情","relax"=>"沙发 · 点击放松一下","plant"=>"成长盆栽 · 浇水会帮助它成长","garden"=>"装饰花草 · 点击查看植物照顾","room"=>"小屋布置 · 点击调整风格",_=>"点击空地移动 · 点击物件进入活动"};
     }
     private string? Hit(Point point)
     {
@@ -310,7 +375,7 @@ internal sealed class Room3DView : Grid
     private void Camera()
     {
         if(ActualWidth<=0||ActualHeight<=0)return;
-        double a=_azimuth*Math.PI/180,e=_elevation*Math.PI/180;var target=new Point3D(0,.8,1.4);
+        double a=_azimuth*Math.PI/180,e=_elevation*Math.PI/180;var target=new Point3D(0,.8,_outdoors?0:1.4);
         var forward=new Vector3D(-Math.Sin(a)*Math.Cos(e),-Math.Sin(e),-Math.Cos(a)*Math.Cos(e));
         var right=Vector3D.CrossProduct(forward,new Vector3D(0,1,0));right.Normalize();var up=Vector3D.CrossProduct(right,forward);
         double horizontal=Math.Tan(41*Math.PI/360),vertical=horizontal*ActualHeight/ActualWidth;
@@ -344,7 +409,7 @@ internal sealed class Room3DView : Grid
     private void PlaceBadge(Border badge,Point3D anchor,string category)
     {
         var point=Project(anchor);bool visible=ActualHeight>=340&&ActualWidth>=420&&point is {} p&&p.X>40&&p.X<ActualWidth-40&&p.Y>50&&p.Y<ActualHeight-45&&ExactHit(p)==category;
-        badge.Visibility=visible?Visibility.Visible:Visibility.Collapsed;
+        badge.Visibility=visible&&!_outdoors?Visibility.Visible:Visibility.Collapsed;
         if(visible&&point is {} position){Canvas.SetLeft(badge,position.X-29);Canvas.SetTop(badge,position.Y-38);}
     }
     internal bool DefaultSceneFits()=>_sceneCorners.Count>0&&_sceneCorners.All(corner=>Project(corner) is {} p&&p.X>=0&&p.X<=ActualWidth&&p.Y>=0&&p.Y<=ActualHeight);
@@ -354,10 +419,10 @@ internal sealed class Room3DView : Grid
         string state=_c.Clock.Active?(_c.Clock.Running&&_c.Clock.Activity!.Kind=="focus"?"focus":"rest"):_c.Busy?"thinking":_c.Preferences.Quiet?"quiet":"idle";
         var p=_preview??_c.Preferences;int points=_c.Store.PlantPoints;bool night=p.Theme=="night"||p.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7);
         _animator.Configure(state,IsLoaded&&IsVisible&&_motionVisible,p.ReducedMotion,p.Quiet,_c.AnimationSuspended);
-        string appearance=$"{p.Theme}/{p.Rug}/{p.Ornament}/{points}/{night}";
+        string appearance=$"{_outdoors}/{p.Theme}/{p.Rug}/{p.Ornament}/{points}/{night}";
         if(_appearance!=appearance)
         {
-            _appearance=appearance;_hits.Clear();_model.Content=MeshArt.Room(p,points,_hits,_pet.Root);
+            _appearance=appearance;_hits.Clear();_model.Content=_outdoors?MeshArt.Outdoors(p,_hits,_character):MeshArt.Room(p,points,_hits,_character);
             _sceneCorners.Clear();CollectSceneCorners(_model.Content,Matrix3D.Identity);
             var backdrop=new LinearGradientBrush(Ui.Brush(night?"#D8E0E3":"#F1EDE1").Color,Ui.Brush(night?"#B7C6CD":"#DCE5D7").Color,new Point(0,0),new Point(1,1));backdrop.Freeze();Background=backdrop;
             Camera();
@@ -371,7 +436,7 @@ internal sealed class Room3DView : Grid
     }
     public void ReplaceModel(IPetModelFactory factory)
     {
-        var rig=factory.Create();_animator.Replace(rig);_pet=rig;_appearance=null;Refresh();
+        var rig=factory.Create();_animator.Replace(rig);_character.Children.Remove(_pet.Root);_pet=rig;_character.Children.Add(rig.Root);_appearance=null;Refresh();
     }
     public void Release(){if(_released)return;_released=true;_animator.Dispose();_dayChange.Stop();_model.Content=null;_viewport.Children.Clear();_hits.Clear();_sceneCorners.Clear();_appearance=null;}
 }

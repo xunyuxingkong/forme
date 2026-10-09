@@ -12,7 +12,6 @@ internal static class SproutMesh
         // Face points towards +Z. Different states remain the same sculpted character.
         Ellipse(g,"#C9DCBB",0,.74,0,.65,.62,.53);
         Ellipse(g,"#A7C49C",-.42,1.32,-.06,.16,.37,.13,-26);Ellipse(g,"#A7C49C",.42,1.32,-.06,.16,.37,.13,26);
-        Ellipse(g,"#BDD2AB",-.35,.19,.23,.23,.13,.25);Ellipse(g,"#BDD2AB",.35,.19,.23,.23,.13,.25);
         Ellipse(g,"#B9CFAB",-.58,.56,.06,.14,.24,.15,-20);Ellipse(g,"#B9CFAB",.58,.56,.06,.14,.24,.15,20);
         Ellipse(g,"#E5B9A1",-.34,.66,.451,.11,.048,.028);Ellipse(g,"#E5B9A1",.34,.66,.451,.11,.048,.028);
         Box(g,"#6D935F",0,1.47,-.015,.034,.3,.034,-8);

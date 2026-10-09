@@ -1,12 +1,12 @@
 namespace Forme.Core;
 
 // Normalized pose: no mesh coordinates, renderer types, or model names.
-public readonly record struct PetPose(double ScaleX,double ScaleY,double Lift,double Yaw,double Lean,bool Blink,string Expression)
+public readonly record struct PetPose(double ScaleX,double ScaleY,double Lift,double Yaw,double Lean,bool Blink,string Expression,double Stride=0)
 {
     public static PetPose Neutral(string expression="idle")=>new(1,1,0,0,0,false,expression);
 }
 
-public enum PetAction { Pat, Rub, Land }
+public enum PetAction { Pat, Rub, Land, DanceSway, DanceHop, DanceSpin }
 
 public sealed class PetMotion
 {
@@ -36,7 +36,7 @@ public sealed class PetMotion
         if(_dragging)return new(1.04,.94,.035,0,-7,false,"thinking");
         if(_action is {} action)
         {
-            double duration=action==PetAction.Pat?1.05:action==PetAction.Rub?.65:.45;
+            double duration=action==PetAction.Pat?1.05:action==PetAction.Rub?.65:action==PetAction.Land?.45:6;
             double t=Math.Clamp((seconds-_started)/duration,0,1);
             if(t<1)
             {
@@ -45,12 +45,16 @@ public sealed class PetMotion
                 {
                     PetAction.Pat=>new(1+.045*wave,1-.07*wave,.055*Math.Pow(envelope,2),9*wave,5*wave,false,"happy"),
                     PetAction.Rub=>new(1+.07*envelope,1-.10*envelope,0,5*wave,4*wave,true,"happy"),
+                    PetAction.DanceSway=>new(1,1,0,8*Math.Sin(t*Math.PI*12)*envelope,7*Math.Sin(t*Math.PI*12)*envelope,false,"happy",Math.Sin(t*Math.PI*12)*envelope),
+                    PetAction.DanceHop=>new(1+.04*wave,1-.06*wave,.075*Math.Abs(Math.Sin(t*Math.PI*16))*envelope,6*wave,3*wave,false,"happy",wave),
+                    PetAction.DanceSpin=>new(1,1,.025*envelope,360*(3*t-Math.Sin(6*Math.PI*t)/(6*Math.PI)),4*wave,false,"happy",wave),
                     _=>new(1+.065*envelope,1-.08*envelope,0,0,3*wave,false,State)
                 };
             }
             _action=null;
         }
         if(State=="quiet")return PetPose.Neutral(State);
+        if(State=="sleep")return new(1.07,.87+.006*Math.Sin(seconds*Math.PI/3),0,0,5,true,"rest");
         double cycle=seconds%7;
         double breath=.012*(1-Math.Cos(seconds*Math.PI*2/3.5))/2;
         double sway=State is "idle" or "thinking" && cycle>4&&cycle<6?Math.Sin((cycle-4)*Math.PI)*3:0;
