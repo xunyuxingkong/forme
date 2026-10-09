@@ -86,7 +86,7 @@ internal sealed class DesktopHost : IDisposable
         _tray.DoubleClick+=(_,_)=>ShowHouse("home");c.Finished+=Finished;c.Changed+=Changed;c.Tick+=TrayTick;c.Notice+=Notice;
         SystemEvents.PowerModeChanged+=Power;SystemEvents.SessionSwitch+=Session;SystemEvents.DisplaySettingsChanged+=Displays;
         _greetings.Tick+=(_,_)=>Greeting();
-        if(!smoke){_ =Listen(pipeName);if(!c.Preferences.Onboarded)ShowHouse("welcome");else if(_petWanted)ShowPet(false);Changed();}
+        if(!smoke){_ =ObserveListener(pipeName);if(!c.Preferences.Onboarded)ShowHouse("welcome");else if(_petWanted)ShowPet(false);Changed();}
     }
     public void ShowHouse(string page)
     {
@@ -167,7 +167,18 @@ internal sealed class DesktopHost : IDisposable
                 await pipe.WaitForConnectionAsync(_pipeCancel.Token);using var reader=new StreamReader(pipe);
                 if(await reader.ReadLineAsync(_pipeCancel.Token)=="open")_ =_app.Dispatcher.BeginInvoke(()=>ShowHouse("home"));
             }
-            catch(OperationCanceledException){break;}catch(IOException){await Task.Delay(200,_pipeCancel.Token);}
+            catch(OperationCanceledException){break;}catch(IOException)
+            {
+                try{await Task.Delay(200,_pipeCancel.Token);}catch(OperationCanceledException){break;}
+            }
+        }
+    }
+    private async Task ObserveListener(string name)
+    {
+        try{await Listen(name);}
+        catch(Exception error)
+        {
+            if(!_exit)_app.Dispatcher.BeginInvoke(new Action(()=>System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw()));
         }
     }
     public void Dispose()
