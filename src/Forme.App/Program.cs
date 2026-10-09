@@ -178,7 +178,7 @@ internal sealed class DesktopHost : IDisposable
         try{await Listen(name);}
         catch(Exception error)
         {
-            if(!_exit)_app.Dispatcher.BeginInvoke(new Action(()=>System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw()));
+            if(!_exit)_ =_app.Dispatcher.BeginInvoke(new Action(()=>System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw()));
         }
     }
     public void Dispose()

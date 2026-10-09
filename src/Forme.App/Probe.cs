@@ -50,11 +50,19 @@ internal static class Probe
                 Enter(host,state);await Task.Delay(TimeSpan.FromSeconds(warmup));
                 using var process=Process.GetCurrentProcess();var initial=Measure(process,0);var cpu=process.TotalProcessorTime;
                 GetProcessIoCounters(process.Handle,out var before);var watch=Stopwatch.StartNew();var samples=new List<Sample>();
-                for(int n=0;n<seconds;n++){await Task.Delay(1000);samples.Add(Measure(process,watch.Elapsed.TotalSeconds));}
+                var presentation=new List<object>();int activeSamples=0;
+                for(int n=0;n<seconds;n++)
+                {
+                    await Task.Delay(1000);samples.Add(Measure(process,watch.Elapsed.TotalSeconds));
+                    var window=(Window?)host.House??host.Pet;
+                    bool active=state=="tray"?window is null:window is {IsVisible:true,WindowState:WindowState.Normal};
+                    if(active)activeSamples++;
+                    presentation.Add(new{Seconds=watch.Elapsed.TotalSeconds,Active=active,Visible=window?.IsVisible,WindowState=window?.WindowState.ToString(),RoomAnimation=host.House is {} house?Descendants(house).OfType<Room3DView>().FirstOrDefault()?.AnimationRunning:null});
+                }
                 GetProcessIoCounters(process.Handle,out var after);
                 reports.Add(new{State=state,Seconds=watch.Elapsed.TotalSeconds,NormalizedCpuPercent=(process.TotalProcessorTime-cpu).TotalSeconds/watch.Elapsed.TotalSeconds/Environment.ProcessorCount*100,
                     AveragePrivateMB=samples.Average(s=>s.PrivateBytes)/1048576,PeakPrivateMB=samples.Max(s=>s.PrivateBytes)/1048576d,
-                    WriteBytes=after.WriteBytes-before.WriteBytes,WriteOperations=after.WriteOperations-before.WriteOperations,Initial=initial,Samples=samples});
+                    WriteBytes=after.WriteBytes-before.WriteBytes,WriteOperations=after.WriteOperations-before.WriteOperations,Initial=initial,Samples=samples,ActiveSamples=activeSamples,PresentationValid=activeSamples==seconds,Presentation=presentation});
                 Save("performance.json",new{Date=DateTimeOffset.Now,OS=Environment.OSVersion.ToString(),CpuCount=Environment.ProcessorCount,
                     WarmupSeconds=warmup,DurationPerState=seconds,FreshProcessPerState=states.Length==1,GpuMeasured=false,Results=reports});
             }

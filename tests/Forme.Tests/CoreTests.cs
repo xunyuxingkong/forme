@@ -12,6 +12,14 @@ public sealed class CoreTests
     private readonly Preferences p=new();
     private readonly string testRoot=Path.GetFullPath(Path.Combine("artifacts","test-data",Guid.NewGuid().ToString("N")));
     public CoreTests(){Directory.CreateDirectory(testRoot);}
+    [TestCleanup]
+    public void RemoveOwnFixture()
+    {
+        string parent=Path.GetFullPath(Path.Combine("artifacts","test-data"))+Path.DirectorySeparatorChar;
+        if(!testRoot.StartsWith(parent,StringComparison.OrdinalIgnoreCase)||!Guid.TryParseExact(Path.GetFileName(testRoot),"N",out _))throw new IOException("Unsafe fixture path");
+        if(File.Exists(Path.Combine(testRoot,"large-transfer-memory.txt")))Console.WriteLine(File.ReadAllText(Path.Combine(testRoot,"large-transfer-memory.txt")));
+        if(Directory.Exists(testRoot))Directory.Delete(testRoot,true);
+    }
     private static void Check(bool condition,string name){Assert.IsTrue(condition,name);Console.WriteLine("PASS "+name);}
     private static void Throws(Action action,string name){try{action();}catch(Exception error) when(OperationErrors.Expected(error)){Check(true,name);return;}Assert.Fail("Expected rejection: "+name);}
     private static async Task ThrowsAsync(Func<Task> action,string name){try{await action();}catch(Exception error) when(OperationErrors.Expected(error)){Check(true,name);return;}Assert.Fail("Expected rejection: "+name);}
@@ -114,7 +122,7 @@ public sealed class CoreTests
     store.Import(export);Check(store.Moods().Single().Id=="mood-test"&&store.Messages(session.Id).Count==2&&store.Focus().Count==1,"full import restores all categories transactionally");Check(store.LoadPreferences().Endpoint=="https://api.deepseek.com"&&store.LoadPreferences().PetName=="测试伙伴","room import preserves connection preferences");Check(store.Messages(session.Id).Last().Status=="stopped","imported interrupted stream is not marked complete");
     store.DeleteSession(session.Id);store.SaveMessage(new("late",session.Id,"assistant","late content","complete",DateTimeOffset.Now));Check(store.Messages(session.Id).Count==0,"late callback cannot recreate deleted session");
     store.ResetAll();Check(store.Moods().Count==0&&store.Focus().Count==0&&store.Sessions().Count==0&&store.Growth().Count==0,"reset all categories");
-    string future=Path.Combine(testRoot,"future");Directory.CreateDirectory(future);using(var db=new SqliteConnection("Data Source="+Path.Combine(future,"forme.db"))){db.Open();using var c=db.CreateCommand();c.CommandText="PRAGMA user_version=99";c.ExecuteNonQuery();}Throws(()=>{using var rejected=new Store(future);},"newer database version refused safely");
+    string future=Path.Combine(testRoot,"future");Directory.CreateDirectory(future);using(var db=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=Path.Combine(future,"forme.db"),Pooling=false}.ToString())){db.Open();using var c=db.CreateCommand();c.CommandText="PRAGMA user_version=99";c.ExecuteNonQuery();}Throws(()=>{using var rejected=new Store(future);},"newer database version refused safely");
 
     }
     [TestMethod, TestCategory("AI")]

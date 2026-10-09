@@ -31,7 +31,7 @@ internal static class MigrationChecks
         check(Scalar(path,"PRAGMA user_version")==1&&Scalar(path,"SELECT count(*) FROM moods")==1&&Scalar(path,"SELECT count(*) FROM sqlite_master WHERE name='moods_created'")==0,"failed migration rolls back DDL version and records");
         check(Scalar(Path.Combine(failed,"migration-v1.db"),"SELECT count(*) FROM moods")==1,"failed migration retains usable backup");
         string interrupted=Path.Combine(root,"migration-interrupted");Directory.CreateDirectory(interrupted);
-        using(var db=new SqliteConnection("Data Source="+Path.Combine(interrupted,"forme.db")))
+        using(var db=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=Path.Combine(interrupted,"forme.db"),Pooling=false}.ToString()))
         {
             db.Open();throws(()=>DatabaseMigrator.Upgrade(db,interrupted,version=>{if(version==1)throw new IOException("injected failure");}),"migration interruption rejected");
             check(Scalar(Path.Combine(interrupted,"forme.db"),"PRAGMA user_version")==0&&Scalar(Path.Combine(interrupted,"forme.db"),"SELECT count(*) FROM sqlite_master WHERE type='table'")==0,"entire migration chain rolls back");
