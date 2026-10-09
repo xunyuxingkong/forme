@@ -46,7 +46,7 @@ internal sealed class Controller : IDisposable
     }
     public void SaveAiConfiguration(Preferences next,string? replacementKey)
     {
-        if(Busy)throw new InvalidOperationException("请先停止并等待当前请求结束。");
+        if(Busy)throw new OperationFailureException("请先停止并等待当前请求结束。");
         var session=Store.SaveAiConfiguration(next,Session,Secrets,replacementKey);
         Preferences=next;Session=session;LiveReply="";ChatStatus="";Changed?.Invoke();
     }
@@ -80,25 +80,25 @@ internal sealed class Controller : IDisposable
             }
             Tick?.Invoke();
         }
-        catch(Exception ex){Clock.Pause();SyncTimer();Notice?.Invoke("进度保存失败，计时已暂停："+ex.Message);Changed?.Invoke();}
+        catch(Exception ex) when(OperationErrors.Expected(ex)){Clock.Pause();SyncTimer();Notice?.Invoke("进度保存失败，计时已暂停："+OperationErrors.Message(ex));Changed?.Invoke();}
     }
     private void SyncTimer(){if(Clock.Running || Busy)_timer.Start();else _timer.Stop();}
-    public void SelectSession(ChatSession session){if(Busy)throw new InvalidOperationException("请先停止当前回复。");Session=session;LiveReply="";ChatStatus="";Changed?.Invoke();}
-    public void NewSession(){if(Busy)throw new InvalidOperationException("请先停止当前回复。");Session=Store.NewSession(Preferences.Endpoint);LiveReply="";ChatStatus="";Changed?.Invoke();}
+    public void SelectSession(ChatSession session){if(Busy)throw new OperationFailureException("请先停止当前回复。");Session=session;LiveReply="";ChatStatus="";Changed?.Invoke();}
+    public void NewSession(){if(Busy)throw new OperationFailureException("请先停止当前回复。");Session=Store.NewSession(Preferences.Endpoint);LiveReply="";ChatStatus="";Changed?.Invoke();}
     public void DeleteSession(){Cancel();if(Session is not null)Store.DeleteSession(Session.Id);Session=Store.Sessions().FirstOrDefault();LiveReply="";ChatStatus="";Changed?.Invoke();}
     public void Cancel(){_epoch++;_request?.Cancel();}
     public void StopReply(){Cancel();ChatStatus="已停止。服务端已发生的用量可能仍计费。";Changed?.Invoke();}
     public async Task Send(string? retryId=null)
     {
         if(Busy) return;
-        var key=Secrets.Read(); if(string.IsNullOrEmpty(key)) throw new InvalidOperationException("请先在设置中连接 AI；也可以继续使用本地活动。");
+        var key=Secrets.Read(); if(string.IsNullOrEmpty(key)) throw new OperationFailureException("请先在设置中连接 AI；也可以继续使用本地活动。");
         Session??=Store.NewSession(Preferences.Endpoint);
-        if(Session.Endpoint!=Preferences.Endpoint) throw new InvalidOperationException("此会话属于另一服务，请新建会话，或确认转移上下文后继续。");
+        if(Session.Endpoint!=Preferences.Endpoint) throw new OperationFailureException("此会话属于另一服务，请新建会话，或确认转移上下文后继续。");
         var history=Store.Messages(Session.Id,0,60);
         string input=Draft.Trim();
         if(retryId is not null)
         {
-            var user=history.LastOrDefault(x=>x.Role=="user" && x.Id==retryId)??throw new InvalidOperationException("找不到重试消息。");
+            var user=history.LastOrDefault(x=>x.Role=="user" && x.Id==retryId)??throw new OperationFailureException("找不到重试消息。");
             input=user.Content;history=history.TakeWhile(x=>x.Id!=retryId).ToList();
         }
         var turns=AiClient.BuildContext(Preferences,history,input,out bool trimmed);
@@ -126,7 +126,7 @@ internal sealed class Controller : IDisposable
             if(epoch==_epoch)ChatStatus=result.LengthLimited?"已达到单次回复上限，未自动续写。":trimmed?"回复完成；较早对话未发送。":"回复完成。";
         }
         catch(OperationCanceledException){status="stopped";if(epoch==_epoch)ChatStatus="已停止。";}
-        catch(Exception ex){if(epoch==_epoch)ChatStatus=ex.Message;}
+        catch(Exception ex) when(OperationErrors.Expected(ex)){if(epoch==_epoch)ChatStatus=OperationErrors.Message(ex);}
         finally
         {
             try
@@ -139,7 +139,7 @@ internal sealed class Controller : IDisposable
     }
     public async Task TestConnection(string endpoint,string model,string key)
     {
-        if(Busy) throw new InvalidOperationException("已有请求正在处理。");
+        if(Busy) throw new OperationFailureException("已有请求正在处理。");
         var request=new CancellationTokenSource();_request=request;SyncTimer();Changed?.Invoke();
         try{await Ai.SendAsync(Preferences with {Endpoint=endpoint,Model=model},key,[new("user","请只回复：连接成功")],_=>{},request.Token);}
         finally{_request=null;request.Dispose();SyncTimer();Changed?.Invoke();}
@@ -147,8 +147,8 @@ internal sealed class Controller : IDisposable
     public void AfterImport(){Preferences=Store.LoadPreferences();Session=Store.Sessions().FirstOrDefault();Draft="";LiveReply="";Changed?.Invoke();}
     public void ClearAll()
     {
-        if(Busy)throw new InvalidOperationException("请先停止请求并等待结束，再清除数据。");
+        if(Busy)throw new OperationFailureException("请先停止请求并等待结束，再清除数据。");
         if(Clock.Active)Clock.Finish();Store.ResetAll();Secrets.Delete();Preferences=new(){Onboarded=true};Store.SavePreferences(Preferences);Session=null;Draft="";FocusDraft="";FocusDurationDraft=null;RestDurationDraft=null;LiveReply="";ChatStatus="";SyncTimer();Changed?.Invoke();
     }
-    public void Dispose(){Cancel();_timer.Stop();Clock.Pause();Store.SaveActivity(Clock.Snapshot());Ai.Dispose();Store.Dispose();}
+    public void Dispose(){Cancel();_timer.Stop();Clock.Pause();try{Store.SaveActivity(Clock.Snapshot());}finally{Ai.Dispose();Store.Dispose();}}
 }

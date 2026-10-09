@@ -23,7 +23,7 @@ internal sealed partial class MainWindow
         content.Children.Add(Ui.Card(Ui.Stack(Ui.Text("专注与休息",17,null,true),Ui.Text("默认专注时长 · 分钟"),focus,Ui.Text("默认休息时长 · 分钟"),rest)));
         content.Children.Add(Ui.Button("保存偏好",()=>
         {
-            if(!int.TryParse(from.Text,out int start)||!int.TryParse(until.Text,out int end))throw new InvalidOperationException("请输入有效小时。");
+            if(!int.TryParse(from.Text,out int start)||!int.TryParse(until.Text,out int end))throw new OperationFailureException("请输入有效小时。");
             var next=_c.Preferences with{PetName=name.Text.Trim(),UserName=user.Text.Trim(),Quiet=quiet.IsChecked==true,ReducedMotion=reduced.IsChecked==true,Topmost=top.IsChecked==true,Sounds=sound.IsChecked==true,TimerSounds=timerSound.IsChecked==true,Notifications=notifications.IsChecked==true,Greetings=greetings.IsChecked==true,GreetingStart=start,GreetingEnd=end,PetScale=scale.SelectedIndex==0?.8:scale.SelectedIndex==2?1.3:1,FocusMinutes=ReadMinutes(focus),RestMinutes=ReadMinutes(rest)};
             next.Validate();StartupLink.Set(startup.IsChecked==true);_c.SavePreferences(next);Toast("偏好已保存。");
         },true));
@@ -42,18 +42,18 @@ internal sealed partial class MainWindow
             if(!Ui.Confirm("将向填写的服务发送固定测试文字，不含私人记录。可能产生少量费用。继续？"))return;
             connectionStatus.Text="正在测试，可以点击停止。";
             try {await _c.TestConnection(endpoint.Text.Trim(),model.Text.Trim(),key.Password.Length>0?key.Password:_c.Secrets.Read());connectionStatus.Text="连接成功。点击保存后用于聊天。";}
-            catch(Exception ex){connectionStatus.Text=ex.Message;}
+            catch(Exception ex) when(OperationErrors.Expected(ex)){connectionStatus.Text=OperationErrors.Message(ex);}
         }),Ui.Button("停止测试",_c.StopReply)));
         aiPanel.Children.Add(Ui.Button("保存 AI 配置",()=>
         {
-            if(_c.Busy)throw new InvalidOperationException("请先停止并等待当前请求结束。");
+            if(_c.Busy)throw new OperationFailureException("请先停止并等待当前请求结束。");
             var next=_c.Preferences with{Endpoint=endpoint.Text.Trim().TrimEnd('/'),Model=model.Text.Trim(),ReplyStyle=style.Text.Trim()};next.Validate();
             var previousKey=_c.Secrets.Read();string newKey=key.Password;
             if(next.Endpoint!=_c.Preferences.Endpoint && !Ui.Confirm("更换服务地址会新建对话，不自动分享旧历史。"+(newKey.Length==0&&previousKey.Length>0?"当前密钥将保留，请确认它适用于新服务；也可以取消后填写新密钥。":"")))return;
             _c.SaveAiConfiguration(next,newKey);
             key.Clear();connectionStatus.Text=_c.Secrets.Exists?"配置已保存，密钥由 Windows 保护。":"配置已保存，请填写密钥后聊天。";Toast("AI 配置已保存。未自动发起请求。");
         },true));
-        aiPanel.Children.Add(Ui.Button("删除已保存密钥",()=>{if(_c.Busy)throw new InvalidOperationException("请先停止并等待请求结束。");if(Ui.Confirm("删除本机保存的 AI 密钥？历史记录保留。")){_c.Secrets.Delete();key.Clear();connectionStatus.Text="密钥已删除。";}}));
+        aiPanel.Children.Add(Ui.Button("删除已保存密钥",()=>{if(_c.Busy)throw new OperationFailureException("请先停止并等待请求结束。");if(Ui.Confirm("删除本机保存的 AI 密钥？历史记录保留。")){_c.Secrets.Delete();key.Clear();connectionStatus.Text="密钥已删除。";}}));
         aiPanel.Children.Add(Ui.Text("每次请求输出最多512 tokens，上下文受保守预算限制。不自动重试，不后台推理。账单以服务商为准，请在服务商处设置额度。",11,Ui.Muted));content.Children.Add(Ui.Card(aiPanel));
         content.Children.Add(DataSettings());
         content.Children.Add(Ui.Card(Ui.Stack(Ui.Text("关于 Forme",17,null,true),Ui.Text("v0.1.0 · Windows x64\n没有账号、云同步或遥测。连接预设依据官方协议；真实服务可用性由你的测试连接确认。",12,Ui.Muted),Ui.Text("本地数据："+_c.Store.DirectoryPath,11,Ui.Muted),Ui.Button("打开数据目录",()=>Process.Start(new ProcessStartInfo{FileName=_c.Store.DirectoryPath,UseShellExecute=true})))));
@@ -66,8 +66,8 @@ internal sealed partial class MainWindow
         CancellationTokenSource? exportRequest=null;var exportStatus=Ui.Text("",12,Ui.Muted);
         panel.Children.Add(Ui.Row(Ui.AsyncButton("导出所选数据",async()=>
         {
-            if(exportRequest is not null)throw new InvalidOperationException("请先等待或取消当前数据操作。");
-            if(!(chat.IsChecked==true||moods.IsChecked==true||focus.IsChecked==true||room.IsChecked==true))throw new InvalidOperationException("至少选择一类数据。");
+            if(exportRequest is not null)throw new OperationFailureException("请先等待或取消当前数据操作。");
+            if(!(chat.IsChecked==true||moods.IsChecked==true||focus.IsChecked==true||room.IsChecked==true))throw new OperationFailureException("至少选择一类数据。");
             if(!Ui.Confirm("导出文件可能包含私人内容，文件不会包含密钥。请选择安全的保存位置。"))return;
             var dialog=new Microsoft.Win32.SaveFileDialog{Filter="Forme 数据 (*.json)|*.json",FileName=$"Forme-{DateTime.Now:yyyyMMdd}.json"};
             if(dialog.ShowDialog(this)==true)
@@ -93,7 +93,7 @@ internal sealed partial class MainWindow
         })));
         async Task ImportFile(string path)
         {
-            if(exportRequest is not null)throw new InvalidOperationException("请先等待或取消当前数据操作。");
+            if(exportRequest is not null)throw new OperationFailureException("请先等待或取消当前数据操作。");
             RequireIdle();var request=new CancellationTokenSource();exportRequest=request;exportStatus.Text="正在检查导入文件，可以取消…";
             try
             {
@@ -121,7 +121,7 @@ internal sealed partial class MainWindow
         }));
         panel.Children.Add(Ui.Text("删除是应用层清除，不承诺存储介质取证级擦除。卸载保留数据，可先在这里清除。",11,Ui.Muted));return Ui.Card(panel);
     }
-    private void RequireIdle(){if(_c.Busy||_c.Clock.Active)throw new InvalidOperationException("请先结束当前计时，并停止和等待 AI 请求结束。");}
+    private void RequireIdle(){if(_c.Busy||_c.Clock.Active)throw new OperationFailureException("请先结束当前计时，并停止和等待 AI 请求结束。");}
     private void Clear(string category)
     {
         RequireIdle();if(!Ui.Confirm("清空此类本地记录和应用恢复备份？外部副本不受影响。"))return;_c.Store.ClearCategory(category);_c.AfterImport();Navigate("settings");Toast("记录已清空。");

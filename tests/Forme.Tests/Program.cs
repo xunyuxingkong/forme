@@ -11,6 +11,9 @@ async Task ThrowsAsync(Func<Task> action,string name){try{await action();}catch(
 string testRoot=Path.GetFullPath(Path.Combine("artifacts","test-data",Guid.NewGuid().ToString("N")));Directory.CreateDirectory(testRoot);
 try
 {
+    Check(OperationErrors.Expected(new IOException())&&!OperationErrors.Expected(new NullReferenceException())&&!OperationErrors.Expected(new AiConfigurationRecoveryException()),"known failures are separated from fatal defects");
+    string diagnostic=OperationErrors.Diagnostic(new Exception("secret-token private-chat C:\\private\\file"));
+    Check(!diagnostic.Contains("secret-token")&&!diagnostic.Contains("private-chat")&&!diagnostic.Contains("private\\\\file"),"diagnostics exclude messages and private paths");
     MigrationChecks.Run(testRoot,Check,Throws);
     AiConfigurationChecks.Run(testRoot,Check,Throws);
     TransferChecks.Run(testRoot,Check,Throws);

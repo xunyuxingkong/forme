@@ -18,7 +18,7 @@ internal static class Program
     {
         var app=new Application {ShutdownMode=ShutdownMode.OnExplicitShutdown};Ui.InstallStyles(app);
         string data=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Forme");
-        bool testing=args.Contains("--smoke")||args.Contains("--probe");
+        bool testing=args.Contains("--smoke")||args.Contains("--probe")||args.Contains("--crash-test");
         if(testing)data=Path.GetFullPath(Path.Combine("artifacts","ui-test-data",Guid.NewGuid().ToString("N")));
         int dataArg=Array.IndexOf(args,"--data-dir");if(dataArg>=0&&dataArg+1<args.Length)data=Path.GetFullPath(args[dataArg+1]);
         string name="Forme-"+Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(data)))[..16];
@@ -35,13 +35,26 @@ internal static class Program
         {
             PreparedImport.CleanupAbandoned();
             controller=new Controller(data);host=new DesktopHost(app,controller,name,testing);
-            app.DispatcherUnhandledException+=(_,e)=>{Ui.Error("操作未完成："+e.Exception.Message);e.Handled=true;};
+            app.DispatcherUnhandledException+=(_,e)=>
+            {
+                CrashDiagnostics.Write(data,e.Exception);
+                try{controller.Cancel();controller.Pause();}catch(Exception checkpoint){CrashDiagnostics.Write(data,checkpoint);}
+                if(!testing)Ui.Error("发生未预期错误，Forme 将退出。原数据保留，本机已记录不含聊天或密钥的诊断。");
+                e.Handled=true;Environment.ExitCode=1;app.Shutdown(1);
+            };
+            AppDomain.CurrentDomain.UnhandledException+=(_,e)=>{if(e.ExceptionObject is Exception error)CrashDiagnostics.Write(data,error);};
+            if(args.Contains("--crash-test"))app.Dispatcher.BeginInvoke(new Action(()=>throw new NullReferenceException("secret-token private-chat")));
             if(args.Contains("--smoke"))app.Dispatcher.BeginInvoke(async()=>await Smoke.Run(host,controller));
             if(args.Contains("--probe"))app.Dispatcher.BeginInvoke(async()=>await Probe.Run(host,controller));
             app.Run();return Environment.ExitCode;
         }
-        catch(Exception ex){if(args.Contains("--smoke")){Directory.CreateDirectory("artifacts");File.WriteAllText("artifacts/smoke-error.txt",ex.ToString());}else Ui.Error("启动失败，原数据保留："+ex.Message);return 1;}
-        finally{host?.Dispose();controller?.Dispose();if(locked)mutex.ReleaseMutex();}
+        catch(Exception ex){CrashDiagnostics.Write(data,ex);if(!testing)Ui.Error("启动失败，原数据保留。"+(OperationErrors.Expected(ex)?OperationErrors.Message(ex):"请查看本机诊断。"));return 1;}
+        finally
+        {
+            try{host?.Dispose();}catch(Exception ex){CrashDiagnostics.Write(data,ex);Environment.ExitCode=1;}
+            try{controller?.Dispose();}catch(Exception ex){CrashDiagnostics.Write(data,ex);Environment.ExitCode=1;}
+            if(locked)mutex.ReleaseMutex();
+        }
     }
 }
 

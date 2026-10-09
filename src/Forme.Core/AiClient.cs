@@ -60,7 +60,7 @@ public sealed class AiClient : IDisposable
     }
     public async Task<AiResult> SendAsync(Preferences settings, string key, List<AiTurn> turns, Action<string> progress, CancellationToken cancellation, bool trimmed=false)
     {
-        if(!await _gate.WaitAsync(0,cancellation).ConfigureAwait(false)) throw new InvalidOperationException("已有请求正在处理，请稍后再试。");
+        if(!await _gate.WaitAsync(0,cancellation).ConfigureAwait(false)) throw new OperationFailureException("已有请求正在处理，请稍后再试。");
         try
         {
             var baseUri=ValidateEndpoint(settings.Endpoint);
@@ -78,7 +78,7 @@ public sealed class AiClient : IDisposable
             try
             {
                 using var response=await _http.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,inactivity.Token).ConfigureAwait(false);
-                if(!response.IsSuccessStatusCode) throw new InvalidOperationException(response.StatusCode switch
+                if(!response.IsSuccessStatusCode) throw new OperationFailureException(response.StatusCode switch
                 {
                     HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden=>"认证失败，请检查密钥或服务权限。",
                     HttpStatusCode.PaymentRequired=>"服务余额不足，请到服务商处检查。",
@@ -95,7 +95,7 @@ public sealed class AiClient : IDisposable
                     if(!line.StartsWith("data:",StringComparison.Ordinal)) continue;
                     var data=line[5..].Trim(); if(data=="[DONE]") {done=true;break;} if(data.Length==0) continue;
                     using var doc=JsonDocument.Parse(data);
-                    if(doc.RootElement.TryGetProperty("error",out _)) throw new InvalidOperationException("服务返回流式错误，请手动重试。");
+                    if(doc.RootElement.TryGetProperty("error",out _)) throw new OperationFailureException("服务返回流式错误，请手动重试。");
                     if(!doc.RootElement.TryGetProperty("choices",out var choices) || choices.GetArrayLength()==0) continue;
                     var choice=choices[0];
                     if(choice.TryGetProperty("delta",out var delta) && delta.TryGetProperty("content",out var c) && c.ValueKind==JsonValueKind.String)
@@ -106,13 +106,13 @@ public sealed class AiClient : IDisposable
                     if(choice.TryGetProperty("finish_reason",out var reason) && reason.ValueKind==JsonValueKind.String)
                     {length=reason.GetString()=="length";done=true;break;}
                 }
-                if(!done) throw new InvalidOperationException("回复连接中断，已有内容已保留。");
-                if(!gotContent) throw new InvalidOperationException("服务未返回文本，请检查模型是否支持非思考文本对话。");
+                if(!done) throw new OperationFailureException("回复连接中断，已有内容已保留。");
+                if(!gotContent) throw new OperationFailureException("服务未返回文本，请检查模型是否支持非思考文本对话。");
                 return new(content.ToString(),length,trimmed);
             }
             catch(OperationCanceledException) when(!cancellation.IsCancellationRequested)
             {throw new TimeoutException(gotContent?"回复超时或停滞，已保留部分内容；可手动重试。":"等待服务超时，未自动重试。");}
-            catch(HttpRequestException) {throw new InvalidOperationException("网络或 TLS 连接失败，请检查网络和服务地址。");}
+            catch(HttpRequestException) {throw new OperationFailureException("网络或 TLS 连接失败，请检查网络和服务地址。");}
             catch(JsonException) {throw new InvalidDataException("服务返回格式不兼容，已有内容已保留。");}
         }
         finally {_gate.Release();}

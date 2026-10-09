@@ -147,7 +147,7 @@ internal sealed partial class MainWindow : Window
         foreach(var f in records)list.Children.Add(Ui.Text($"{f.Started:MM-dd HH:mm} · {(f.Kind=="focus"?"专注":"休息")} {f.ElapsedSeconds/60:0.#} 分钟 · {(f.Result=="completed"?"完成":"提前结束")}\n{f.Title}",13));
         list.Children.Add(Pager(_focusOffset,records.Count,10,offset=>{_focusOffset=offset;Navigate("focus");}));p.Children.Add(Ui.Card(list));return p;
     }
-    private static int ReadMinutes(TextBox input){if(!int.TryParse(input.Text,out int m)||m is <1 or >180)throw new InvalidOperationException("时长需要为 1–180 分钟。");return m;}
+    private static int ReadMinutes(TextBox input){if(!int.TryParse(input.Text,out int m)||m is <1 or >180)throw new OperationFailureException("时长需要为 1–180 分钟。");return m;}
     private UIElement Pager(int offset,int count,int size,Action<int> change)
     {
         var previous=Ui.Button("较新记录",()=>change(Math.Max(0,offset-size)));previous.IsEnabled=offset>0;
@@ -260,13 +260,13 @@ internal sealed partial class MainWindow : Window
         }
         input.PreviewKeyDown+=async(_,e)=>
         {
-            if(e.Key==Key.Enter && !Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) && !InputMethod.GetIsInputMethodEnabled(input)) {e.Handled=true;try{await Send();}catch(Exception ex){Ui.Error(ex.Message);}}
+            if(e.Key==Key.Enter && !Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) && !InputMethod.GetIsInputMethodEnabled(input)) {e.Handled=true;try{await Send();}catch(Exception ex) when(OperationErrors.Expected(ex)){Ui.Error(OperationErrors.Message(ex));}}
         };
         // IME composition is tracked explicitly; Enter confirms a candidate before sending.
         bool composing=false;
         TextCompositionManager.AddPreviewTextInputStartHandler(input,(_,_)=>composing=true);
         TextCompositionManager.AddPreviewTextInputHandler(input,(_,_)=>composing=false);
-        input.PreviewKeyDown+=async(_,e)=>{if(e.Handled)return;if(e.Key==Key.Enter&&!Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)&&!composing&&InputMethod.GetIsInputMethodEnabled(input)){e.Handled=true;try{await Send();}catch(Exception ex){Ui.Error(ex.Message);}}};
+        input.PreviewKeyDown+=async(_,e)=>{if(e.Handled)return;if(e.Key==Key.Enter&&!Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)&&!composing&&InputMethod.GetIsInputMethodEnabled(input)){e.Handled=true;try{await Send();}catch(Exception ex) when(OperationErrors.Expected(ex)){Ui.Error(OperationErrors.Message(ex));}}};
         p.Children.Add(input);var send=Ui.AsyncButton("发送",Send,true);send.IsEnabled=!_c.Busy&&_c.Secrets.Exists;
         var stop=Ui.Button("停止",_c.StopReply);stop.IsEnabled=_c.Busy;
         var lastUser=messages.LastOrDefault(x=>x.Role=="user");var retry=Ui.AsyncButton("重试最后消息",async()=>{if(lastUser is not null)await _c.Send(lastUser.Id);});retry.IsEnabled=!_c.Busy&&lastUser is not null&&_c.Secrets.Exists&&messages.LastOrDefault()?.Status is "error" or "stopped";

@@ -16,9 +16,9 @@ internal static class Ui
     }
     public static Button AsyncButton(string text,Func<Task> action,bool primary=false)
     {
-        var b=Button(text,()=>{},primary);b.Click+=async(_,_)=>{b.IsEnabled=false;try{await action();}catch(Exception ex){Error(ex.Message);}finally{b.IsEnabled=true;}};return b;
+        var b=Button(text,()=>{},primary);b.Click+=async(_,_)=>{b.IsEnabled=false;try{await action();}catch(Exception ex) when(Forme.Core.OperationErrors.Expected(ex)){Error(Forme.Core.OperationErrors.Message(ex));}finally{b.IsEnabled=true;}};return b;
     }
-    public static void Guard(Action action){try{action();}catch(Exception ex){Error(ex.Message);}}
+    public static void Guard(Action action){try{action();}catch(Exception ex) when(Forme.Core.OperationErrors.Expected(ex)){Error(Forme.Core.OperationErrors.Message(ex));}}
     public static void Error(string text)=>MessageBox.Show(text,"Forme",MessageBoxButton.OK,MessageBoxImage.Warning);
     public static bool Confirm(string text)=>MessageBox.Show(text,"Forme",MessageBoxButton.OKCancel,MessageBoxImage.Information)==MessageBoxResult.OK;
     public static TextBox Input(string value="",bool multiline=false,int max=2000)
