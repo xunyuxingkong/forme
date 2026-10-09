@@ -1,6 +1,6 @@
 <Project>
-  <Target Name="GenerateFormeApplicationManifest" BeforeTargets="PrepareForBuild" Condition="'$(MSBuildProjectName)' == 'Forme.App'">
-    <ReadLinesFromFile File="$(MSBuildProjectDirectory)/app.manifest">
+  <Target Name="GenerateFormeApplicationManifest" BeforeTargets="PrepareForBuild" Condition="'$(MSBuildProjectName)' == 'Forme.App' Or '$(MSBuildProjectName)' == 'Forme.Setup'">
+    <ReadLinesFromFile File="$(MSBuildThisFileDirectory)src/Forme.App/app.manifest">
       <Output TaskParameter="Lines" ItemName="_formeManifestLines" />
     </ReadLinesFromFile>
     <PropertyGroup>
