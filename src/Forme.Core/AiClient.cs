@@ -88,12 +88,10 @@ public sealed class AiClient : IDisposable
                 });
                 using var stream=await response.Content.ReadAsStreamAsync(inactivity.Token).ConfigureAwait(false);
                 using var reader=new StreamReader(stream,Encoding.UTF8);
-                int received=0;
-                while(await ReadBoundedLine(reader,inactivity.Token).ConfigureAwait(false) is { } line)
+                var events=new BufferedSseReader(reader);
+                while(await events.Event(inactivity.Token).ConfigureAwait(false) is { } data)
                 {
-                    received+=line.Length; if(received>256000) throw new InvalidDataException("服务响应过大，已停止接收。");
-                    if(!line.StartsWith("data:",StringComparison.Ordinal)) continue;
-                    var data=line[5..].Trim(); if(data=="[DONE]") {done=true;break;} if(data.Length==0) continue;
+                    if(data.Trim()=="[DONE]") {done=true;break;} if(data.Length==0) continue;
                     using var doc=JsonDocument.Parse(data);
                     if(doc.RootElement.TryGetProperty("error",out _)) throw new OperationFailureException("服务返回流式错误，请手动重试。");
                     if(!doc.RootElement.TryGetProperty("choices",out var choices) || choices.GetArrayLength()==0) continue;
@@ -101,7 +99,7 @@ public sealed class AiClient : IDisposable
                     if(choice.TryGetProperty("delta",out var delta) && delta.TryGetProperty("content",out var c) && c.ValueKind==JsonValueKind.String)
                     {
                         var fragment=c.GetString();
-                        if(!string.IsNullOrEmpty(fragment)) {gotContent=true;content.Append(fragment); if(content.Length>32000) throw new InvalidDataException("回复超出本地长度限制。"); progress(content.ToString()); inactivity.CancelAfter(_limits.Idle);}
+                        if(!string.IsNullOrEmpty(fragment)) {gotContent=true;content.Append(fragment); if(content.Length>32000) throw new InvalidDataException("回复超出本地长度限制。"); progress(fragment); inactivity.CancelAfter(_limits.Idle);}
                     }
                     if(choice.TryGetProperty("finish_reason",out var reason) && reason.ValueKind==JsonValueKind.String)
                     {length=reason.GetString()=="length";done=true;break;}
@@ -116,16 +114,6 @@ public sealed class AiClient : IDisposable
             catch(JsonException) {throw new InvalidDataException("服务返回格式不兼容，已有内容已保留。");}
         }
         finally {_gate.Release();}
-    }
-    private static async Task<string?> ReadBoundedLine(StreamReader reader, CancellationToken token)
-    {
-        var result=new StringBuilder(); var buffer=new char[1];
-        while(await reader.ReadAsync(buffer.AsMemory(),token).ConfigureAwait(false)>0)
-        {
-            if(buffer[0]=='\n') return result.ToString().TrimEnd('\r');
-            result.Append(buffer[0]); if(result.Length>65536) throw new InvalidDataException("服务单行响应过大。");
-        }
-        return result.Length==0?null:result.ToString();
     }
     public void Dispose() {_http.Dispose();_gate.Dispose();}
 }

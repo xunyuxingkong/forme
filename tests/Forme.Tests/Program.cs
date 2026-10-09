@@ -19,6 +19,7 @@ try
     TransferChecks.Run(testRoot,Check,Throws);
     TransferChecks.Large(testRoot,Check);
     await TransferChecks.Concurrent(testRoot,Check);
+    await StreamingChecks.Run(Check,ThrowsAsync);
     var motion=new PetMotion();
     var breathing=motion.Sample(1);
     Check(breathing.ScaleY>1&&breathing.Expression=="idle","idle breathing is local normalized pose");
@@ -82,7 +83,7 @@ try
     var handler=new FakeHandler((_,_)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(stream,Encoding.UTF8,"text/event-stream")}));
     using(var ai=new AiClient(handler))
     {
-        string progress="";var result=await ai.SendAsync(p,"fake-key",[new("user","hello")],s=>progress=s,CancellationToken.None);
+        string progress="";var result=await ai.SendAsync(p,"fake-key",[new("user","hello")],s=>progress+=s,CancellationToken.None);
         Check(result.Content=="你好呀"&&progress==result.Content&&result.LengthLimited,"SSE and output-limit feedback");Check(handler.Calls==1,"one action one network request");
         using var payload=JsonDocument.Parse(handler.Body!);Check(payload.RootElement.GetProperty("max_tokens").GetInt32()==512&&payload.RootElement.GetProperty("thinking").GetProperty("type").GetString()=="disabled","output limit and non-thinking mode");Check(!handler.Body!.Contains("fake-key"),"key is not in request body");
     }
@@ -92,7 +93,7 @@ try
     using(var ai=new AiClient(slow,new(TimeSpan.FromMilliseconds(80),TimeSpan.FromMilliseconds(80),TimeSpan.FromMilliseconds(300)))){await ThrowsAsync(()=>ai.SendAsync(p,"fake",[new("user","hello")],_=>{},CancellationToken.None),"first content timeout");Check(slow.Calls==1,"timeout never retries");}
     var stallStream=new StallStream(Encoding.UTF8.GetBytes("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"));
     var stallHandler=new FakeHandler((_,_)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StreamContent(stallStream)}));
-    using(var ai=new AiClient(stallHandler,new(TimeSpan.FromMilliseconds(200),TimeSpan.FromMilliseconds(80),TimeSpan.FromMilliseconds(400)))){string partial="";await ThrowsAsync(()=>ai.SendAsync(p,"fake",[new("user","hello")],s=>partial=s,CancellationToken.None),"streaming idle timeout");Check(partial=="partial"&&stallHandler.Calls==1,"partial content preserved without retries");}
+    using(var ai=new AiClient(stallHandler,new(TimeSpan.FromMilliseconds(200),TimeSpan.FromMilliseconds(80),TimeSpan.FromMilliseconds(400)))){string partial="";await ThrowsAsync(()=>ai.SendAsync(p,"fake",[new("user","hello")],s=>partial+=s,CancellationToken.None),"streaming idle timeout");Check(partial=="partial"&&stallHandler.Calls==1,"partial content preserved without retries");}
     var invalid=new FakeHandler((_,_)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent("data: not-json\n\n")}));
     using(var ai=new AiClient(invalid)){await ThrowsAsync(()=>ai.SendAsync(p,"fake",[new("user","hello")],_=>{},CancellationToken.None),"invalid SSE fails visibly");Check(invalid.Calls==1,"invalid protocol is not retried");}
     var unauthorized=new FakeHandler((_,_)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)));

@@ -107,21 +107,23 @@ internal sealed class Controller : IDisposable
         var response=new ChatMessage(Guid.NewGuid().ToString("N"),Session.Id,"assistant","","streaming",DateTimeOffset.Now.AddTicks(1));
         Store.SaveMessage(response); LiveReply="";ChatStatus=trimmed?"较早对话未发送。正在回应…":"正在回应…";
         var request=new CancellationTokenSource();_request=request;int epoch=++_epoch;_requestedAt=DateTimeOffset.UtcNow;
-        var p=Preferences with {};SyncTimer();Changed?.Invoke();var dispatcher=Dispatcher.CurrentDispatcher;
-        DateTimeOffset lastPaint=DateTimeOffset.MinValue,lastSave=DateTimeOffset.MinValue;
+        var p=Preferences with {};SyncTimer();Changed?.Invoke();
+        DateTimeOffset lastSave=DateTimeOffset.MinValue;
         string text="",status="error";
+        var pending=new ReplyBuffer();
+        var paint=new DispatcherTimer(DispatcherPriority.Background){Interval=TimeSpan.FromMilliseconds(80)};
+        paint.Tick+=(_,_)=>
+        {
+            if(epoch!=_epoch)return;
+            if(pending.ReadChanges() is not {} partial)return;
+            text=partial;LiveReply=partial;
+            if(DateTimeOffset.UtcNow-lastSave>TimeSpan.FromSeconds(2)){Store.SaveMessage(response with{Content=partial});lastSave=DateTimeOffset.UtcNow;}
+            Tick?.Invoke();
+        };
+        paint.Start();
         try
         {
-            var result=await Ai.SendAsync(p,key,turns,partial=>
-            {
-                dispatcher.Invoke(()=>
-                {
-                    if(epoch!=_epoch || !Store.HasSession(response.SessionId)) return;
-                    text=partial;LiveReply=partial;
-                    if(DateTimeOffset.UtcNow-lastSave>TimeSpan.FromSeconds(2)){Store.SaveMessage(response with {Content=partial});lastSave=DateTimeOffset.UtcNow;}
-                    if(DateTimeOffset.UtcNow-lastPaint>TimeSpan.FromMilliseconds(80)){Tick?.Invoke();lastPaint=DateTimeOffset.UtcNow;}
-                });
-            },request.Token,trimmed);
+            var result=await Ai.SendAsync(p,key,turns,pending.Append,request.Token,trimmed);
             if(epoch==_epoch){text=result.Content;status="complete";}else status="stopped";
             if(epoch==_epoch)ChatStatus=result.LengthLimited?"已达到单次回复上限，未自动续写。":trimmed?"回复完成；较早对话未发送。":"回复完成。";
         }
@@ -129,6 +131,7 @@ internal sealed class Controller : IDisposable
         catch(Exception ex) when(OperationErrors.Expected(ex)){if(epoch==_epoch)ChatStatus=OperationErrors.Message(ex);}
         finally
         {
+            paint.Stop();text=pending.Snapshot();
             try
             {
                 if(Store.HasSession(response.SessionId) && (epoch==_epoch || request.IsCancellationRequested))
