@@ -1,4 +1,4 @@
-# Forme · 陪伴小屋
+﻿# Forme · 陪伴小屋
 
 Windows 上的 3D 桌面伙伴与陪伴小屋。可以和伙伴互动、在小屋中专注和休息、记录心情，或使用自己配置的 AI 服务聊天。
 
@@ -34,7 +34,7 @@ Windows 上的 3D 桌面伙伴与陪伴小屋。可以和伙伴互动、在小�
 
 导入只替换文件明确包含的类别；导入前保存一个恢复备份。删除会处理应用管理备份，但无法删除你保存在其他位置的导出文件或服务商收到的数据。
 
-首版导入限制为 32MB，较大的导出可以保存，但暂不能直接导回。
+导入和导出共用 512MB、100万条记录上限，逐记录处理；导入前备份，可在设置中恢复上次导入前的数据。
 
 ## 开发
 
@@ -43,16 +43,21 @@ Windows 上的 3D 桌面伙伴与陪伴小屋。可以和伙伴互动、在小�
 使用 .NET SDK 10.0.401；可安装到项目 `.tools/dotnet`，或使用匹配的系统 SDK。SDK 校验信息保存在本次工作区 `.tools/sdk-download.json`；开发工具和测试输出不提交。
 
 ```powershell
-# 构建、自动化核心检查和界面冒烟检查
+# 构建、标准测试及覆盖率报告
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Test
+
+# 在交互式Windows桌面执行WPF冒烟检查
+powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Smoke
 
 # 生成自包含程序及安装包
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Package
 
-# 三种状态的资源采样；每种默认 10 分钟，使用隔离数据
+# 资源采样：默认预热2分钟、采样10分钟；正式比较需三种状态各自独立进程
 .tools/dotnet/dotnet.exe src/Forme.App/bin/Release/net10.0-windows/Forme.dll --probe
 ```
 
 检查数据与截图在 `artifacts`，与正式个人数据隔离。自动化检查不向真实 AI 服务发送请求。不要将私人的数据库、密钥或导出文件放入仓库。
 
 运行结构：WPF 展示与 Windows 集成、独立本地活动逻辑、SQLite 存储、独立流式 AI 接口。3D 几何由代码生成并复用，不加载外部模型，不使用常驻后端。
+
+标准测试可直接运行 dotnet test，按 TestCategory 筛选；TRX 和覆盖率在 artifacts/test-results。Windows CI 执行相同构建、测试、打包和安装包自检，界面与GPU/混合DPI检查在本机交互式桌面执行。审核整改进度见 [整改实施记录](docs/审核意见与下一步计划/整改实施记录.md)。

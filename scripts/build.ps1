@@ -1,6 +1,7 @@
-﻿param([switch]$Package, [switch]$Test)
+﻿param([switch]$Package, [switch]$Test, [switch]$Smoke, [string]$PublishDirectory = 'artifacts/publish')
 $ErrorActionPreference = 'Stop'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+$env:TESTINGPLATFORM_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
 $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
 $formeRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -14,23 +15,34 @@ function Invoke-FormeDotnet {
 Invoke-FormeDotnet restore src/Forme.App/Forme.App.csproj --locked-mode
 Invoke-FormeDotnet build src/Forme.App/Forme.App.csproj -c Release --no-restore --nologo
 if ($Test) {
-    Invoke-FormeDotnet run --project tests/Forme.Tests/Forme.Tests.csproj -c Release
+    Invoke-FormeDotnet restore tests/Forme.Tests/Forme.Tests.csproj --locked-mode
+    Invoke-FormeDotnet test tests/Forme.Tests/Forme.Tests.csproj -c Release --no-restore --logger 'trx;LogFileName=core.trx' --collect 'XPlat Code Coverage' --results-directory artifacts/test-results
+}
+if ($Smoke) {
     Invoke-FormeDotnet src/Forme.App/bin/Release/net10.0-windows/Forme.dll --smoke
 }
 if ($Package) {
-    $formePublish = Join-Path $formeRoot 'artifacts/publish'
+    $formePublish = [IO.Path]::GetFullPath((Join-Path $formeRoot $PublishDirectory))
+    $formeArtifacts = [IO.Path]::GetFullPath((Join-Path $formeRoot 'artifacts')) + [IO.Path]::DirectorySeparatorChar
+    if (-not $formePublish.StartsWith($formeArtifacts, [StringComparison]::OrdinalIgnoreCase)) { throw 'Publish directory must be inside artifacts' }
     if (Test-Path -LiteralPath $formePublish) {
         $formeResolved = [IO.Path]::GetFullPath($formePublish)
-        if ($formeResolved -ne (Join-Path $formeRoot 'artifacts/publish')) { throw 'Unexpected publish directory' }
+        if (-not $formeResolved.StartsWith($formeArtifacts, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected publish directory' }
+        $formeExe = Join-Path $formeResolved 'Forme.exe'
+        if (Test-Path -LiteralPath $formeExe) {
+            try { $formeCheck = [IO.File]::Open($formeExe, 'Open', 'ReadWrite', 'None'); $formeCheck.Dispose() }
+            catch { throw 'This output is running or locked. Use -PublishDirectory artifacts/new-build.' }
+        }
         Remove-Item -LiteralPath $formeResolved -Recurse -Force
     }
-    Invoke-FormeDotnet publish src/Forme.App/Forme.App.csproj -c Release -r win-x64 --self-contained true -p:DebugType=None -o $formePublish
+    Invoke-FormeDotnet publish src/Forme.App/Forme.App.csproj -c Release -r win-x64 --self-contained true --no-restore '-p:DebugType=None' -o $formePublish
     Copy-Item -LiteralPath 'docs/使用说明.md' -Destination (Join-Path $formePublish 'README.md')
     Copy-Item -LiteralPath 'docs/隐私说明.md' -Destination $formePublish
     Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md' -Destination $formePublish
     Copy-Item -LiteralPath 'licenses' -Destination $formePublish -Recurse
     Compress-Archive -Path (Join-Path $formePublish '*') -DestinationPath 'artifacts/payload.zip' -Force
-    Invoke-FormeDotnet build src/Forme.Setup/Forme.Setup.csproj -c Release --nologo
+    Invoke-FormeDotnet restore src/Forme.Setup/Forme.Setup.csproj --locked-mode
+    Invoke-FormeDotnet build src/Forme.Setup/Forme.Setup.csproj -c Release --no-restore --nologo
     Copy-Item -LiteralPath 'src/Forme.Setup/bin/Release/net48/Forme-Setup.exe' -Destination 'artifacts/Forme-Setup-0.1.0.exe' -Force
     $formeInstaller = Start-Process -FilePath (Join-Path $formeRoot 'artifacts/Forme-Setup-0.1.0.exe') -ArgumentList '--self-test' -WindowStyle Hidden -PassThru -Wait
     if ($formeInstaller.ExitCode -ne 0) { throw 'Installer payload verification failed' }
