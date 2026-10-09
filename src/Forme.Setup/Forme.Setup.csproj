@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType><TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms><ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable><AssemblyName>Forme-Setup</AssemblyName>
+    <ApplicationManifest>../Forme.App/app.manifest</ApplicationManifest>
+    <ApplicationIcon>../Forme.App/Assets/forme.ico</ApplicationIcon>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.IO.Compression"/><Reference Include="System.IO.Compression.FileSystem"/>
+    <Reference Include="Microsoft.CSharp"/>
+    <EmbeddedResource Include="../../artifacts/payload.zip" LogicalName="Forme.Payload" />
+    <EmbeddedResource Include="uninstall.ps1" LogicalName="Forme.Uninstall" />
+  </ItemGroup>
+</Project>
