@@ -3,23 +3,59 @@ using Microsoft.Data.Sqlite;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-int checks=0;
-void Check(bool condition,string name){if(!condition)throw new Exception("FAIL: "+name);Console.WriteLine("PASS "+name);checks++;}
-void Throws(Action action,string name){try{action();}catch(Exception){Check(true,name);return;}throw new Exception("FAIL: expected rejection: "+name);}
-async Task ThrowsAsync(Func<Task> action,string name){try{await action();}catch(Exception){Check(true,name);return;}throw new Exception("FAIL: expected rejection: "+name);}
-string testRoot=Path.GetFullPath(Path.Combine("artifacts","test-data",Guid.NewGuid().ToString("N")));Directory.CreateDirectory(testRoot);
-try
+[assembly: DoNotParallelize]
+[TestClass]
+public sealed class CoreTests
 {
+    private readonly Preferences p=new();
+    private readonly string testRoot=Path.GetFullPath(Path.Combine("artifacts","test-data",Guid.NewGuid().ToString("N")));
+    public CoreTests(){Directory.CreateDirectory(testRoot);}
+    private static void Check(bool condition,string name){Assert.IsTrue(condition,name);Console.WriteLine("PASS "+name);}
+    private static void Throws(Action action,string name){try{action();}catch(Exception error) when(OperationErrors.Expected(error)){Check(true,name);return;}Assert.Fail("Expected rejection: "+name);}
+    private static async Task ThrowsAsync(Func<Task> action,string name){try{await action();}catch(Exception error) when(OperationErrors.Expected(error)){Check(true,name);return;}Assert.Fail("Expected rejection: "+name);}
+    [TestMethod, TestCategory("Privacy")]
+    public void PrivacySafeDiagnostics()
+    {
     Check(OperationErrors.Expected(new IOException())&&!OperationErrors.Expected(new NullReferenceException())&&!OperationErrors.Expected(new AiConfigurationRecoveryException()),"known failures are separated from fatal defects");
     string diagnostic=OperationErrors.Diagnostic(new Exception("secret-token private-chat C:\\private\\file"));
     Check(!diagnostic.Contains("secret-token")&&!diagnostic.Contains("private-chat")&&!diagnostic.Contains("private\\\\file"),"diagnostics exclude messages and private paths");
-    MigrationChecks.Run(testRoot,Check,Throws);
-    AiConfigurationChecks.Run(testRoot,Check,Throws);
-    TransferChecks.Run(testRoot,Check,Throws);
-    TransferChecks.Large(testRoot,Check);
-    await TransferChecks.Concurrent(testRoot,Check);
-    await StreamingChecks.Run(Check,ThrowsAsync);
+
+    }
+    [TestMethod, TestCategory("Migration")]
+    public void DatabaseMigrationsAndRollback()
+    {
+        MigrationChecks.Run(testRoot,Check,Throws);
+    }
+    [TestMethod, TestCategory("Privacy")]
+    public void AiConfigurationFailureRecovery()
+    {
+        AiConfigurationChecks.Run(testRoot,Check,Throws);
+    }
+    [TestMethod, TestCategory("Import")]
+    public void StreamingImportValidationAndRecovery()
+    {
+        TransferChecks.Run(testRoot,Check,Throws);
+    }
+    [TestMethod, TestCategory("LargeFile")]
+    public void LargeExportImportRoundTrip()
+    {
+        TransferChecks.Large(testRoot,Check);
+    }
+    [TestMethod, TestCategory("Concurrency")]
+    public async Task ExportDuringConcurrentWrites()
+    {
+        await TransferChecks.Concurrent(testRoot,Check);
+    }
+    [TestMethod, TestCategory("AI")]
+    public async Task FragmentedStreamingProtocol()
+    {
+        await StreamingChecks.Run(Check,ThrowsAsync);
+    }
+    [TestMethod, TestCategory("Motion")]
+    public void ModelIndependentMotion()
+    {
     var motion=new PetMotion();
     var breathing=motion.Sample(1);
     Check(breathing.ScaleY>1&&breathing.Expression=="idle","idle breathing is local normalized pose");
@@ -51,6 +87,11 @@ try
         }
     }
     Check(true,"all action samples stay inside motion bounds");
+
+    }
+    [TestMethod, TestCategory("Storage")]
+    public void FocusStorageImportAndDelete()
+    {
     double time=100;var clock=new FocusClock(()=>time);clock.Start("focus",5,"test");time+=31;
     Check(clock.Elapsed==31,"monotonic elapsed");clock.Pause();time+=400;Check(clock.Elapsed==31,"pause excludes absence");clock.Resume();time+=20;Check(clock.Elapsed==51,"resume uses fresh anchor");
     var snapshot=clock.Snapshot()!;var restored=new FocusClock(()=>time);restored.Restore(snapshot);time+=800;Check(!restored.Running&&restored.Elapsed==51,"crash recovery stays paused");clock.Pause();clock.Resume();time+=400;Check(clock.Complete&&clock.Elapsed==300,"completion clamps elapsed");Check(clock.Finish().Result=="completed","completed status");Throws(()=>clock.Start("focus",0,""),"invalid duration rejected");
@@ -72,6 +113,13 @@ try
     Throws(()=>store.Import(new(){Moods=[mood,mood]}),"duplicate import IDs rejected");store.DeleteMood("other");Check(!File.Exists(store.BackupPath),"deletion removes recovery backup");
     store.Import(export);Check(store.Moods().Single().Id=="mood-test"&&store.Messages(session.Id).Count==2&&store.Focus().Count==1,"full import restores all categories transactionally");Check(store.LoadPreferences().Endpoint=="https://api.deepseek.com"&&store.LoadPreferences().PetName=="测试伙伴","room import preserves connection preferences");Check(store.Messages(session.Id).Last().Status=="stopped","imported interrupted stream is not marked complete");
     store.DeleteSession(session.Id);store.SaveMessage(new("late",session.Id,"assistant","late content","complete",DateTimeOffset.Now));Check(store.Messages(session.Id).Count==0,"late callback cannot recreate deleted session");
+    store.ResetAll();Check(store.Moods().Count==0&&store.Focus().Count==0&&store.Sessions().Count==0&&store.Growth().Count==0,"reset all categories");
+    string future=Path.Combine(testRoot,"future");Directory.CreateDirectory(future);using(var db=new SqliteConnection("Data Source="+Path.Combine(future,"forme.db"))){db.Open();using var c=db.CreateCommand();c.CommandText="PRAGMA user_version=99";c.ExecuteNonQuery();}Throws(()=>{using var rejected=new Store(future);},"newer database version refused safely");
+
+    }
+    [TestMethod, TestCategory("AI")]
+    public void ContextBudgetAndPrivacy()
+    {
     var p=new Preferences();var history=new List<ChatMessage>();
     for(int i=0;i<30;i++){history.Add(new("u"+i,"s","user",new string('中',80),"complete",DateTimeOffset.Now));history.Add(new("a"+i,"s","assistant",new string('答',80),"complete",DateTimeOffset.Now));}
     var turns=AiClient.BuildContext(p,history,"你好",out bool trimmed);Check(trimmed&&turns.Sum(AiClient.Estimate)<=4096,"bounded context trims oldest exchanges");Check(turns[0].Role=="system"&&turns[^1].Content=="你好","current message retained");Check(!turns.Any(x=>x.Content.Contains("private mood")||x.Content.Contains("private task")),"mood and focus not implicitly shared");
@@ -79,6 +127,11 @@ try
     var retryHistory=new List<ChatMessage>{new("u","s","user","question","complete",DateTimeOffset.Now),new("a","s","assistant","bad partial","error",DateTimeOffset.Now),new("b","s","assistant","good retry","complete",DateTimeOffset.Now)};
     turns=AiClient.BuildContext(p,retryHistory,"next",out _);Check(turns.Any(x=>x.Content=="good retry")&&!turns.Any(x=>x.Content=="bad partial"),"successful retry context excludes failed partial");
     Throws(()=>AiClient.ValidateEndpoint("http://example.com"),"remote plaintext blocked");Throws(()=>AiClient.ValidateEndpoint("https://key:secret@example.com"),"URL credentials blocked");Throws(()=>AiClient.ValidateEndpoint("https://example.com?key=abc"),"query credentials blocked");Check(AiClient.ValidateEndpoint("http://127.0.0.1:1234/v1").IsLoopback,"local HTTP allowed");
+
+    }
+    [TestMethod, TestCategory("AI")]
+    public async Task StreamingOutputAndRequestBudget()
+    {
     string stream="data: {\"choices\":[{\"delta\":{\"content\":\"你好\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"呀\"},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n";
     var handler=new FakeHandler((_,_)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(stream,Encoding.UTF8,"text/event-stream")}));
     using(var ai=new AiClient(handler))
@@ -87,26 +140,52 @@ try
         Check(result.Content=="你好呀"&&progress==result.Content&&result.LengthLimited,"SSE and output-limit feedback");Check(handler.Calls==1,"one action one network request");
         using var payload=JsonDocument.Parse(handler.Body!);Check(payload.RootElement.GetProperty("max_tokens").GetInt32()==512&&payload.RootElement.GetProperty("thinking").GetProperty("type").GetString()=="disabled","output limit and non-thinking mode");Check(!handler.Body!.Contains("fake-key"),"key is not in request body");
     }
+
+    }
+    [TestMethod, TestCategory("AI")]
+    public async Task RejectRedirectWithoutReplay()
+    {
     var redirect=new FakeHandler((_,_)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.Redirect)));
     using(var ai=new AiClient(redirect)){await ThrowsAsync(()=>ai.SendAsync(p,"fake",[new("user","hello")],_=>{},CancellationToken.None),"redirect rejected");Check(redirect.Calls==1,"no redirect replay");}
+
+    }
+    [TestMethod, TestCategory("AI")]
+    public async Task FirstContentTimeoutWithoutRetry()
+    {
     var slow=new FakeHandler(async(_,token)=>{await Task.Delay(5000,token);return new(HttpStatusCode.OK);});
     using(var ai=new AiClient(slow,new(TimeSpan.FromMilliseconds(80),TimeSpan.FromMilliseconds(80),TimeSpan.FromMilliseconds(300)))){await ThrowsAsync(()=>ai.SendAsync(p,"fake",[new("user","hello")],_=>{},CancellationToken.None),"first content timeout");Check(slow.Calls==1,"timeout never retries");}
+
+    }
+    [TestMethod, TestCategory("AI")]
+    public async Task IdleTimeoutRetainsPartial()
+    {
     var stallStream=new StallStream(Encoding.UTF8.GetBytes("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"));
     var stallHandler=new FakeHandler((_,_)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StreamContent(stallStream)}));
     using(var ai=new AiClient(stallHandler,new(TimeSpan.FromMilliseconds(200),TimeSpan.FromMilliseconds(80),TimeSpan.FromMilliseconds(400)))){string partial="";await ThrowsAsync(()=>ai.SendAsync(p,"fake",[new("user","hello")],s=>partial+=s,CancellationToken.None),"streaming idle timeout");Check(partial=="partial"&&stallHandler.Calls==1,"partial content preserved without retries");}
+
+    }
+    [TestMethod, TestCategory("AI")]
+    public async Task MalformedStreamingFails()
+    {
     var invalid=new FakeHandler((_,_)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent("data: not-json\n\n")}));
     using(var ai=new AiClient(invalid)){await ThrowsAsync(()=>ai.SendAsync(p,"fake",[new("user","hello")],_=>{},CancellationToken.None),"invalid SSE fails visibly");Check(invalid.Calls==1,"invalid protocol is not retried");}
+
+    }
+    [TestMethod, TestCategory("AI")]
+    public async Task AuthenticationFailureWithoutRetry()
+    {
     var unauthorized=new FakeHandler((_,_)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)));
     using(var ai=new AiClient(unauthorized)){await ThrowsAsync(()=>ai.SendAsync(p,"fake",[new("user","hello")],_=>{},CancellationToken.None),"authentication failure");Check(unauthorized.Calls==1,"auth failure is not retried");}
+
+    }
+    [TestMethod, TestCategory("AI")]
+    public async Task ConcurrentRequestGateAndCancel()
+    {
     var concurrent=new FakeHandler(async(_,token)=>{await Task.Delay(5000,token);return new(HttpStatusCode.OK);});
     using(var ai=new AiClient(concurrent)){using var cancel=new CancellationTokenSource();var first=ai.SendAsync(p,"fake",[new("user","first")],_=>{},cancel.Token);await Task.Delay(20);await ThrowsAsync(()=>ai.SendAsync(p,"fake",[new("user","second")],_=>{},CancellationToken.None),"concurrent request blocked");cancel.Cancel();await ThrowsAsync(()=>first,"cancellation completes request");Check(concurrent.Calls==1,"shared gate avoids duplicate requests");}
-    store.ResetAll();Check(store.Moods().Count==0&&store.Focus().Count==0&&store.Sessions().Count==0&&store.Growth().Count==0,"reset all categories");
-    string future=Path.Combine(testRoot,"future");Directory.CreateDirectory(future);using(var db=new SqliteConnection("Data Source="+Path.Combine(future,"forme.db"))){db.Open();using var c=db.CreateCommand();c.CommandText="PRAGMA user_version=99";c.ExecuteNonQuery();}Throws(()=>{using var rejected=new Store(future);},"newer database version refused safely");
-    Console.WriteLine($"\n{checks} checks passed. Test data: {testRoot}");
-    Directory.CreateDirectory("artifacts");File.WriteAllText("artifacts/core-tests.txt",$"{checks} checks passed at {DateTimeOffset.Now:O}\n");
-}
-catch(Exception ex){Console.Error.WriteLine(ex);Environment.ExitCode=1;}
 
+    }
+}
 sealed class FakeHandler(Func<HttpRequestMessage,CancellationToken,Task<HttpResponseMessage>> reply):HttpMessageHandler
 {
     public int Calls {get;private set;}public string? Body {get;private set;}
@@ -125,3 +204,4 @@ sealed class StallStream(byte[] initial):Stream
     }
     public override void Flush(){}public override long Seek(long offset,SeekOrigin origin)=>throw new NotSupportedException();public override void SetLength(long value)=>throw new NotSupportedException();public override void Write(byte[] buffer,int offset,int count)=>throw new NotSupportedException();
 }
+

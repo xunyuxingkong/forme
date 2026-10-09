@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/Forme.Core/Forme.Core.csproj" />
+  <Project Path="src/Forme.App/Forme.App.csproj" />
+  <Project Path="tests/Forme.Tests/Forme.Tests.csproj" />
+</Solution>
