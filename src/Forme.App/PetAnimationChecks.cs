@@ -80,9 +80,14 @@ internal static class PetAnimationChecks
             foreach(var state in new[]{"idle","focus","thinking","happy"})foreach(bool blink in new[]{false,true})
             {
                 sprout.Apply(PetPose.Neutral(state) with{Blink=blink});
-                var mesh=(Model3DGroup)sprout.Root.Children[0];
-                if(!mesh.Children.All(sprout.Contains))throw new Exception("Expression geometry lost picking ownership");
+                foreach(var mesh in sprout.Root.Children.OfType<Model3DGroup>())
+                    if(!mesh.Children.All(sprout.Contains))throw new Exception("Expression geometry lost picking ownership");
             }
+            using var other=new SproutPetModel();
+            if(ReferenceEquals(sprout.Root,other.Root)||!ReferenceEquals(sprout.Root.Children[0],other.Root.Children[0]))throw new Exception("Mutable roots must be independent and frozen bodies shared");
+            var states=new[]{"idle","focus","thinking","happy","rest","quiet"};
+            for(int i=0;i<10000;i++)sprout.Apply(PetPose.Neutral(states[i%6]) with{Blink=(i/6)%2==0});
+            if(sprout.ExpressionCount>7||sprout.Root.Children.Count!=2||!ReferenceEquals(geometry,sprout.Root.Children[0]))throw new Exception("10000 expression swaps grew geometry cache or duplicated body");
         }
         finally{pet.Release();window.Close();}
     }
