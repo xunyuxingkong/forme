@@ -16,7 +16,7 @@ public sealed partial class Store : IDisposable
     {
         DirectoryPath = Path.GetFullPath(directory);
         if(!readOnly)Directory.CreateDirectory(DirectoryPath);
-        _db = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(DirectoryPath, "forme.db"), Pooling = false, Mode=readOnly?SqliteOpenMode.ReadOnly:SqliteOpenMode.ReadWriteCreate }.ToString());
+        _db = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(DirectoryPath, "forme.db"), Pooling = false, DefaultTimeout=3, Mode=readOnly?SqliteOpenMode.ReadOnly:SqliteOpenMode.ReadWriteCreate }.ToString());
         try
         {
             _db.Open();

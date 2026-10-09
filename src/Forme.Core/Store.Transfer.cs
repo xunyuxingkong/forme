@@ -10,6 +10,18 @@ public sealed partial class Store
     {using var cmd=Command(sql);using var reader=cmd.ExecuteReader();while(reader.Read())yield return map(reader);}
     public void ExportFile(string path,bool chat,bool moods,bool focus,bool room,CancellationToken cancellation=default)
     {
+        cancellation.ThrowIfCancellationRequested();
+        using var stage=PreparedImport.Empty();
+        using(var destination=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=stage.DatabasePath,Pooling=false,DefaultTimeout=3}.ToString()))
+        {
+            destination.Open();_db.BackupDatabase(destination);
+        }
+        cancellation.ThrowIfCancellationRequested();
+        using var snapshot=new Store(stage.DirectoryPath,true);
+        snapshot.WriteExport(path,chat,moods,focus,room,cancellation);
+    }
+    private void WriteExport(string path,bool chat,bool moods,bool focus,bool room,CancellationToken cancellation)
+    {
         if(!(chat||moods||focus||room))throw new InvalidDataException("至少选择一类数据。");
         string temp=path+"."+Guid.NewGuid().ToString("N")+".tmp";
         try

@@ -46,6 +46,31 @@ internal static class TransferChecks
         check(peak<100L*1024*1024,"large-file managed heap stays below 100MB during parse and import");
         File.WriteAllText(Path.Combine(root,"large-transfer-memory.txt"),$"Observed managed heap peak: {peak/1048576d:F1} MB\n");
     }
+    public static async Task Concurrent(string root,Action<bool,string> check)
+    {
+        string dir=Path.Combine(root,"concurrent"),path=Path.Combine(root,"concurrent.json");
+        using(var initial=new Store(dir))
+        {
+            var session=initial.NewSession("https://api.deepseek.com");
+            for(int i=0;i<2000;i++)initial.SaveMessage(new("row-"+i,session.Id,"assistant",new string('x',4000),"complete",DateTimeOffset.Now));
+        }
+        using var stop=new CancellationTokenSource();int writes=0;
+        var writer=Task.Run(()=>
+        {
+            using var store=new Store(dir);var session=store.Sessions().Single();
+            while(!stop.IsCancellationRequested)
+            {
+                int n=Interlocked.Increment(ref writes);store.SaveMessage(new("new-"+n,session.Id,"user","concurrent","complete",DateTimeOffset.Now));Thread.Sleep(1);
+            }
+        });
+        try
+        {
+            await Task.Run(()=>{using var source=new Store(dir,true);source.ExportFile(path,true,false,false,false);});
+            using var plan=Store.PrepareImport(path);check(plan.Sessions==1&&plan.Messages>=2000,"snapshot remains consistent during concurrent writes");
+        }
+        finally{stop.Cancel();await writer;}
+        check(writes>0,"normal writes succeed while export runs");
+    }
     private static class InterlockedExtensions
     {
         public static void Max(ref long target,long value){long old;do{old=Volatile.Read(ref target);if(value<=old)return;}while(Interlocked.CompareExchange(ref target,value,old)!=old);}

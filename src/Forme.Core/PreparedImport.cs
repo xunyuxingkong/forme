@@ -11,6 +11,8 @@ public sealed class PreparedImport : IDisposable
     private readonly FileStream _lease;
     private static string TemporaryRoot=>Path.Combine(Path.GetTempPath(),"Forme-transfer");
     internal string DatabasePath=>Path.Combine(_directory,"forme.db");
+    internal string DirectoryPath=>_directory;
+    internal static PreparedImport Empty()=>new(Path.Combine(TemporaryRoot,Guid.NewGuid().ToString("N")));
     private readonly HashSet<string> _categories=new(StringComparer.Ordinal);
     public bool HasChat=>_categories.Contains("Sessions");
     public bool HasMoods=>_categories.Contains("Moods");

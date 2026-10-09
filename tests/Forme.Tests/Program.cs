@@ -18,6 +18,7 @@ try
     AiConfigurationChecks.Run(testRoot,Check,Throws);
     TransferChecks.Run(testRoot,Check,Throws);
     TransferChecks.Large(testRoot,Check);
+    await TransferChecks.Concurrent(testRoot,Check);
     var motion=new PetMotion();
     var breathing=motion.Sample(1);
     Check(breathing.ScaleY>1&&breathing.Expression=="idle","idle breathing is local normalized pose");
