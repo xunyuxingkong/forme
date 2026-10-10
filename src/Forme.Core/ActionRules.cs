@@ -7,6 +7,10 @@ namespace Forme.Core;
 public sealed record ActionRule(string[] Phrases,CompanionCommand[] Commands);
 public sealed record ActionRules(int Version,ActionRule[] Rules)
 {
+    // Version remains readable by old files; schema and built-in content evolve independently.
+    public int SchemaVersion {get;init;}=1;
+    public int BuiltinRevision {get;init;}
+    public const int CurrentBuiltinRevision=4;
     private static readonly JsonSerializerOptions Json=new(){WriteIndented=true,Encoder=System.Text.Encodings.Web.JavaScriptEncoder.Create(System.Text.Unicode.UnicodeRanges.All),PropertyNamingPolicy=JsonNamingPolicy.CamelCase,PropertyNameCaseInsensitive=true,UnmappedMemberHandling=JsonUnmappedMemberHandling.Disallow,MaxDepth=8};
     public static ActionRules Default()=>new(1,[
         new(["走两步","走几步","散散步"],[new("stroll","walk")]),
@@ -31,15 +35,24 @@ public sealed record ActionRules(int Version,ActionRule[] Rules)
         new(["玩小球","抛个球"],[new("throw",X:0,Z:2.5)]),new(["体验阅读角"],[new("life","reading")]),
         new(["去户外"],[new("scene","outdoor")]),new(["回小屋"],[new("scene","indoor")]),
         new(["打开灯"],[new("light","on")]),new(["关灯"],[new("light","off")])
-    ]);
+    ]) {BuiltinRevision=CurrentBuiltinRevision};
     public string Serialize()=>JsonSerializer.Serialize(this,Json);
+    private static readonly IReadOnlySet<string> LegacyBuiltinFingerprints=new HashSet<string>(StringComparer.Ordinal)
+    {
+        "FA9D342718F31790F6DF32434FE69C63D639917A2D97CEEB9FF534527E77CFA7", // revision 4, frozen for future migrations
+        "0D4C49FCB049754E11AA8D3F6E199C05F0AEC1066ECDABAB3149F468390BD939", // before screen laps
+        "BF8FAA30B641DF90E0C5FEF406CB6E3DB6775910961D418B2C8BAD5A5303C4B4", // before spin aliases and screen laps
+        "B11295EB7C104A021E76D1F155D1C15506987E440C7D2A611AD8B95CA474F300"  // screen laps, before spin aliases
+    };
+    private string ContentFingerprint()=>Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+        JsonSerializer.Serialize(Rules.Select(r=>new{r.Phrases,Commands=r.Commands.Select(c=>new{c.Action,c.Value,c.X,c.Z,c.Rotation,c.Motion})}),new JsonSerializerOptions{Encoder=System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping}))));
     public ActionRules UpgradeDefaults()
     {
-        var current=Default();
-        var previous=current with{Rules=current.Rules.Where(r=>r.Commands.Length!=1||r.Commands[0].Action!="stroll"||r.Commands[0].Value is not ("lap1" or "lap2")).ToArray()};
-        var earlier=previous with{Rules=previous.Rules.Select(r=>r.Commands.Length==1&&r.Commands[0]==new CompanionCommand("dance","spin")?r with{Phrases=["转圈舞"]}:r).ToArray()};
-        var spinPrevious=current with{Rules=current.Rules.Select(r=>r.Commands.Length==1&&r.Commands[0]==new CompanionCommand("dance","spin")?r with{Phrases=["转圈舞"]}:r).ToArray()};
-        return Serialize()==previous.Serialize()||Serialize()==earlier.Serialize()||Serialize()==spinPrevious.Serialize()?current:this;
+        var current=Default();string fingerprint=ContentFingerprint();
+        // Freeze old fingerprints once. Later revisions do not reconstruct historical snapshots.
+        // Metadata alone never authorizes overwriting a user's edited file.
+        if(fingerprint==current.ContentFingerprint())return BuiltinRevision==CurrentBuiltinRevision?this:current;
+        return LegacyBuiltinFingerprints.Contains(fingerprint)?current:this;
     }
     public static ActionRules Parse(string text)
     {
@@ -47,7 +60,7 @@ public sealed record ActionRules(int Version,ActionRule[] Rules)
         ActionRules rules;
         try{rules=JsonSerializer.Deserialize<ActionRules>(text,Json)??throw new JsonException();}
         catch(JsonException){throw new InvalidDataException("动作规则JSON格式无效或包含未知字段。");}
-        if(rules.Version!=1||rules.Rules is null||rules.Rules.Length>40)throw new InvalidDataException("规则版本需为1，最多40条。");
+        if(rules.Version!=1||rules.SchemaVersion!=1||rules.BuiltinRevision<0||rules.BuiltinRevision>CurrentBuiltinRevision||rules.Rules is null||rules.Rules.Length>40)throw new InvalidDataException("规则结构版本需为1，内置修订版本无效或超过40条。");
         var seen=new HashSet<string>();var grants=new Preferences{AllowPetControl=true,AllowSceneControl=true,AllowPlayControl=true,AllowLayoutPreview=true};
         foreach(var rule in rules.Rules)
         {
@@ -60,6 +73,7 @@ public sealed record ActionRules(int Version,ActionRule[] Rules)
     public IReadOnlyList<CompanionCommand>? Match(string input)
     {
         if(input.Length>160)return null;
+        if(IntentResolver.Suppressed(input)&&!Regex.IsMatch(input.Trim(),"^(?:请|你)?(?:别动|不要动)[。！!？?吧]*$",RegexOptions.CultureInvariant))return null;
         var whole=Rules.FirstOrDefault(r=>r.Phrases.Any(p=>Normalize(p)==Normalize(input)));
         if(whole is not null)return whole.Commands;
         if(ScreenLap(Normalize(input)) is {} lap)return [new("stroll",lap)];

@@ -84,7 +84,7 @@ internal static partial class MeshArt
 internal sealed partial class Room3DView
 {
     public string SceneDescription=>$"{(_outdoors?"20m×20m户外":"小屋和花园")}；宠物坐标X={_travel.Position.X:0.0},Z={_travel.Position.Z:0.0}；天气={_c.Preferences.Weather}；灯={_c.Preferences.RoomLamp}；壁炉={_c.Preferences.Fireplace}";
-    private static string InteractionName(string id)=>id switch{"book"=>"小书架","feed"=>"零食碗","sleep"=>"软软的小窝","lamp"=>"落地灯","fireplace"=>"暖暖的壁炉","fish"=>"小鱼缸","pond"=>"池塘与木桥","picnic"=>"野餐毯","rest"=>"花园凉亭","bell"=>"风铃","water"=>"浇水","ball"=>"小球",_=>"互动"};
+    private static string InteractionName(string id)=>TargetCatalog.Find(id)?.Name??(id switch{"lamp"=>"落地灯","fireplace"=>"暖暖的壁炉",_=>"互动"});
     public void PlayAction(PetAction action)
     {
         _activityGeneration++;_animator.Play(action);
@@ -93,15 +93,16 @@ internal sealed partial class Room3DView
     internal string Interact(string id)
     {
         _activityGeneration++;
-        if(!IsLoaded||!IsVisible||!_motionVisible||_c.AnimationSuspended)return "场景未显示，互动未执行";
+        if(!IsLoaded||!IsVisible||!_motionVisible||_c.AnimationSuspended)throw new ActionFailureException(ActionResultCode.SceneUnavailable,"场景未显示，互动未执行。");
         if(id=="lamp"){_c.SavePreferences(_c.Preferences with{RoomLamp=!_c.Preferences.RoomLamp});if(_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),"furniture"))_c.Refresh();return _hint.Text=_c.Preferences.RoomLamp?"灯亮了，小屋暖暖的。":"灯关好了。";}
         if(id=="fireplace"){_c.SavePreferences(_c.Preferences with{Fireplace=!_c.Preferences.Fireplace});if(_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),"furniture"))_c.Refresh();return _hint.Text=_c.Preferences.Fireplace?"壁炉点亮了。":"壁炉熄灭了。";}
-        if(id=="ball"){if(!PlayBall())return "这里无法投球";return "小球正在飞向落点，伙伴随后去捡。";}
-        if(!_outdoors&&CurrentWorld.Items.FirstOrDefault(i=>LivingWorld.Kind(i.Kind).Action==id) is {} furniture){UseFurniture(furniture.Id);return _hint.Text;}
+        if(id=="ball"){if(!PlayBall())throw new ActionFailureException(ActionResultCode.PathBlocked,"这里无法投球。");return "小球正在飞向落点，伙伴随后去捡。";}
+        if(!_outdoors&&CurrentWorld.Items.FirstOrDefault(i=>LivingWorld.Kind(i.Kind).Action==id) is {} furniture){if(!UseFurniture(furniture.Id))throw new ActionFailureException(ActionResultCode.PathBlocked,"目标家具附近没有可达位置。");return _hint.Text;}
         if(_outdoors&&id is "feed" or "book" or "sleep" or "fish")return _hint.Text="回小屋后可以使用这个物件。";
         if(!_outdoors&&id is "pond" or "picnic" or "rest" or "bell")return _hint.Text="去户外后可以使用这个物件。";
-        var target=id switch{"book"=>new GroundPoint(3.15,.65),"feed"=>new(-2.0,1.6),"sleep"=>new(2.35,1.3),"fish"=>new(0,-1),"pond"=>new(-3.7,-2.8),"picnic"=>new(3.0,4.5),"rest"=>new(5.5,-3.0),"bell"=>new(.65,-6.5),"water"=>_outdoors?new(-2.4,5):new(1.3,3.5),_=>_travel.Position};
-        _pendingInteraction=null;if(!_animator.MoveTo(target))return _hint.Text="伙伴走不到这里，请先点击附近的空地。";
+        var definition=TargetCatalog.Find(id)??throw new ActionFailureException(ActionResultCode.TargetUnavailable,"目标不存在。");
+        var target=TargetCatalog.Resolve(definition,CurrentWorld,_travel,_outdoors?SceneKind.Outdoor:SceneKind.Indoor)??throw new ActionFailureException(ActionResultCode.PathBlocked,"目标附近没有可达位置。");
+        _pendingInteraction=null;if(!_animator.MoveTo(target))throw new ActionFailureException(ActionResultCode.PathBlocked,"伙伴走不到这里，请先点击附近的空地。");
         _pendingInteraction=id;if(!_travel.Moving){_pendingInteraction=null;CompleteInteraction(id);}
         return _hint.Text="伙伴正在走向"+InteractionName(id);
     }

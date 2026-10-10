@@ -16,6 +16,10 @@ internal sealed partial class Controller : IDisposable
     public event Action<string>? Finished;
     public ChatSession? Session { get; private set; }
     public Func<CompanionCommand,string>? CommandHandler {get;set;}
+    public Func<CompanionCommand,ActionResult>? ActionHandler {get;set;}
+    public Func<ActionPlan,ActionResult?>? ActionPreflight {get;set;}
+    public Func<SceneKind>? CurrentScene {get;set;}
+    public IReadOnlyList<ActionResult> ActionResults {get;private set;} = [];
     public Func<CompanionCommand,CancellationToken,Task<bool>>? CommandWaiter {get;set;}
     public Action? StopCommands {get;set;}
     public Func<string>? SceneContext {get;set;}
@@ -113,7 +117,10 @@ internal sealed partial class Controller : IDisposable
             var user=history.LastOrDefault(x=>x.Role=="user" && x.Id==retryId)??throw new OperationFailureException("找不到重试消息。");
             input=user.Content;history=history.TakeWhile(x=>x.Id!=retryId).ToList();
         }
-        var turns=AiClient.BuildContext(Preferences,history,input,out bool trimmed,Preferences.MemoryEnabled?Store.Memories():null,Preferences.MemoryEnabled?Store.Note(Session.Id):null,CompanionCommands.HasControl(Preferences)?SceneContext?.Invoke():null);
+        bool intentRequest=IntentResolver.LooksLikeRequest(input,Preferences.PetName);
+        bool trimmed=false;
+        var turns=intentRequest?AiIntentProtocol.BuildContext(Preferences,input):AiClient.BuildContext(Preferences,history,input,out trimmed,Preferences.MemoryEnabled?Store.Memories():null,Preferences.MemoryEnabled?Store.Note(Session.Id):null);
+        ActionResults=[];
         var userMessage=new ChatMessage(retryId??Guid.NewGuid().ToString("N"),Session.Id,"user",input,"complete",DateTimeOffset.Now);
         var response=new ChatMessage(Guid.NewGuid().ToString("N"),Session.Id,"assistant","","streaming",DateTimeOffset.Now.AddTicks(1));
         Store.BeginChatTurn(retryId is null?userMessage:null,response);if(retryId is null)Draft="";LiveReply="";ChatStatus=trimmed?"上下文已按预算裁剪。正在回应…":"正在回应…";
@@ -127,7 +134,7 @@ internal sealed partial class Controller : IDisposable
         {
             if(epoch!=_epoch)return;
             if(pending.ReadChanges() is not {} partial)return;
-            text=partial;LiveReply=CompanionCommands.VisibleText(partial);
+            text=partial;LiveReply=intentRequest?"正在理解动作请求…":ConversationText.Visible(partial);
             try{if(DateTimeOffset.UtcNow-lastSave>TimeSpan.FromSeconds(3)&&partial.Length-savedLength>=64){Store.SaveMessage(response with{Content=LiveReply});lastSave=DateTimeOffset.UtcNow;savedLength=partial.Length;}}
             catch(Exception ex) when(OperationErrors.Expected(ex)){request.Cancel();ChatStatus="本地保存失败，已停止请求："+OperationErrors.Message(ex);}
             Tick?.Invoke();
@@ -143,13 +150,18 @@ internal sealed partial class Controller : IDisposable
         catch(Exception ex) when(OperationErrors.Expected(ex)){if(epoch==_epoch)ChatStatus=OperationErrors.Message(ex);}
         finally
         {
-            paint.Stop();text=pending.Snapshot();var parsed=CompanionCommands.Parse(text,p);text=parsed.Text;
-            if(status=="complete"&&epoch==_epoch&&!limited&&!request.IsCancellationRequested)
+            paint.Stop();text=intentRequest?"":ConversationText.Visible(pending.Snapshot());
+            if(intentRequest&&status=="complete"&&epoch==_epoch&&!limited&&!request.IsCancellationRequested)
             {
-                var reports=await ExecuteCommands(parsed.Commands,epoch,request.Token,text);
-                if(parsed.Rejected>0)reports.Add("已忽略无效或未授权动作");
-                if(reports.Count>0){string report=string.Join("；",reports);ChatStatus+=" "+report;text+="\n\n"+CompanionCommands.ReportMarker+" "+report;}
+                try
+                {
+                    var intents=AiIntentProtocol.Parse(pending.Snapshot(),input);
+                    ActionResults=intents.Count==0?[ActionResult.Failure(ActionResultCode.NotRecognized,"没有识别到明确动作，没有执行；请换一种说法。")]:await ExecuteIntents(intents,request.Token);
+                }
+                catch(ActionFailureException ex){ActionResults=[ActionResult.Failure(ex.Code,ex.Message)];}
+                text=ResultText(ActionResults);ChatStatus=ActionResults.LastOrDefault()?.UserMessage??text;
             }
+            else if(intentRequest){text=ChatStatus;ActionResults=[ActionResult.Failure(request.IsCancellationRequested?ActionResultCode.Cancelled:ActionResultCode.Failed,text)];}
             try
             {
                 if(Store.HasSession(response.SessionId) && (epoch==_epoch || request.IsCancellationRequested))

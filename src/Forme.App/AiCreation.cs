@@ -50,6 +50,7 @@ internal sealed partial class MainWindow
         if(_page is "boat" or "hide")Navigate("living");
         RevealWorld();
         _room.SwitchScene(false);
+        if(command.Action=="toy"){if(!_room.SelectToy(command.Value!)||!_room.PlaySelectedToy())throw new ActionFailureException(ActionResultCode.TargetUnavailable,"玩具尚未拥有或没有可达落点。");return "玩具已抛出，伙伴会去捡。";}
         if(command.Action=="throw"){if(!_room.ThrowToy(new(command.X!.Value,command.Z!.Value)))throw new OperationFailureException("落点被遮挡，抛球未执行");return "小球已抛出，伙伴会去捡";}
         var life=_room.AvailableLife().FirstOrDefault(e=>e.Id==command.Value)??throw new OperationFailureException("当前摆放或天气不满足该事件条件");
         if(!_room.UseFurniture(life.Target,life.Action))throw new OperationFailureException("事件物件无法到达");
@@ -61,32 +62,46 @@ internal sealed partial class MainWindow
 
 internal sealed partial class Room3DView
 {
+    internal ActionResult? PreflightActions(ActionPlan plan)
+    {
+        if(_released||_c.AnimationSuspended)return ActionResult.Failure(ActionResultCode.SceneUnavailable,"场景已关闭或暂停，整组未执行。");
+        if((_editing||_boatOpen)&&plan.Steps.Any(x=>x.Action is "go" or "stroll" or "interact"))return ActionResult.Failure(ActionResultCode.SceneUnavailable,"请先退出家具预览或纸船玩法，整组未执行。");
+        var draft=CurrentWorld.Copy();
+        foreach(var step in plan.Steps)
+        {
+            if(step.Action=="toy"&&!OwnedToys.Any(x=>x.Id==step.Value))return ActionResult.Failure(ActionResultCode.TargetUnavailable,"玩具尚未拥有，整组未执行。",step);
+            if(step.Action=="hide"&&draft.Items.Count<2)return ActionResult.Failure(ActionResultCode.TargetUnavailable,"至少摆两件家具才能藏物，整组未执行。",step);
+            if(step.Action=="life"&&!AvailableLife().Any(x=>x.Id==step.Value))return ActionResult.Failure(ActionResultCode.TargetUnavailable,"当前环境不满足生活事件条件，整组未执行。",step);
+            if(step.Action=="boat-name"&&LastBoat is null)return ActionResult.Failure(ActionResultCode.TargetUnavailable,"请先完成纸船旅行，整组未执行。",step);
+            if(step.Action=="boat"&&step.Value is "pause" or "resume"&&!BoatRunning)return ActionResult.Failure(ActionResultCode.TargetUnavailable,"没有正在进行的纸船旅行，整组未执行。",step);
+            if(step.Action=="furniture")
+            {
+                int index=draft.Items.FindIndex(x=>x.Id==step.Value);if(index<0)return ActionResult.Failure(ActionResultCode.TargetUnavailable,"家具编号不存在，整组未执行。",step);
+                draft.Items[index]=draft.Items[index] with{X=step.X!.Value,Z=step.Z!.Value,Rotation=step.Rotation??draft.Items[index].Rotation};
+                if(draft.PlacementProblem() is {} issue)return ActionResult.Failure(ActionResultCode.PathBlocked,issue+"，整组未执行。",step);
+            }
+        }
+        return TargetNavigation.Preflight(plan,CurrentWorld,_outdoors?SceneKind.Outdoor:SceneKind.Indoor,_travel.Position);
+    }
     internal string MoveNaturally(CompanionCommand command)
     {
         if(_editing||_boatOpen)throw new OperationFailureException("请先退出家具预览或纸船玩法，再让伙伴走动");
         GroundPoint? target;
         if(command.Action=="stroll")target=_travel.NearbyTarget(command.Value=="run"?3.5:1.1);
-        else if(command.Value is "window" or "door")
-        {
-            if(_outdoors)throw new OperationFailureException("请先回到小屋，再去窗边或门边");
-            var candidates=command.Value=="window"?new GroundPoint[]{new(0,-1.4),new(.6,-1.4),new(-.6,-1.4)}:new GroundPoint[]{new(0,2.5),new(-.6,2.5),new(.6,2.5)};
-            target=candidates.Cast<GroundPoint?>().FirstOrDefault(p=>p is {} point&&_travel.CanReach(point));
-        }
         else
         {
-            if(_outdoors)throw new OperationFailureException("请先回到小屋，再去家具旁");
-            target=null;
-            foreach(var item in CurrentWorld.Items.Where(i=>i.Kind==command.Value).OrderBy(i=>Math.Abs(i.X-_travel.Position.X)+Math.Abs(i.Z-_travel.Position.Z)))
-            {var probe=CurrentWorld.Travel();probe.Reset(_travel.Position);target=LivingWorld.Approach(item,probe);if(target is not null)break;}
+            var definition=TargetCatalog.Find(command.Value)??throw new ActionFailureException(ActionResultCode.TargetUnavailable,"目标不存在。");
+            if(definition.FurnitureKind is {} kind&&!CurrentWorld.Items.Any(x=>x.Kind==kind))throw new ActionFailureException(ActionResultCode.TargetUnavailable,"目标家具已收纳。");
+            target=TargetCatalog.Resolve(definition,CurrentWorld,_travel,_outdoors?SceneKind.Outdoor:SceneKind.Indoor);
         }
-        if(target is null||!TryMove(target.Value))throw new OperationFailureException("附近没有可达位置，或目标物件已收纳");
-        _travel.SetGait(command.Action=="stroll"&&command.Value=="run");
+        if(target is null||!TryMove(target.Value))throw new ActionFailureException(ActionResultCode.PathBlocked,"目标附近没有可达位置，动作未执行。");
+        _travel.SetGait(command.Action=="stroll"&&command.Value=="run"||command.Action=="go"&&command.Motion=="run");
         return command.Action=="stroll"?(command.Value=="run"?"伙伴开始短途奔跑，结束后停下":"伙伴开始走几步，结束后停下"):"伙伴正在去目标旁边";
     }
     internal IReadOnlyList<LifeEvent> AvailableLife()
     {
         var p=_c.Preferences;bool night=p.Theme=="night"||p.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7);
-        return LifeRules.Evaluate(CurrentWorld,p.Weather,night,p.RoomLamp);
+        return LifeRules.Evaluate(CurrentWorld,EnvironmentContext.From(DateTime.Now,p.Weather,p.Theme,p.RoomLamp));
     }
     internal void RecordRequestedLife(LifeEvent life)
     {if(_pendingInteraction is not null)_pendingLife=life.Id;else{_c.Store.DiscoverLife(life.Id);_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),"life");_c.Refresh();}_hint.Text=life.Title+"："+life.Description;}
@@ -125,7 +140,7 @@ internal sealed partial class Room3DView
     }
     internal async Task<bool> WaitCreation(CompanionCommand command,CancellationToken token)
     {
-        if(command.Action is not ("move" or "stroll" or "go" or "interact" or "life" or "throw" or "recall" or "dance" or "pat" or "rub"))return true;
+        if(command.Action is not ("move" or "stroll" or "go" or "interact" or "life" or "throw" or "toy" or "recall" or "dance" or "pat" or "rub"))return true;
         int generation=_activityGeneration;
         string model=_modelId;
         while(true)

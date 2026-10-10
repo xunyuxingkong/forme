@@ -130,7 +130,7 @@ internal sealed partial class MainWindow : Window
     {
         if(_clockText is not null)_clockText.Text=ClockLabel();
         if(_liveText is not null && _c.Busy)_liveText.Text=_c.LiveReply.Length==0?"…":ChatDisplay.Message(_c.LiveReply);
-        if(_chatState is not null)_chatState.Text=_c.Waiting?"仍在等待服务响应，可以随时停止。":ChatDisplay.Status(_c.ChatStatus);
+        if(_chatState is not null){_chatState.Text=_c.Waiting?"仍在等待服务响应，可以随时停止。":ChatDisplay.Status(_c.ChatStatus);_chatState.Visibility=string.IsNullOrEmpty(_chatState.Text)?Visibility.Collapsed:Visibility.Visible;}
     }
     private string ClockLabel()=>TimeSpan.FromSeconds(Math.Ceiling(_c.Clock.Remaining)).ToString(_c.Clock.Remaining>=3600?@"hh\:mm\:ss":@"mm\:ss");
     private UIElement Home()
@@ -216,7 +216,9 @@ internal sealed partial class MainWindow : Window
         var inventory=Ui.Stack(Ui.Text("玩具与布置",17,null,true));var owned=_c.Store.GameInventory().ToDictionary(x=>x.ItemId,x=>x.Quantity,StringComparer.Ordinal);
         foreach(var item in GameProgression.Catalog.Where(x=>x.Kind is "toy" or "decor" or "rug"))
         {
-            int count=owned.GetValueOrDefault(item.Id);var row=Ui.Row(Ui.Text($"{item.Name}  ·  {count} 件  ·  {item.Price} 星",13),Ui.Button(count>=item.MaxOwned?"已拥有":"兑换",()=>{if(_c.Store.PurchaseGameItem(item.Id)){_c.Refresh();Navigate("play");Toast("物品已放入本机收藏。可在布置页选择摆放位置。");}else Toast("星星不足，慢慢来就好。");}));
+            int count=owned.GetValueOrDefault(item.Id);bool locked=progress.Level<item.MinLevel&&count==0;
+            var redeem=Ui.Button(count>=item.MaxOwned?"已拥有":locked?$"Lv.{item.MinLevel} 解锁":"兑换",()=>{if(_c.Store.PurchaseGameItem(item.Id)){_c.Refresh();Navigate("play");Toast("物品已放入本机收藏。可在布置页选择摆放位置。");}else Toast("星星不足或尚未达到解锁等级，慢慢来就好。");});redeem.IsEnabled=!locked&&count<item.MaxOwned;
+            var row=Ui.Row(Ui.Text($"{item.Name}  ·  {count} 件  ·  {item.Price} 星",13),redeem);
             inventory.Children.Add(row);
         }
         panel.Children.Add(Ui.Card(inventory));
@@ -256,7 +258,7 @@ internal sealed partial class MainWindow : Window
             else
             {
                 var before=_c.Store.GameDiscoveries().Select(x=>x.ItemId).ToHashSet(StringComparer.Ordinal);
-                if(!_c.Store.DiscoverOutdoor(day,_c.Preferences.Weather,DateTime.Now.Hour)){Toast("今天已经记下这个户外发现啦，慢慢来就好。");return;}
+                if(!_c.Store.DiscoverOutdoor(day,_c.Preferences.Weather,DateTime.Now.Hour)){_room.PlayAction(PetAction.Look);Toast(EnvironmentFeedback.Explore(EnvironmentContext.From(DateTime.Now,_c.Preferences.Weather,_c.Preferences.Theme,_c.Preferences.RoomLamp)));return;}
                 var found=_c.Store.GameDiscoveries().FirstOrDefault(x=>!before.Contains(x.ItemId));Toast(found is null?"伙伴记下了今天的户外散步。":"发现了"+GameProgression.Catalog.First(x=>x.Id==found.ItemId).Name+"，已经收入收藏。");
             }
         }
@@ -268,7 +270,7 @@ internal sealed partial class MainWindow : Window
         else if(taskId=="life")
         {
             _room.SwitchScene(false);var world=_c.Store.World();var night=_c.Preferences.Theme=="night"||_c.Preferences.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7);
-            var life=LifeRules.Evaluate(world,_c.Preferences.Weather,night,_c.Preferences.RoomLamp).FirstOrDefault();
+            var life=LifeRules.Evaluate(world,EnvironmentContext.From(DateTime.Now,_c.Preferences.Weather,_c.Preferences.Theme,_c.Preferences.RoomLamp)).FirstOrDefault();
             if(life is null){Navigate("living");Toast("把坐垫、书架和暖灯摆成新的组合，再来体验生活事件。");return;}_room.RunLife(life);Toast(life.Title+"："+life.Description);
         }
         else if(taskId=="boat"){Navigate("boat");return;}
@@ -349,7 +351,7 @@ internal sealed partial class MainWindow : Window
         foreach(var height in new[]{GridLength.Auto,GridLength.Auto,GridLength.Auto,new GridLength(1,GridUnitType.Star),GridLength.Auto})page.RowDefinitions.Add(new(){Height=height});
         void Place(UIElement child,int row){Grid.SetRow(child,row);page.Children.Add(child);}
         var provider=AiClient.ProviderIdentity(_c.Preferences.Endpoint);
-        string endpoint=_c.Secrets.Exists?(_c.Preferences.LocalActionRules?"本地规则优先 · 未匹配才发送至 ":"发送至 ")+_c.Preferences.Endpoint+" · "+_c.Preferences.Model:"尚未连接 AI · 本地互动仍可使用";
+        string endpoint=_c.Secrets.Exists?(_c.Preferences.LocalActionRules?"本地理解优先 · AI服务：":"发送至 ")+_c.Preferences.Endpoint+" · "+_c.Preferences.Model:"尚未连接 AI · 本地互动仍可使用";
         Place(Ui.Stack(Ui.Text("我在这里，听你说",24,null,true),Ui.Text(endpoint,11,Ui.Muted)),0);
 
         var sessions=_c.Store.Sessions(_sessionOffset,10);
@@ -409,7 +411,7 @@ internal sealed partial class MainWindow : Window
         if(_chatOffset==0)transcriptScroll.Loaded+=(_,_)=>transcriptScroll.ScrollToEnd();
 
         var composer=Ui.Stack();composer.Margin=new Thickness(0,8,0,0);
-        _chatState=Ui.Text(ChatDisplay.Status(_c.ChatStatus),11,Ui.Muted);_chatState.Margin=new Thickness(0,0,0,4);composer.Children.Add(_chatState);
+        _chatState=Ui.Text(ChatDisplay.Status(_c.ChatStatus),11,Ui.Muted);_chatState.Margin=new Thickness(0,0,0,4);_chatState.Visibility=string.IsNullOrEmpty(_chatState.Text)?Visibility.Collapsed:Visibility.Visible;composer.Children.Add(_chatState);
         var input=Ui.Input(_c.Draft,true,automationName:"聊天消息");input.MinHeight=58;input.MaxHeight=100;input.Margin=new Thickness(0,0,0,6);input.TextChanged+=(_,_)=>_c.Draft=input.Text;
         async Task Send()
         {
@@ -427,7 +429,7 @@ internal sealed partial class MainWindow : Window
         var stop=Ui.Button("停止",_c.StopReply);stop.IsEnabled=_c.Busy;
         var lastUser=messages.LastOrDefault(x=>x.Role=="user");var retry=Ui.AsyncButton("重试最后消息",async()=>{if(lastUser is not null)await _c.Send(lastUser.Id);});retry.IsEnabled=!_c.Busy&&lastUser is not null&&_c.Secrets.Exists&&messages.LastOrDefault()?.Status is "error" or "stopped";
         composer.Children.Add(input);composer.Children.Add(Ui.Row(send,stop,retry));
-        composer.Children.Add(Ui.Text("Enter 发送 · Shift+Enter 换行。只分享本次消息、有限历史和已确认记忆；发送内容可预览，不自动读取心情或任务。",10,Ui.Muted));
+        composer.Children.Add(Ui.Text("Enter 发送 · Shift+Enter 换行。动作识别只发本次输入；对话按预算分享历史和已启用记忆。发送内容可预览。",10,Ui.Muted));
         Place(composer,4);return page;
     }
 }

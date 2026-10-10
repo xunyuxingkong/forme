@@ -74,7 +74,8 @@ public sealed class GameProgressionTests
             Assert.IsTrue(achievementIds.Contains("tasks-20"));
             Assert.IsFalse(achievementIds.Contains("tasks-50"));
 
-            foreach(var item in GameProgression.Catalog.Where(x=>x.Kind is "decor" or "rug").Take(10))Assert.IsTrue(store.PurchaseGameItem(item.Id));
+            foreach(var item in GameProgression.Catalog.Where(x=>x.Kind is "decor" or "rug"&&x.MinLevel<=store.GameProgress().Level).Take(10))Assert.IsTrue(store.PurchaseGameItem(item.Id));
+            Assert.IsFalse(store.PurchaseGameItem("wall-photo"));
             Assert.IsTrue(store.GameAchievements().Any(x=>x.Id=="decor-10"));
             var chosen=GameProgression.Catalog.First(x=>x.Kind is "decor" or "rug");
             Assert.IsTrue(store.PlaceGameItem("window",chosen.Id));

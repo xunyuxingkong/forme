@@ -67,7 +67,7 @@ internal sealed class FloatingChatWindow : Window
     private void Render()
     {
         Topmost=_c.Preferences.Topmost;
-        _target.Text=(_c.Preferences.LocalActionRules?"本地规则优先 · 未匹配才发送至 ":"发送至 ")+_c.Preferences.Endpoint+"\n"+_c.Preferences.Model+(_c.Preferences.MemoryEnabled?" · 记忆开启":" · 记忆关闭");
+        _target.Text=(_c.Preferences.LocalActionRules?"本地理解优先 · AI服务：":"发送至 ")+_c.Preferences.Endpoint+"\n"+_c.Preferences.Model+(_c.Preferences.MemoryEnabled?" · 记忆开启":" · 记忆关闭");
         _messages.Children.Clear();_live=null;
         var history=_c.Session is null?[]:_c.Store.Messages(_c.Session.Id,0,20);
         foreach(var message in history)

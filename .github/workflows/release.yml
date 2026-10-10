@@ -24,20 +24,20 @@ jobs:
           global-json-file: global.json
           cache: true
           cache-dependency-path: '**/packages.lock.json'
-      - name: Validate tag and build installer
+      - name: Validate tag and complete release pipeline
         shell: pwsh
-        run: |
-          [xml]$props = Get-Content -LiteralPath 'Directory.Build.props' -Raw
-          $version = $props.Project.PropertyGroup.FormeVersion
-          if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag must match v$version" }
-          ./scripts/build.ps1 -Test -Package
-          Copy-Item 'artifacts/payload.zip' "artifacts/Forme-$version-win-x64.zip"
-          $files = @("artifacts/Forme-Setup-$version.exe", "artifacts/Forme-$version-win-x64.zip")
-          $lines = foreach ($file in $files) {
-            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$hash  $([IO.Path]::GetFileName($file))"
-          }
-          Set-Content -LiteralPath 'artifacts/SHA256SUMS.txt' -Value $lines -Encoding ascii
+        run: ./scripts/ValidateRelease.ps1 -ExpectedTag $env:GITHUB_REF_NAME
+      - name: Upload release verification evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-test-evidence
+          path: |
+            artifacts/test-results/
+            artifacts/*smoke*.txt
+            artifacts/crash-validation-*/diagnostics/
+          retention-days: 14
+          if-no-files-found: warn
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

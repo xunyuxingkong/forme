@@ -291,11 +291,12 @@ internal sealed partial class Room3DView : Grid
     public Preferences? Preview{get=>_preview;set{_preview=value;Refresh();}}
     public Room3DView(Controller c,Action<string> navigate,IPetModelFactory? factory=null)
     {
+        _c=c;
         System.Windows.Automation.AutomationProperties.SetName(this,"Forme 3D 小屋和户外场景；点击地面移动，点击物件打开活动");
         _modelId=c.Preferences.PetModel;_pet=(factory??PetModels.For(_modelId)).Create();_animator=new(_pet);
         var characterTransform=new Transform3DGroup();characterTransform.Children.Add(_worldPetScale);characterTransform.Children.Add(new RotateTransform3D(_heading));characterTransform.Children.Add(_position);_character.Transform=characterTransform;
         MeshArt.Ellipse(_character,"#AFA68C",0,.015,0,.66,.006,.42);_character.Children.Add(_pet.Root);ResetTravel();
-        _c=c;_navigate=navigate;Height=560;MinWidth=280;ClipToBounds=true;
+        _navigate=navigate;Height=560;MinWidth=280;ClipToBounds=true;
         _animator.Frame=_=>{if(_boatOpen&&_boatGame is {Complete:true})_heading.Angle=0;if(_moveTarget is not null&&!_throwDrag&&!_travel.Moving&&_pendingInteraction is null&&!ToyRunning){_moveTarget=null;PaintWorld();}if(_pendingInteraction is {} interaction&&!_travel.Moving){_pendingInteraction=null;CompleteInteraction(interaction);}};
         SizeChanged+=(_,_)=>{Clip=new RectangleGeometry(new Rect(RenderSize),18,18);Camera();};
         SetToyVisual("ball-yellow");_ballGroup.Transform=_ballPosition;_ballVisual.Content=_ballGroup;
@@ -345,9 +346,7 @@ internal sealed partial class Room3DView : Grid
     }
     private void ResetTravel()
     {
-        GroundObstacle[] obstacles=_outdoors?[new(-5,-1,2.2,1.2),new(5,-1,2.2,1.2),new(-4,5,2,2),new(-7,-7,1,1),new(7,-7,1,1),new(-8,6,1,1),new(8,6,1,1)]:[new(-2.25,-2.29,2.83,1.28),new(-2.32,-1.19,.8,.8),new(2.36,-2.1,3.25,1.7),new(-1.96,4.32,1.45,1.88),new(2.12,3.73,.75,.75),new(1.85,5.05,1.6,.6),new(-3.95,4.75,1.4,3.2),new(3.95,4.75,1.4,3.2)];
-        obstacles=obstacles.Concat(_outdoors?new GroundObstacle[]{new(-3.6,-5.0,4.3,2.5),new(5.45,-5.7,2.0,.8),new(4.44,4.23,.6,.45)}:new GroundObstacle[]{new(-3.65,-.5,.75,1.2),new(3.48,-.4,.5,.5)}).ToArray();
-        _travel=new(_outdoors?-10:-4.3,_outdoors?10:4.3,_outdoors?-10:-3.6,_outdoors?10:5.65,obstacles);_travel.Reset(new(.15,1.25));
+        _travel=TargetNavigation.Travel(_outdoors?SceneKind.Outdoor:SceneKind.Indoor,_c.Store.World());_travel.Reset(TargetNavigation.Start);
         _animator.AttachTravel(_travel,(point,heading)=>{_position.OffsetX=point.X;_position.OffsetY=.035;_position.OffsetZ=point.Z;_heading.Angle=heading;});
     }
     internal void SwitchScene(bool outdoors){if(_outdoors==outdoors)return;StopWorld();if(_editing)CloseFurniture();if(_boatOpen)CloseBoats();_pendingInteraction=null;_ballVisual.Content=null;_outdoors=outdoors;_sceneButton.Content=outdoors?"回到小屋":"去户外 · 20m × 20m";_foodButton.Content=outdoors?"看池塘":"喂食";_bookButton.Content=outdoors?"去野餐":"读书";System.Windows.Automation.AutomationProperties.SetName(_foodButton,(string)_foodButton.Content);System.Windows.Automation.AutomationProperties.SetName(_bookButton,(string)_bookButton.Content);ResetTravel();if(!outdoors)RebuildWorldTravel();_appearance=null;_azimuth=30;_elevation=32;_zoom=1;ShowHint(null);Refresh();}

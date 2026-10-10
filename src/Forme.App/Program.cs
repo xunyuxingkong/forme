@@ -86,6 +86,7 @@ internal sealed partial class DesktopHost : IDisposable
     {
         _app=app;_c=c;_smoke=smoke;
         c.CommandHandler=ExecuteCompanionCommand;c.SceneContext=()=>House?.SceneDescription??"桌面悬浮伙伴；房间坐标移动暂不可用";
+        c.ActionHandler=ExecuteAction;c.ActionPreflight=PreflightActions;c.CurrentScene=()=>House?.CompanionScene??(_pet is {IsVisible:true}?SceneKind.Desktop:SceneKind.Tray);
         c.CommandWaiter=(command,token)=>House?.WaitCreation(command,token)??_pet?.WaitCommand(command,token)??Task.FromResult(true);
         c.StopCommands=()=>{House?.StopCompanion();_pet?.StopCommands();};
         _petWanted=c.Preferences.DisplayMode!="tray";
@@ -207,6 +208,7 @@ internal sealed partial class DesktopHost : IDisposable
     public void Dispose()
     {
         _c.CommandHandler=null;_c.SceneContext=null;
+        _c.ActionHandler=null;_c.ActionPreflight=null;_c.CurrentScene=null;
         _c.CommandWaiter=null;_c.StopCommands=null;
         _exit=true;_pipeCancel.Cancel();_greetings.Stop();SystemEvents.PowerModeChanged-=Power;SystemEvents.SessionSwitch-=Session;SystemEvents.DisplaySettingsChanged-=Displays;
         _c.Finished-=Finished;_c.Changed-=Changed;_c.Tick-=TrayTick;_c.Notice-=Notice;_tray.Dispose();_icon?.Dispose();_pet?.Close();House?.Close();_pipeCancel.Dispose();
@@ -343,7 +345,7 @@ internal static class Smoke
             var chatHistory=Descendants(chat).OfType<System.Windows.Controls.ScrollViewer>().Single(x=>x.Name=="聊天记录滚动区");
             var chatNav=Descendants(chat).OfType<System.Windows.Controls.Button>().Single(x=>x.Content?.ToString()=="聊一会儿");
             var inputBounds=chatInput.TransformToAncestor(chat).TransformBounds(new Rect(chatInput.RenderSize));var historyBounds=chatHistory.TransformToAncestor(chat).TransformBounds(new Rect(chatHistory.RenderSize));var navBounds=chatNav.TransformToAncestor(chat).TransformBounds(new Rect(chatNav.RenderSize));
-            if(!chatInput.IsVisible||chatInput.ActualWidth<300||chatHistory.ActualHeight<120||historyBounds.Bottom>inputBounds.Top||inputBounds.Bottom>navBounds.Top)throw new Exception("Chat history and bottom composer overlap or leave the viewport");
+            if(!chatInput.IsVisible||chatInput.ActualWidth<300||chatHistory.ActualHeight<120||historyBounds.Bottom>inputBounds.Top||inputBounds.Bottom>navBounds.Top){Save(chat,"artifacts/screenshots/chat-layout-failure.png");throw new Exception($"Chat history and bottom composer overlap or leave the viewport: input={inputBounds}, history={historyBounds}, nav={navBounds}, visible={chatInput.IsVisible}");}
             Save(chat,"artifacts/screenshots/chat-layout.png");
             var chatOptions=Descendants(chat).OfType<System.Windows.Controls.Expander>().Single(x=>System.Windows.Automation.AutomationProperties.GetName(x)=="聊天记录管理");chatOptions.IsExpanded=true;chat.UpdateLayout();
             var searchInput=Descendants(chat).OfType<System.Windows.Controls.TextBox>().Single(x=>System.Windows.Automation.AutomationProperties.GetName(x)=="搜索当前会话");
@@ -370,7 +372,8 @@ internal static class Smoke
             Click(host.Pet,"停止动作");host.Pet.SetIdleMode("idle");
             host.Pet.CollapseToEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="edge"||host.Pet.Width>50||animatedPet.AnimationRunning)throw new Exception("Edge collapse not persisted or animation active");host.Pet.ExpandFromEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="pet"||host.Pet.Width<100||!animatedPet.AnimationRunning)throw new Exception("Edge restore failed");
             host.HidePet();
-            File.WriteAllText("artifacts/smoke-result.txt",$"PASS: interchangeable pet adapter, idle/pat/rub/drag/landing, reduced/quiet/hidden/edge/minimized/suspended animation cleanup, room model replacement picking, 8 pages rendered, 3D geometry picking for all 6 activities, four camera-fit layouts, compact scene retained on settings change, focus drafts retained on refresh and navigation, responsive layout, day/night and rug previews, unchanged room geometry reuse, mood UI save, room preview rollback, bubble UI reward, focus persistence, watering deduplication, DPAPI roundtrip, native pet HWND no-activate and transparent-area hit test.\nHouse private memory snapshot: {memory} MB\nTimestamp: {DateTimeOffset.Now:O}\n");
+            await CompanionChecks.IntentPipeline(host,c);
+            File.WriteAllText("artifacts/smoke-result.txt",$"PASS: interchangeable pet adapter, idle/pat/rub/drag/landing, reduced/quiet/hidden/edge/minimized/suspended animation cleanup, room model replacement picking, 8 pages rendered, 3D geometry picking for all 6 activities, four camera-fit layouts, compact scene retained on settings change, focus drafts retained on refresh and navigation, responsive layout, day/night and rug previews, unchanged room geometry reuse, mood UI save, room preview rollback, bubble UI reward, focus persistence, watering deduplication, DPAPI roundtrip, native pet HWND no-activate and transparent-area hit test; structured intent pipeline.\nHouse private memory snapshot: {memory} MB\nTimestamp: {DateTimeOffset.Now:O}\n");
             Environment.ExitCode=0;
             if(File.Exists("artifacts/smoke-error.txt"))File.Delete("artifacts/smoke-error.txt");
         }

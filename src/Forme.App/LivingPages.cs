@@ -23,7 +23,7 @@ internal sealed partial class MainWindow
     }
     private UIElement LivingPage()
     {
-        var world=_c.Store.World();var p=_c.Preferences;bool night=p.Theme=="night"||p.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7);var events=LifeRules.Evaluate(world,p.Weather,night,p.RoomLamp);
+        var world=_c.Store.World();var p=_c.Preferences;bool night=p.Theme=="night"||p.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7);var events=LifeRules.Evaluate(world,EnvironmentContext.From(DateTime.Now,p.Weather,p.Theme,p.RoomLamp));
         var panel=Ui.Stack(Ui.Text("小屋里的新生活",24,null,true),Ui.Text("摆放关系会改变可发生的事件。事件全部本地执行，没有签到和失败惩罚。",13,Ui.Muted),Ui.Row(Ui.Button("布置家具",()=>Navigate("furniture"),true),Ui.Button("伙伴藏物",()=>Navigate("hide")),Ui.Button("玩纸船",()=>Navigate("boat"))),Ui.Row(Ui.Button("叫回伙伴",_room.RecallFromUser),Ui.Button("停止当前活动",_room.StopFromUser)),Ui.Text("当前能发生的生活",18,null,true));
         foreach(var life in events)panel.Children.Add(Ui.Card(Ui.Stack(Ui.Text(life.Title,17,null,true),Ui.Text(life.Description,12,Ui.Muted),Ui.Button("体验"+life.Title,()=>{_room.SwitchScene(false);_room.RunLife(life);} ))));
         if(events.Count==0)panel.Children.Add(Ui.Text("把坐垫靠近书架或鱼缸，把小窝放到暖灯旁，试试新组合。",13,Ui.Muted));

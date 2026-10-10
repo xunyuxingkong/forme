@@ -4,14 +4,25 @@ namespace Forme.Core;
 
 public static class GameProgression
 {
+    static GameProgression()=>ContentCatalogValidator.Validate(Catalog,TaskCatalog,Achievements,LifeRules.Catalog);
     public static int LevelFor(int experience)=>Math.Clamp(experience/100+1,1,20);
     public static int ExperienceToNext(int experience)=>LevelFor(experience)>=20?0:100-experience%100;
     public static IReadOnlyList<GameTaskDefinition> TaskCatalog {get;}=Load<GameTaskDefinition[]>("game-tasks.json");
     public static IReadOnlyList<GameAchievementDefinition> Achievements {get;}=Load<GameAchievementDefinition[]>("game-achievements.json");
     public static IReadOnlyList<GameTask> DailyTasks(DateOnly day,IReadOnlySet<string> completed)
     {
-        int rotation=day.DayNumber%TaskCatalog.Count;
-        return Enumerable.Range(0,Math.Min(3,TaskCatalog.Count)).Select(i=>TaskCatalog[(rotation+i)%TaskCatalog.Count]).Select(x=>new GameTask(x.Id,x.Title,x.Hint,x.RewardXp,x.RewardStars,completed.Contains(x.Id),x.Action)).ToArray();
+        // Alternating fixed action pools guarantee no overlap with the preceding day.
+        // Date-seeded shuffle varies selections without storing or recursively reconstructing history.
+        var actions=TaskCatalog.GroupBy(x=>x.Action).OrderBy(x=>x.Key,StringComparer.Ordinal).ToArray();
+        var pool=actions.Where((_,i)=>i%2==day.DayNumber%2).ToArray();
+        if(pool.Length<3)pool=actions;
+        var random=new Random(unchecked(day.DayNumber*7919+104729));
+        var candidates=pool.Select(group=>group.ElementAt(random.Next(group.Count()))).ToList();
+        for(int i=candidates.Count-1;i>0;i--){int j=random.Next(i+1);(candidates[i],candidates[j])=(candidates[j],candidates[i]);}
+        string category(GameTaskDefinition task)=>task.Action is "focus" or "water" or "relax"?"practical":task.Action is "discover" or "garden" or "outdoor" or "life"?"explore":"companion";
+        var selected=candidates.GroupBy(category).Select(group=>group.First()).Take(3).ToList();
+        selected.AddRange(candidates.Where(x=>!selected.Contains(x)).Take(3-selected.Count));
+        return selected.Select(x=>new GameTask(x.Id,x.Title,x.Hint,x.RewardXp,x.RewardStars,completed.Contains(x.Id),x.Action)).ToArray();
     }
     public static IReadOnlyList<GameItem> Catalog {get;}=LoadCatalog();
     public static IReadOnlyList<GameAchievementDefinition> AchievementsCatalog=>Achievements;

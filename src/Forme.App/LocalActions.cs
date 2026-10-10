@@ -23,7 +23,19 @@ internal sealed partial class Controller
         catch(Exception ex) when(OperationErrors.Expected(ex)){_rulesError="规则未加载："+OperationErrors.Message(ex);}
     }
     public string RulesText()=>File.Exists(ActionRulesPath)&&new FileInfo(ActionRulesPath).Length<=32768?File.ReadAllText(ActionRulesPath):ActionRules.Default().Serialize();
-    public string? LocalRulePreview()=>Preferences.LocalActionRules&&_rulesError is null&&_actionRules.Match(Draft.Trim()) is {} commands?"将执行本地规则，不调用AI、不发送消息或场景。\n"+System.Text.Json.JsonSerializer.Serialize(commands)+"\n权限仍逐项检查；最多3步、30秒。":null;
+    private IntentResolution LocalIntent(string input)=>IntentResolver.Resolve(input,_actionRules,Preferences.PetName);
+    public string? LocalRulePreview()
+    {
+        if(!Preferences.LocalActionRules||_rulesError is not null)return null;
+        var resolved=LocalIntent(Draft.Trim());if(resolved.Intents.Count==0)return null;
+        try
+        {
+            var plan=ActionPlanner.Build(resolved.Intents,CurrentScene?.Invoke()??SceneKind.Desktop);
+            var denied=ActionPlanner.Preflight(plan,Preferences,ActionPreflight);
+            return "本次在本地理解和执行，不调用AI、不发送消息或场景。\n"+(denied?.UserMessage??string.Join(" → ",plan.Steps.Select(x=>x.Action=="go"?"前往"+TargetCatalog.Find(x.Value)?.Name:x.Action=="scene"?(x.Value=="outdoor"?"切换户外":"回小屋"):"伙伴动作")))+"\n整组预检；最多3步、30秒。";
+        }
+        catch(ActionFailureException ex){return ex.Message;}
+    }
     public void SaveRules(string text)
     {
         var rules=ActionRules.Parse(text);string saved=rules.Serialize();if(Encoding.UTF8.GetByteCount(saved)>32768)throw new InvalidDataException("格式化后的规则超过32KB，请减少规则。");string temporary=ActionRulesPath+".tmp";File.WriteAllText(temporary,saved,new UTF8Encoding(false));File.Move(temporary,ActionRulesPath,true);_actionRules=rules;_rulesError=null;Refresh();
@@ -32,45 +44,39 @@ internal sealed partial class Controller
     {
         if(!Preferences.LocalActionRules)return false;
         if(_rulesError is not null)throw new OperationFailureException(_rulesError+"，请在动作规则设置中修复或恢复默认。");
-        var commands=_actionRules.Match(Draft.Trim());if(commands is null)return false;
+        var resolved=LocalIntent(Draft.Trim());if(resolved.Intents.Count==0)return false;
         if(Busy)return true;if(PendingChatSave is not null)throw new OperationFailureException("请先处理暂存回复。");
         string input=Draft.Trim();Session??=Store.NewSession(Preferences.Endpoint);
         var user=new ChatMessage(Guid.NewGuid().ToString("N"),Session.Id,"user",input,"local",DateTimeOffset.Now);
         var reply=new ChatMessage(Guid.NewGuid().ToString("N"),Session.Id,"assistant","","streaming",DateTimeOffset.Now.AddTicks(1));
-        Store.BeginChatTurn(user,reply);Draft="";var request=new CancellationTokenSource();_request=request;int epoch=++_epoch;
+        Store.BeginChatTurn(user,reply);Draft="";var request=new CancellationTokenSource();_request=request;++_epoch;ActionResults=[];
         _localExecuting=true;LiveReply="正在执行本地规则，不发送AI请求。";ChatStatus=LiveReply;SyncTimer();Changed?.Invoke();
         try
         {
-            var reports=await ExecuteCommands(commands,epoch,request.Token,"本地动作");
-            string text="本地规则匹配 · 未联网\n"+CompanionCommands.ReportMarker+" "+string.Join("；",reports);
+            ActionResults=await ExecuteIntents(resolved.Intents,request.Token);
+            string text=ResultText(ActionResults);
             if(Store.HasSession(reply.SessionId))
             {
                 var final=reply with{Content=text,Status="local"};
                 try{Store.SaveMessage(final);}catch(Exception ex) when(OperationErrors.Expected(ex)){PendingChatSave=final;Notice?.Invoke("本地动作反馈暂存，可重试保存。");}
             }
-            ChatStatus=text;
+            ChatStatus=ActionResults.LastOrDefault()?.UserMessage??text;
         }
         finally{_localExecuting=false;_request=null;request.Dispose();LiveReply="";SyncTimer();Changed?.Invoke();}
         return true;
     }
-    private async Task<List<string>> ExecuteCommands(IReadOnlyList<CompanionCommand> commands,int epoch,CancellationToken token,string text)
+    private static string ResultText(IReadOnlyList<ActionResult> results)=>string.Join("\n",results.Select(x=>x.UserMessage));
+    private async Task<IReadOnlyList<ActionResult>> ExecuteIntents(IReadOnlyList<CompanionIntent> intents,CancellationToken token)
     {
-        var reports=new List<string>();using var limit=new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var linked=CancellationTokenSource.CreateLinkedTokenSource(token,limit.Token);
-        foreach(var command in commands)
+        try
         {
-            if(epoch!=_epoch||linked.IsCancellationRequested){reports.Add("动作组已停止");break;}
-            if(!CompanionCommands.Allowed(command,Preferences)){reports.Add("对应动作权限未开启，请在设置中开启；剩余动作未执行");break;}
-            try
-            {
-                if(CommandHandler is null){reports.Add("当前没有可控制的场景");break;}
-                reports.Add(CommandHandler(command));LiveReply=text+"\n"+CompanionCommands.ReportMarker+" "+string.Join("；",reports);Tick?.Invoke();
-                if(command.Action=="stop")break;
-                if(CommandWaiter is {} wait&&!await wait(command,linked.Token)){reports.Add("活动被打断，剩余动作未执行");break;}
-            }
-            catch(OperationCanceledException){StopCommands?.Invoke();reports.Add(limit.IsCancellationRequested?"动作组超过30秒，已停止":"动作组已取消");break;}
-            catch(Exception ex) when(OperationErrors.Expected(ex)){reports.Add("未执行："+OperationErrors.Message(ex));break;}
+            var plan=ActionPlanner.Build(intents,CurrentScene?.Invoke()??SceneKind.Desktop);
+            return await ActionExecutor.Execute(plan,()=>Preferences,ActionPreflight,
+                command=>ActionHandler?.Invoke(command)??(CommandHandler is {} handler
+                    ?new ActionResult(ActionResultCode.Started,command.Action,command.Value,handler(command),TimeSpan.Zero)
+                    :ActionResult.Failure(ActionResultCode.SceneUnavailable,"当前没有可控制的场景。",command)),
+                CommandWaiter,()=>StopCommands?.Invoke(),token,result=>{LiveReply=result.UserMessage;ChatStatus=result.UserMessage;Tick?.Invoke();});
         }
-        return reports;
+        catch(ActionFailureException ex){return [ActionResult.Failure(ex.Code,ex.Message)];}
     }
 }

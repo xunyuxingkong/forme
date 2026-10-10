@@ -81,12 +81,16 @@ public sealed partial class Store
         }
         return true;
     }
-    public bool DiscoverOutdoor(DateOnly day,string weather="clear",int localHour=12)
+    public static TimeSpan DiscoveryCooldown {get;}=TimeSpan.FromMinutes(5);
+    public bool DiscoverOutdoor(DateOnly day,string weather="clear",int localHour=12,DateTimeOffset? now=null)
     {
+        var at=now??DateTimeOffset.UtcNow;
+        if(Get<DateTimeOffset?>("last-outdoor-discovery") is {} last&&at-last<DiscoveryCooldown)return false;
         var known=GameDiscoveries().Select(x=>x.ItemId).ToHashSet(StringComparer.Ordinal);
         var next=GameProgression.NextDiscovery(day,known,weather,localHour);
         if(next is null)return CompleteGameTask(day,"discover");
         using var tx=_db.BeginTransaction();string date=day.ToString("yyyy-MM-dd");
+        Exec("INSERT INTO settings(k,v) VALUES('last-outdoor-discovery',$0) ON CONFLICT(k) DO UPDATE SET v=excluded.v",tx,System.Text.Json.JsonSerializer.Serialize(at));
         Exec("INSERT INTO game_discoveries(item_id,day) VALUES($0,$1)",tx,next.Id,date);Exec("INSERT INTO game_inventory VALUES($0,1) ON CONFLICT(item_id) DO UPDATE SET quantity=quantity+1",tx,next.Id);
         GrantGameAchievement(tx,"first-discovery",date);int total=known.Count+1;
         if(total>=5)GrantGameAchievement(tx,"discoveries-5",date);if(total>=10)GrantGameAchievement(tx,"discoveries-10",date);if(total>=GameProgression.Discoveries.Count)GrantGameAchievement(tx,"discoveries-all",date);
@@ -125,7 +129,8 @@ public sealed partial class Store
         using var tx=_db.BeginTransaction();
         using(var existing=Command("SELECT quantity FROM game_inventory WHERE item_id=$0",tx,itemId))
         using(var row=existing.ExecuteReader())if(row.Read()&&row.GetInt32(0)>=item.MaxOwned)return false;
-        using(var wallet=Command("SELECT stars FROM game_progress WHERE id=1",tx))if(Convert.ToInt32(wallet.ExecuteScalar())<item.Price)return false;
+        using(var wallet=Command("SELECT stars,xp FROM game_progress WHERE id=1",tx))
+        using(var row=wallet.ExecuteReader())if(!row.Read()||row.GetInt32(0)<item.Price||GameProgression.LevelFor(row.GetInt32(1))<item.MinLevel)return false;
         Exec("UPDATE game_progress SET stars=stars-$0 WHERE id=1",tx,item.Price);Exec("INSERT INTO game_inventory VALUES($0,1) ON CONFLICT(item_id) DO UPDATE SET quantity=quantity+1",tx,itemId);
         string date=DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd");GrantGameAchievement(tx,"first-purchase",date);
         var decorIds=GameProgression.Catalog.Where(x=>x.Kind is "decor" or "rug").Select(x=>x.Id).ToArray();

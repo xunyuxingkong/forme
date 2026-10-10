@@ -72,10 +72,17 @@ internal static class Probe
                 await Enter(host,c,state);await Task.Delay(TimeSpan.FromSeconds(warmup));
                 using var process=Process.GetCurrentProcess();var initial=Measure(process,0);var cpu=process.TotalProcessorTime;
                 GetProcessIoCounters(process.Handle,out var before);var watch=Stopwatch.StartNew();var samples=new List<Sample>();
-                var presentation=new List<object>();int activeSamples=0;
+                var presentation=new List<object>();int activeSamples=0,movingSamples=0;
                 for(int n=0;n<seconds;n++)
                 {
                     await Task.Delay(1000);samples.Add(Measure(process,watch.Elapsed.TotalSeconds));
+                    // A single short path ends during warmup; keep the explicitly requested moving state active.
+                    if(state.EndsWith("-moving",StringComparison.Ordinal)&&host.House is {} movingHouse)
+                    {
+                        var movingRoom=Descendants(movingHouse).OfType<Room3DView>().First();
+                        if(!movingRoom.PetMoving)movingRoom.MoveNaturally(new("stroll","run"));
+                        if(movingRoom.PetMoving)movingSamples++;
+                    }
                     if(state=="house-boat-playing"&&host.House is {} boatHouse){var boatRoom=Descendants(boatHouse).OfType<Room3DView>().First();if(!boatRoom.BoatRunning)boatRoom.StartBoat();}
                     var window=state.StartsWith("floating-chat-",StringComparison.Ordinal)?(Window?)host.FloatingChat:state.StartsWith("tray-",StringComparison.Ordinal)?null:(Window?)host.House??host.Pet;
                     bool active=state.StartsWith("tray-",StringComparison.Ordinal)?window is null:window is {IsVisible:true,WindowState:WindowState.Normal};
@@ -85,7 +92,7 @@ internal static class Probe
                 GetProcessIoCounters(process.Handle,out var after);
                 reports.Add(new{State=state,Seconds=watch.Elapsed.TotalSeconds,NormalizedCpuPercent=(process.TotalProcessorTime-cpu).TotalSeconds/watch.Elapsed.TotalSeconds/Environment.ProcessorCount*100,
                     AveragePrivateMB=samples.Average(s=>s.PrivateBytes)/1048576,PeakPrivateMB=samples.Max(s=>s.PrivateBytes)/1048576d,
-                    WriteBytes=after.WriteBytes-before.WriteBytes,WriteOperations=after.WriteOperations-before.WriteOperations,Initial=initial,Samples=samples,ActiveSamples=activeSamples,PresentationValid=activeSamples==seconds,Presentation=presentation});
+                    WriteBytes=after.WriteBytes-before.WriteBytes,WriteOperations=after.WriteOperations-before.WriteOperations,Initial=initial,Samples=samples,ActiveSamples=activeSamples,MovingSamples=movingSamples,PresentationValid=activeSamples==seconds&&(!state.EndsWith("-moving",StringComparison.Ordinal)||movingSamples==seconds),Presentation=presentation});
                 Save("performance.json",new{Date=DateTimeOffset.Now,OS=Environment.OSVersion.ToString(),CpuCount=Environment.ProcessorCount,
                     WarmupSeconds=warmup,DurationPerState=seconds,FreshProcessPerState=states.Length==1,PetModel=c.Preferences.PetModel,PerformanceMode=c.Preferences.PerformanceMode,GpuMeasured=false,Results=reports});
             }

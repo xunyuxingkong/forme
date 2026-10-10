@@ -30,26 +30,18 @@ jobs:
           global-json-file: global.json
           cache: true
           cache-dependency-path: '**/packages.lock.json'
-      - name: Build, test, package and verify installer
+      - name: Validate release pipeline
         shell: pwsh
-        run: ./scripts/build.ps1 -Test -Package
-      - name: Verify fatal error exits with private diagnostics
-        shell: pwsh
-        run: |
-          $dotnet = (Get-Command dotnet -ErrorAction Stop).Source
-          & $dotnet build src/Forme.App/Forme.App.csproj -c Release --no-restore '-p:FormeDevelopmentTools=true'
-          if ($LASTEXITCODE -ne 0) { throw 'Development test host build failed' }
-          $process = Start-Process -FilePath $dotnet -ArgumentList 'src/Forme.App/bin/Release/net10.0-windows/Forme.dll','--crash-test','--data-dir','artifacts/crash-ci' -WindowStyle Hidden -PassThru
-          if (-not $process.WaitForExit(30000)) { $process.Kill(); throw 'Crash verification timed out' }
-          if ($process.ExitCode -ne 1) { throw 'Unexpected crash exit code' }
-          $diagnostics = Get-ChildItem artifacts/crash-ci/diagnostics/*.json | Get-Content -Raw
-          if (-not $diagnostics -or $diagnostics -match 'secret-token|private-chat') { throw 'Missing or unsafe diagnostics' }
+        run: ./scripts/ValidateRelease.ps1
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: test-evidence
-          path: artifacts/test-results/
+          path: |
+            artifacts/test-results/
+            artifacts/*smoke*.txt
+            artifacts/crash-validation-*/diagnostics/
           retention-days: 14
           if-no-files-found: warn
       - name: Upload verified installer
@@ -58,6 +50,7 @@ jobs:
           name: forme-windows-x64
           path: |
             artifacts/Forme-Setup-*.exe
-            artifacts/sha256.txt
+            artifacts/Forme-*-win-x64.zip
+            artifacts/SHA256SUMS.txt
           retention-days: 14
           if-no-files-found: error

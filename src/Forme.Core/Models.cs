@@ -86,6 +86,7 @@ public sealed record GameTask(string Id,string Title,string Hint,int RewardXp,in
 public sealed record GameTaskDefinition(string Id,string Title,string Hint,int RewardXp,int RewardStars,string Action="");
 public sealed record GameItem(string Id,string Name,string Kind,int Price,int MaxOwned)
 {
+    public int MinLevel {get;init;}=1;
     public string Visual {get;init;}="";
     public string Color {get;init;}="#8FA976";
     public string Action {get;init;}="";

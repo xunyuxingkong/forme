@@ -5,10 +5,32 @@ namespace Forme.App;
 
 internal sealed partial class DesktopHost
 {
+    internal ActionResult? PreflightActions(ActionPlan plan)
+    {
+        if(_exit||_c.AnimationSuspended)return ActionResult.Failure(ActionResultCode.SceneUnavailable,"应用正在暂停，整组未执行。");
+        if(House is {WindowState:WindowState.Minimized})return ActionResult.Failure(ActionResultCode.SceneUnavailable,"小屋已最小化，整组未执行。");
+        if(!_c.Preferences.ShowHome3D&&plan.Steps.Any(x=>x.Action is "go" or "interact" or "life" or "hide" or "throw" or "toy" or "furniture" or "layout"))return ActionResult.Failure(ActionResultCode.SceneUnavailable,"动画场景已隐藏，请先显示动画；整组未执行。");
+        bool willOpenHouse=House is not null;
+        foreach(var step in plan.Steps)
+        {
+            if(step.Action is "scene" or "go" or "interact" or "life" or "hide" or "throw" or "toy" or "layout" or "furniture" || step.Action.StartsWith("boat",StringComparison.Ordinal))willOpenHouse=true;
+            if(willOpenHouse&&!_c.Preferences.ShowHome3D&&step.Action is "stroll" or "dance" or "pat" or "rub" or "recall")return ActionResult.Failure(ActionResultCode.SceneUnavailable,"动画场景已隐藏，请先显示动画；整组未执行。",step);
+            if(step.Action=="stroll"&&step.Value is "lap1" or "lap2"&&willOpenHouse)return ActionResult.Failure(ActionResultCode.SceneUnavailable,"屏幕环绕只支持桌面伙伴，整组未执行。",step);
+            if(step.Action is "stroll" or "dance" or "pat" or "rub" or "recall" && !willOpenHouse && (_pet is not {IsVisible:true} || _c.Preferences.DisplayMode=="edge"))return ActionResult.Failure(ActionResultCode.SceneUnavailable,"伙伴已隐藏或收起，整组未执行。",step);
+        }
+        return House?.PreflightActions(plan)??TargetNavigation.Preflight(plan,_c.Store.World(),SceneKind.Desktop,TargetNavigation.Start);
+    }
+    internal ActionResult ExecuteAction(CompanionCommand command)
+    {
+        // The legacy string is presentation only. Failure branches throw a typed error.
+        string message=ExecuteCompanionCommand(command);
+        bool waits=command.Action is "go" or "stroll" or "move" or "dance" or "pat" or "rub" or "interact" or "life" or "throw" or "toy" or "recall";
+        return new(waits?ActionResultCode.Started:ActionResultCode.Completed,command.Action,command.Value,message,TimeSpan.Zero);
+    }
     internal string ExecuteCompanionCommand(CompanionCommand command)
     {
-        if(!CompanionCommands.Allowed(command,_c.Preferences))return "动作未获授权";
-        if(_exit||_c.AnimationSuspended)return "应用正在暂停，动作未执行";
+        if(!CompanionCommands.Allowed(command,_c.Preferences))throw new ActionFailureException(ActionResultCode.Unauthorized,"没有执行：动作权限未开启。");
+        if(_exit||_c.AnimationSuspended)throw new ActionFailureException(ActionResultCode.SceneUnavailable,"应用正在暂停，动作未执行。");
         switch(command.Action)
         {
             case "scene":ShowHouse("chat");House!.SwitchWorld(command.Value=="outdoor");return command.Value=="outdoor"?"已切换户外":"已切换小屋";
@@ -21,7 +43,7 @@ internal sealed partial class DesktopHost
             case "model":_c.SavePreferences(_c.Preferences with{PetModel=command.Value!});return "已切换伙伴模型";
             case "stop":House?.StopCompanion();_pet?.StopCommands();if(House is null)_pet?.SetAiIdleMode("idle");return "已停止当前活动和剩余动作";
             case "recall":if(House is null){_pet?.SetAiIdleMode("idle");return "伙伴已停下，留在你身边";}House.RecallCompanion();return "已叫回伙伴";
-            case "life":case "hide":case "throw":case "layout":case "furniture":
+            case "life":case "hide":case "throw":case "toy":case "layout":case "furniture":
             case "boat":case "boat-shape":case "boat-color":case "boat-wind":case "boat-leaf":case "boat-name":
                 if(House is null)ShowHouse("chat");return House!.ExecuteCreation(command);
             case "move":if(House is null)throw new OperationFailureException("请先打开小屋，再移动到场景坐标");return House.MoveCompanion(new(command.X!.Value,command.Z!.Value));
@@ -29,8 +51,8 @@ internal sealed partial class DesktopHost
             default:
                 var action=command.Action=="pat"?PetAction.Pat:command.Action=="rub"?PetAction.Rub:command.Value=="hop"?PetAction.DanceHop:command.Value=="spin"?PetAction.DanceSpin:PetAction.DanceSway;
                 if(House is not null)return House.PlayCompanion(action);
-                if(_pet is not {IsVisible:true})return "伙伴已隐藏，动作未执行";
-                if(_c.Preferences.DisplayMode=="edge")return "伙伴已收起到边缘，动作未执行";
+                if(_pet is not {IsVisible:true})throw new ActionFailureException(ActionResultCode.SceneUnavailable,"伙伴已隐藏，动作未执行。");
+                if(_c.Preferences.DisplayMode=="edge")throw new ActionFailureException(ActionResultCode.SceneUnavailable,"伙伴已收起到边缘，动作未执行。");
                 _pet.ExecuteAction(action);return _c.Preferences.ReducedMotion?"减少动效模式：已显示静态回应":"已发起伙伴动作";
         }
     }
@@ -38,6 +60,8 @@ internal sealed partial class DesktopHost
 
 internal sealed partial class MainWindow
 {
+    internal SceneKind CompanionScene=>_room.Outdoors?SceneKind.Outdoor:SceneKind.Indoor;
+    internal ActionResult? PreflightActions(ActionPlan plan)=>_room.PreflightActions(plan);
     public string SceneDescription=>_room.CreationContext();
     public void StopCompanion()=>_room.StopWorld();
     public void RecallCompanion(){if(WindowState==WindowState.Minimized)throw new OperationFailureException("窗口已最小化，叫回未执行");RevealWorld();_room.RecallPet();}
@@ -49,5 +73,5 @@ internal sealed partial class MainWindow
     internal string MoveNaturally(CompanionCommand command)
     {if(WindowState==WindowState.Minimized)throw new OperationFailureException("窗口已最小化，移动未执行");RevealWorld();return _room.MoveNaturally(command);}
     public string PlayCompanion(PetAction action)
-    {RevealWorld();if(WindowState==WindowState.Minimized)return "窗口已最小化，动作未执行";_room.PlayAction(action);return _c.Preferences.ReducedMotion?"减少动效模式：已显示静态回应":"已发起伙伴动作";}
+    {RevealWorld();if(WindowState==WindowState.Minimized)throw new ActionFailureException(ActionResultCode.SceneUnavailable,"窗口已最小化，动作未执行。");_room.PlayAction(action);return _c.Preferences.ReducedMotion?"减少动效模式：已显示静态回应":"已发起伙伴动作";}
 }

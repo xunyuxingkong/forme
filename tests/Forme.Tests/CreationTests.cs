@@ -12,7 +12,7 @@ public sealed class CreationTests
         foreach(var c in new CompanionCommand[]{new("stroll","walk"),new("stroll","run"),new("go","book"),new("go","window")})
         {Assert.IsTrue(CompanionCommands.Allowed(c,p));Assert.IsFalse(CompanionCommands.Allowed(c,new()));}
         Assert.IsFalse(CompanionCommands.Allowed(new("go","shell"),p));Assert.IsFalse(CompanionCommands.Allowed(new("stroll","walk",1,1),p));
-        Assert.IsTrue(CompanionCommands.Instructions(p,null).Contains("能走两步吗"));
+        Assert.IsTrue(CompanionCommands.Instructions(p,null).Contains("独立意图识别"));
     }
     [TestMethod]
     public void NearbyGoalAvoidsObstaclesAndLeavesCurrentRouteUntouched()
@@ -47,6 +47,7 @@ public sealed class CreationTests
         var turns=AiClient.BuildContext(p,[],"布置阅读角",out _,scene:"小屋；可用事件reading");
         Assert.IsTrue(turns.Sum(AiClient.Estimate)<=p.ContextBudget);
         turns=AiClient.BuildContext(p,[],"布置阅读角",out bool trimmed,scene:new string('x',6000));
-        Assert.IsTrue(trimmed);Assert.IsTrue(turns.Sum(AiClient.Estimate)<=p.ContextBudget);Assert.IsTrue(turns[0].Content.Contains("场景数据超过预算"));
+        Assert.IsFalse(trimmed);Assert.IsTrue(turns.Sum(AiClient.Estimate)<=p.ContextBudget);Assert.IsFalse(turns[0].Content.Contains(new string('x',100)));
+        Assert.IsTrue(AiIntentProtocol.BuildContext(p,"去池塘边").Sum(AiClient.Estimate)<=p.ContextBudget);
     }
 }

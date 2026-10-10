@@ -66,8 +66,10 @@ public static class LifeRules
         new("garden-nap","花园打盹","前庭的坐垫靠近小窝，伙伴可以晒着太阳休息。","sleep","cushion")
     ];
     public static readonly string[] Ids=Catalog.Select(x=>x.Id).ToArray();
-    public static IReadOnlyList<LifeEvent> Evaluate(LivingWorld world,string weather,bool night,bool lamp)
+    public static IReadOnlyList<LifeEvent> Evaluate(LivingWorld world,string weather,bool night,bool lamp)=>Evaluate(world,new(weather,night?21:8,"spring",night,lamp));
+    public static IReadOnlyList<LifeEvent> Evaluate(LivingWorld world,EnvironmentContext context)
     {
+        string weather=context.Weather;bool night=context.IsNight,lamp=context.LampOn;
         bool near(string a,string b)=>world.Items.Any(x=>x.Kind==a&&world.Items.Any(y=>y.Kind==b&&x.Id!=y.Id&&Distance(x,y)<2.1));
         bool window(string a)=>world.Items.Any(x=>x.Kind==a&&x.Z< -1.4);
         bool front(string a)=>world.Items.Any(x=>x.Kind==a&&x.Z>2.3);
@@ -92,7 +94,7 @@ public static class LifeRules
         add(pair("cushion"),"twin-cushions");
         add(front("book")&&front("cushion")&&near("book","cushion"),"garden-reading");
         add(near("feed","lamp")&&lamp,"lamp-snack");
-        add(near("feed","book")&&clear&&!night,"morning-snack");
+        add(near("feed","book")&&clear&&!night&&context.Hour is >=6 and <11,"morning-snack");
         add(window("sleep")&&weather=="snow","snowy-nest");
         add(near("fish","lamp")&&weather=="rain"&&lamp,"rainy-fish");
         add(front("cushion")&&near("cushion","sleep"),"garden-nap");
