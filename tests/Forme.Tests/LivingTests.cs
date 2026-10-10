@@ -27,6 +27,20 @@ public sealed class LivingTests
         var separated=world with{Items=world.Items.Select((i,n)=>i with{X=n*10,Z=0}).ToList()};Assert.AreEqual(0,LifeRules.Evaluate(separated,"clear",false,false).Count);
     }
     [TestMethod]
+    public void LifeEventsRemainSafeWithEmptyOrPartialFurnitureLayouts()
+    {
+        var empty=new LivingWorld([],[]);
+        Assert.AreEqual(0,LifeRules.Evaluate(empty,"rain",true,true).Count);
+        foreach(var kind in LivingWorld.Catalog.Select(x=>x.Id))
+        {
+            var partial=LivingWorld.Default() with{Items=LivingWorld.Default().Items.Where(x=>x.Kind!=kind).ToList()};
+            Assert.IsNotNull(LifeRules.Evaluate(partial,"rain",false,true));
+            Assert.IsNotNull(LifeRules.Evaluate(partial,"clear",true,false));
+        }
+        var importedPartial=new LivingWorld([new("chair","cushion",0,-2,0)],[]);
+        Assert.IsNotNull(LifeRules.Evaluate(importedPartial,"clear",false,false));
+    }
+    [TestMethod]
     public void LayoutAndDiscoveriesRoundTripAndOlderBackupsPreserveThem()
     {
         var dir=Path.GetFullPath(Path.Combine("artifacts","living-tests",Guid.NewGuid().ToString("N")));

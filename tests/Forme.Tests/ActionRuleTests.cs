@@ -35,6 +35,8 @@ public sealed class ActionRuleTests
         var current=ActionRules.Default();
         var old=current with{Rules=current.Rules.Select(r=>r.Commands[0]==new CompanionCommand("dance","spin")?r with{Phrases=["转圈舞"]}:r).ToArray()};
         Assert.AreEqual("spin",old.UpgradeDefaults().Match("转一圈看看")![0].Value);
+        var older=old with{Rules=old.Rules.Where(r=>r.Commands[0].Value is not ("lap1" or "lap2")).ToArray()};
+        Assert.AreEqual("spin",older.UpgradeDefaults().Match("转一圈看看")![0].Value);
         var custom=old with{Rules=old.Rules.Append(new ActionRule(["休息一下"],[new("idle","sleep")])).ToArray()};
         Assert.AreSame(custom,custom.UpgradeDefaults());
     }

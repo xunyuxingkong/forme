@@ -47,8 +47,8 @@ public static class LifeRules
     {
         bool near(string a,string b)=>world.Items.Any(x=>x.Kind==a&&world.Items.Any(y=>y.Kind==b&&x.Id!=y.Id&&Distance(x,y)<2.1));
         bool window(string a)=>world.Items.Any(x=>x.Kind==a&&x.Z< -1.4);
-        string target(string kind)=>world.Items.First(x=>x.Kind==kind).Id;
-        var events=new List<LifeEvent>();void add(bool ok,string id,string title,string text,string action,string kind){if(ok)events.Add(new(id,title,text,action,target(kind)));}
+        string? target(string kind)=>world.Items.FirstOrDefault(x=>x.Kind==kind)?.Id;
+        var events=new List<LifeEvent>();void add(bool ok,string id,string title,string text,string action,string kind){if(ok&&target(kind) is{} itemId)events.Add(new(id,title,text,action,itemId));}
         add(near("cushion","book"),"reading","小小阅读角","坐垫靠近书架，伙伴可以坐下来读书。","book","cushion");
         add(near("cushion","book")&&near("cushion","lamp")&&weather=="rain"&&lamp,"rain-reading","听雨读书","阅读角开着暖灯，雨声成了故事的背景。","book","cushion");
         add(window("cushion")&&weather=="clear"&&!night,"sun-nap","窗边晒太阳","窗边的坐垫接住了白天的阳光。","sleep","cushion");

@@ -38,7 +38,8 @@ public sealed record ActionRules(int Version,ActionRule[] Rules)
         var current=Default();
         var previous=current with{Rules=current.Rules.Where(r=>r.Commands.Length!=1||r.Commands[0].Action!="stroll"||r.Commands[0].Value is not ("lap1" or "lap2")).ToArray()};
         var earlier=previous with{Rules=previous.Rules.Select(r=>r.Commands.Length==1&&r.Commands[0]==new CompanionCommand("dance","spin")?r with{Phrases=["转圈舞"]}:r).ToArray()};
-        return Serialize()==previous.Serialize()||Serialize()==earlier.Serialize()?current:this;
+        var spinPrevious=current with{Rules=current.Rules.Select(r=>r.Commands.Length==1&&r.Commands[0]==new CompanionCommand("dance","spin")?r with{Phrases=["转圈舞"]}:r).ToArray()};
+        return Serialize()==previous.Serialize()||Serialize()==earlier.Serialize()||Serialize()==spinPrevious.Serialize()?current:this;
     }
     public static ActionRules Parse(string text)
     {
