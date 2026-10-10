@@ -30,6 +30,7 @@ internal sealed partial class MainWindow : Window
     private string _page="home";
     private int _focusOffset,_moodOffset,_chatOffset,_sessionOffset;
     private string _chatSearch="";
+    private bool _chatOptionsExpanded,_chatSummaryExpanded;
     private readonly Dictionary<string,Button> _navigation=new();
     private DispatcherTimer? _relaxTimer;
     private Pet3DView? _relaxPet;
@@ -82,7 +83,7 @@ internal sealed partial class MainWindow : Window
         {
             "furniture"=>FurniturePage(),"living"=>LivingPage(),"hide"=>HidePage(),"welcome"=>Welcome(),"boat"=>BoatPage(),"chat"=>Chat(),"memory"=>MemorySettings(),"focus"=>FocusPage(),"relax"=>Relax(),"mood"=>Mood(),"plant"=>Plant(),"room"=>Room(),"play"=>Play(),"settings"=>Settings(),_=>Home()
         };
-        _panel.Content=new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Padding=new Thickness(0,0,8,0)};
+        _panel.Content=page=="chat"?content:new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Padding=new Thickness(0,0,8,0)};
     }
     private void ApplyLayout()
     {
@@ -128,8 +129,8 @@ internal sealed partial class MainWindow : Window
     private void OnTick()
     {
         if(_clockText is not null)_clockText.Text=ClockLabel();
-        if(_liveText is not null && _c.Busy)_liveText.Text=_c.LiveReply.Length==0?"…":_c.LiveReply;
-        if(_chatState is not null)_chatState.Text=_c.Waiting?"仍在等待服务响应，可以随时停止。":_c.ChatStatus;
+        if(_liveText is not null && _c.Busy)_liveText.Text=_c.LiveReply.Length==0?"…":ChatDisplay.Message(_c.LiveReply);
+        if(_chatState is not null)_chatState.Text=_c.Waiting?"仍在等待服务响应，可以随时停止。":ChatDisplay.Status(_c.ChatStatus);
     }
     private string ClockLabel()=>TimeSpan.FromSeconds(Math.Ceiling(_c.Clock.Remaining)).ToString(_c.Clock.Remaining>=3600?@"hh\:mm\:ss":@"mm\:ss");
     private UIElement Home()
@@ -210,7 +211,7 @@ internal sealed partial class MainWindow : Window
         var day=DateOnly.FromDateTime(DateTime.Now);var progress=_c.Store.GameProgress();
         var panel=Ui.Stack(Ui.Text("一起慢慢长大",25,null,true),Ui.Text($"Lv.{progress.Level}  ·  陪伴值 {progress.Experience}  ·  ⭐ {progress.Stars}",17,Ui.Sage,true),Ui.Text(progress.Level>=20?"已经到达当前最高等级。":"距离下一级还差 "+GameProgression.ExperienceToNext(progress.Experience)+" 点陪伴值。每天最多获得 20 点，不需要连续签到。",12,Ui.Muted));
         var tasks=Ui.Stack(Ui.Text("今天的小任务",17,null,true));
-        foreach(var task in _c.Store.GameTasks(day))tasks.Children.Add(Ui.Card(Ui.Stack(Ui.Text((task.Completed?"✓  ":"")+task.Title,15,null,true),Ui.Text(task.Hint+"  ·  完成得 "+task.RewardXp+" 陪伴值和 "+task.RewardStars+" 颗星。",12,Ui.Muted),task.Completed?Ui.Text("已经记下啦",12,Ui.Sage):Ui.Button(task.Id switch{"ball"=>"抛小球","discover"=>"去户外发现","relax"=>"开始放松","focus"=>"开始专注",_=>"完成"},()=>RunGameTask(task.Id,day),true))));
+        foreach(var task in _c.Store.GameTasks(day))tasks.Children.Add(Ui.Card(Ui.Stack(Ui.Text((task.Completed?"✓  ":"")+task.Title,15,null,true),Ui.Text(task.Hint+"  ·  完成得 "+task.RewardXp+" 陪伴值和 "+task.RewardStars+" 颗星。",12,Ui.Muted),task.Completed?Ui.Text("已经记下啦",12,Ui.Sage):Ui.Button(TaskButtonLabel(task.Id),()=>RunGameTask(task.Id,day),true))));
         panel.Children.Add(tasks);
         var inventory=Ui.Stack(Ui.Text("玩具与布置",17,null,true));var owned=_c.Store.GameInventory().ToDictionary(x=>x.ItemId,x=>x.Quantity,StringComparer.Ordinal);
         foreach(var item in GameProgression.Catalog.Where(x=>x.Kind is "toy" or "decor" or "rug"))
@@ -219,31 +220,63 @@ internal sealed partial class MainWindow : Window
             inventory.Children.Add(row);
         }
         panel.Children.Add(Ui.Card(inventory));
-        var discoveries=_c.Store.GameDiscoveries();panel.Children.Add(Ui.Card(Ui.Stack(Ui.Text("户外收藏",17,null,true),Ui.Text(discoveries.Count==0?"还没有发现。去 20m × 20m 的户外场景逛逛吧。":string.Join("、",discoveries.Select(x=>GameProgression.Catalog.First(i=>i.Id==x.ItemId).Name)),13,Ui.Muted),Ui.Text("发现只保存在这台设备上。",11,Ui.Muted))));
+        var discoveries=_c.Store.GameDiscoveries();panel.Children.Add(Ui.Card(Ui.Stack(Ui.Text($"户外收藏 · {discoveries.Count}/{GameProgression.Discoveries.Count}",17,null,true),Ui.Text(discoveries.Count==0?"还没有发现。去 20m × 20m 的户外场景逛逛吧。":string.Join("、",discoveries.Select(x=>GameProgression.Catalog.First(i=>i.Id==x.ItemId).Name)),13,Ui.Muted),Ui.Text("部分发现会在雨雪、夜晚或不同季节出现；没有错过惩罚。收藏只保存在这台设备上。",11,Ui.Muted))));
         var ownedIds=owned.Keys.ToHashSet(StringComparer.Ordinal);var collection=Ui.Stack(Ui.Text("收藏图鉴",17,null,true));
-        foreach(var item in GameProgression.Catalog.Where(x=>x.Kind is "discovery" or "decor" or "rug"))collection.Children.Add(Ui.Text((ownedIds.Contains(item.Id)?"✓  ":"○  ")+item.Name,12,ownedIds.Contains(item.Id)?Ui.Sage:Ui.Muted));
+        foreach(var item in GameProgression.Catalog.Where(x=>x.Kind is "discovery" or "decor" or "rug"))collection.Children.Add(Ui.Text((ownedIds.Contains(item.Id)?"✓  ":"○  ")+item.Name+(item.Kind=="discovery"?" · "+DiscoveryConditionLabel(item):""),12,ownedIds.Contains(item.Id)?Ui.Sage:Ui.Muted));
         panel.Children.Add(Ui.Card(collection));
-        var achievements=_c.Store.GameAchievements().Select(x=>x.Id).ToHashSet(StringComparer.Ordinal);var unlockedAchievements=GameProgression.AchievementsCatalog.Where(x=>achievements.Contains(x.Id)).Select(x=>x.Name).ToArray();
-        panel.Children.Add(Ui.Card(Ui.Stack(Ui.Text("小小纪念",17,null,true),unlockedAchievements.Length==0?Ui.Text("完成任务后会留下纪念。没有连续签到或错过惩罚。",12,Ui.Muted):Ui.Text(string.Join("、",unlockedAchievements),12,Ui.Sage))));
+        var achievements=_c.Store.GameAchievements().Select(x=>x.Id).ToHashSet(StringComparer.Ordinal);var unlockedCount=GameProgression.AchievementsCatalog.Count(x=>achievements.Contains(x.Id));var achievementList=Ui.Stack(Ui.Text($"小小纪念 · {unlockedCount}/{GameProgression.AchievementsCatalog.Count}",17,null,true));
+        foreach(var achievement in GameProgression.AchievementsCatalog)achievementList.Children.Add(Ui.Text((achievements.Contains(achievement.Id)?"✓ ":"○ ")+achievement.Name+" · "+achievement.Description,12,achievements.Contains(achievement.Id)?Ui.Sage:Ui.Muted));
+        panel.Children.Add(Ui.Card(achievementList));
         return panel;
+    }
+    private static string TaskButtonLabel(string id)=>id switch
+    {
+        "ball"=>"抛小球","discover"=>"去户外找找","relax"=>"开始放松","focus"=>"开始专注","walk"=>"带伙伴散步",
+        "furniture"=>"去书架看看","water"=>"去浇水","life"=>"查看生活组合","boat"=>"开始纸船旅行","toy"=>"玩一种玩具",
+        "model"=>"更换伙伴模型","garden"=>"去花园坐坐","dance"=>"看伙伴跳舞","outdoor"=>"去户外走走",_=>"开始体验"
+    };
+    private static string DiscoveryConditionLabel(GameItem item)
+    {
+        string condition=item.Condition switch{"rain"=>"雨天","snow"=>"雪天","night"=>"夜晚","spring"=>"春季","summer"=>"夏季","autumn"=>"秋季","winter"=>"冬季",_=>"户外"};
+        string rarity=item.Rarity switch{"rare"=>"稀有","uncommon"=>"少见",_=>"常见"};return condition+" · "+rarity;
     }
     private void RunGameTask(string taskId,DateOnly day)
     {
-        if((taskId is "ball" or "discover")&&!_room.IsVisible&&ActualWidth<940)
+        if((taskId is "ball" or "discover" or "walk" or "furniture" or "water" or "toy" or "garden" or "outdoor" or "dance")&&!_room.IsVisible&&ActualWidth<940)
         {
             _compactScene=true;ApplyLayout();Dispatcher.BeginInvoke(new Action(()=>RunGameTask(taskId,day)));return;
         }
-        if(taskId=="ball")
+        if(taskId is "ball" or "discover")
         {
-            _room.SwitchScene(false);string report=_room.Interact("ball");if(report.Contains("无法")){_room.SwitchScene(true);report=_room.Interact("ball");}Toast(report);
+            _room.SwitchScene(taskId=="discover");
+            if(taskId=="ball")
+            {
+                _room.SelectToy("ball-yellow");string report=_room.Interact("ball");if(report.Contains("无法")){_room.SwitchScene(true);report=_room.Interact("ball");}Toast(report);
+            }
+            else
+            {
+                var before=_c.Store.GameDiscoveries().Select(x=>x.ItemId).ToHashSet(StringComparer.Ordinal);
+                if(!_c.Store.DiscoverOutdoor(day,_c.Preferences.Weather,DateTime.Now.Hour)){Toast("今天已经记下这个户外发现啦，慢慢来就好。");return;}
+                var found=_c.Store.GameDiscoveries().FirstOrDefault(x=>!before.Contains(x.ItemId));Toast(found is null?"伙伴记下了今天的户外散步。":"发现了"+GameProgression.Catalog.First(x=>x.Id==found.ItemId).Name+"，已经收入收藏。");
+            }
         }
-        else if(taskId=="discover")
+        else if(taskId=="relax"){Navigate("relax");return;}
+        else if(taskId=="focus"){Navigate("focus");return;}
+        else if(taskId=="walk"){_room.SwitchScene(false);if(!_room.TryMove(new(-1.2,2.5)))Toast("先在小屋空地点击一下，陪伙伴走一小段。");}
+        else if(taskId=="furniture"){_room.SwitchScene(false);Toast(_room.Interact("book"));}
+        else if(taskId=="water"){_room.SwitchScene(true);Toast(_room.Interact("water"));}
+        else if(taskId=="life")
         {
-            _room.SwitchScene(true);bool newItem=_c.Store.GameDiscoveries().Count<3;
-            if(!_c.Store.DiscoverOutdoor(day)){Toast("今天已经记下这个发现啦，明天再来看看。");return;}
-            Toast(newItem?"发现了一件小东西，已经放进收藏里。":"伙伴记下了今天的户外散步。");
+            _room.SwitchScene(false);var world=_c.Store.World();var night=_c.Preferences.Theme=="night"||_c.Preferences.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7);
+            var life=LifeRules.Evaluate(world,_c.Preferences.Weather,night,_c.Preferences.RoomLamp).FirstOrDefault();
+            if(life is null){Navigate("living");Toast("把坐垫、书架和暖灯摆成新的组合，再来体验生活事件。");return;}_room.RunLife(life);Toast(life.Title+"："+life.Description);
         }
-        else {Navigate(taskId=="relax"?"relax":"focus");return;}
+        else if(taskId=="boat"){Navigate("boat");return;}
+        else if(taskId=="toy"){if(!_room.PlaySelectedToy())Toast("先在小屋里选一件已拥有的玩具，或者到成长页兑换。");}
+        else if(taskId=="model"){Navigate("settings");Toast("在“伙伴模型与资源占用”里切换模型，保存后任务会自动记下。");return;}
+        else if(taskId=="garden"){_room.SwitchScene(true);Toast(_room.Interact("picnic"));}
+        else if(taskId=="dance")_room.PlayAction(PetAction.DanceSway);
+        else if(taskId=="outdoor"){_room.SwitchScene(true);if(!_room.TryMove(new(4,2)))Toast("花园里找一处空地点击，让伙伴走过去。");}
         _c.Refresh();if(_page=="play")RenderPage("play",true);
     }
     private UIElement Room()
@@ -256,13 +289,22 @@ internal sealed partial class MainWindow : Window
         theme.SelectionChanged+=(_,_)=>Preview();rug.SelectionChanged+=(_,_)=>Preview();ornament.SelectionChanged+=(_,_)=>Preview();
         var page=Ui.Stack(Ui.Button("进入家具编辑",()=>Navigate("furniture"),true),Ui.Text("把这里布置成你喜欢的样子",24,null,true),Ui.Text("基础功能一直开放，装饰只是相处留下的小纪念。",13,Ui.Muted),Ui.Card(Ui.Stack(Ui.Text("窗外"),theme,Ui.Text("地毯"),rug,Ui.Text("桌面摆件"),ornament,Ui.Row(Ui.Button("保存布置",()=>{Preview();var v=_room.Preview!;_c.SavePreferences(_c.Preferences with{Theme=v.Theme,Rug=v.Rug,Ornament=v.Ornament});Toast("布置已保存。");Navigate("home");},true),Ui.Button("取消",()=>Navigate("home"))))),Ui.Text("当前预览未保存。切换页面时将恢复保存的布置。",12,Ui.Muted));
         var inventory=_c.Store.GameInventory().Where(x=>x.Quantity>0).Select(x=>x.ItemId).ToHashSet(StringComparer.Ordinal);
-        var place=Ui.Stack(Ui.Text("家具摆放",17,null,true),Ui.Text("从成长页兑换物品，再选一个位置摆放。",12,Ui.Muted));
-        foreach(var (slot,label) in new[]{("desk","书桌"),("shelf","墙边"),("garden","花园")})
+        var choices=GameProgression.Catalog.Where(x=>inventory.Contains(x.Id)&&(x.Kind is "decor" or "rug")).ToArray();
+        var place=Ui.Stack(Ui.Text("家具摆放",17,null,true),Ui.Text($"10 个摆放位置 · 已收藏装饰可在位置间调整。",12,Ui.Muted));
+        if(choices.Length==0)place.Children.Add(Ui.Text("还没有可摆放的物品，先到成长页兑换一件装饰。",12,Ui.Muted));
+        else
         {
-            var choices=GameProgression.Catalog.Where(x=>inventory.Contains(x.Id)&&(x.Kind is "decor" or "rug")).ToArray();
-            if(choices.Length==0){place.Children.Add(Ui.Text($"{label}：还没有可摆放的物品",12,Ui.Muted));continue;}
-            var select=Ui.Select(choices.Select(x=>x.Name),choices[0].Name,label+"摆放物品");
-            place.Children.Add(Ui.Row(Ui.Text(label,13),select,Ui.Button("摆放",()=>{var item=choices.First(x=>x.Name==select.SelectedItem?.ToString());if(_c.Store.PlaceGameItem(slot,item.Id)){_c.Refresh();Toast(item.Name+"已摆放。");Navigate("room");}})));
+            var slotSelect=Ui.Select(GameProgression.DecorSlots.Select(x=>x.Name),GameProgression.DecorSlots[0].Name,"选择装饰位置");
+            var itemSelect=Ui.Select(choices.Select(x=>x.Name),choices[0].Name,"选择装饰物");
+            var current=Ui.Text("",12,Ui.Muted);
+            void UpdateSlot()
+            {
+                var slot=GameProgression.DecorSlots[Math.Clamp(slotSelect.SelectedIndex,0,GameProgression.DecorSlots.Count-1)];
+                var itemId=_c.Store.GameSlots().GetValueOrDefault(slot.Id);current.Text=itemId is null?"这个位置目前是空的。":"当前位置："+GameProgression.Catalog.First(x=>x.Id==itemId).Name;
+            }
+            slotSelect.SelectionChanged+=(_,_)=>UpdateSlot();UpdateSlot();
+            place.Children.Add(slotSelect);place.Children.Add(itemSelect);place.Children.Add(current);
+            place.Children.Add(Ui.Row(Ui.Button("摆放",()=>{var slot=GameProgression.DecorSlots[Math.Clamp(slotSelect.SelectedIndex,0,GameProgression.DecorSlots.Count-1)];var item=choices.First(x=>x.Name==itemSelect.SelectedItem?.ToString());if(_c.Store.PlaceGameItem(slot.Id,item.Id)){_c.Refresh();Toast(item.Name+"已摆在"+slot.Name+"。");Navigate("room");}}),Ui.Button("收起此处装饰",()=>{var slot=GameProgression.DecorSlots[Math.Clamp(slotSelect.SelectedIndex,0,GameProgression.DecorSlots.Count-1)];if(_c.Store.ClearGameSlot(slot.Id)){_c.Refresh();Toast("装饰已收起。");Navigate("room");}})));
         }
         page.Children.Add(Ui.Card(place));page.Children.Add(WorldControls());return page;
     }
@@ -303,39 +345,72 @@ internal sealed partial class MainWindow : Window
     }
     private UIElement Chat()
     {
-        var p=Ui.Stack(Ui.Text("我在这里，听你说",25,null,true),Ui.Text((_c.Preferences.LocalActionRules?"本地规则优先 · 未匹配才发送至 ":"发送至 ")+_c.Preferences.Endpoint+" · "+_c.Preferences.Model,11,Ui.Muted));
-        var sessions=_c.Store.Sessions(_sessionOffset,10);var select=new ComboBox{Margin=new Thickness(0,0,0,10),MinHeight=34};
-        foreach(var s in sessions)select.Items.Add(new ComboBoxItem{Content=$"{s.Created:MM-dd HH:mm}  {s.Title}",Tag=s,IsSelected=s.Id==_c.Session?.Id});
-        select.SelectionChanged+=(_,_)=>Ui.Guard(()=>{if(select.SelectedItem is ComboBoxItem{Tag:ChatSession s}){_chatOffset=0;_c.SelectSession(s);}});
-        p.Children.Add(select);p.Children.Add(Ui.Row(Ui.Button("新对话",()=>{_chatOffset=0;_c.NewSession();}),Ui.Button("删除本次",()=>{if(Ui.Confirm("删除此会话和相关应用备份？已发送给服务商及外部导出副本不在删除范围内。"))_c.DeleteSession();})));
-        p.Children.Add(Ui.Row(Ui.Button("管理记忆",()=>Navigate("memory")),Ui.Button("角色与动作权限",()=>Navigate("settings")),Ui.Button("查看本次发送内容",()=>ChatRequests.Preview(_c,this))));
-        string provider=AiClient.ProviderIdentity(_c.Preferences.Endpoint);int memories=_c.Store.Memories().Count(x=>x.Enabled&&x.Provider==provider);
-        p.Children.Add(Ui.Text(_c.Preferences.MemoryEnabled?$"记忆分享已开启 · 当前服务可用 {memories} 条 · 只发送预算内的已确认内容":"记忆分享已关闭 · 历史仍保存在本机",11,Ui.Muted));
-        if(_c.PendingChatSave is {} unsaved)p.Children.Add(Ui.Card(Ui.Stack(Ui.Text("这条回复尚未写入磁盘，退出前请复制或重试保存",13,Ui.Sage),Ui.Text(unsaved.Content,13),Ui.Row(Ui.Button("复制暂存回复",()=>Clipboard.SetText(unsaved.Content)),Ui.Button("重试保存",_c.RetryChatSave),Ui.Button("放弃保存",()=>{if(Ui.Confirm("放弃这条暂存回复的保存？"))_c.DiscardPendingSave();})))));
+        var page=new Grid{Margin=new Thickness(0,0,8,0)};
+        foreach(var height in new[]{GridLength.Auto,GridLength.Auto,GridLength.Auto,new GridLength(1,GridUnitType.Star),GridLength.Auto})page.RowDefinitions.Add(new(){Height=height});
+        void Place(UIElement child,int row){Grid.SetRow(child,row);page.Children.Add(child);}
+        var provider=AiClient.ProviderIdentity(_c.Preferences.Endpoint);
+        string endpoint=_c.Secrets.Exists?(_c.Preferences.LocalActionRules?"本地规则优先 · 未匹配才发送至 ":"发送至 ")+_c.Preferences.Endpoint+" · "+_c.Preferences.Model:"尚未连接 AI · 本地互动仍可使用";
+        Place(Ui.Stack(Ui.Text("我在这里，听你说",24,null,true),Ui.Text(endpoint,11,Ui.Muted)),0);
+
+        var sessions=_c.Store.Sessions(_sessionOffset,10);
+        var select=new ComboBox{Margin=new Thickness(0,0,8,8),MinHeight=36,HorizontalAlignment=HorizontalAlignment.Stretch};
+        foreach(var session in sessions)select.Items.Add(new ComboBoxItem{Content=$"{session.Created:MM-dd HH:mm}  {session.Title}",Tag=session,IsSelected=session.Id==_c.Session?.Id});
+        select.SelectionChanged+=(_,_)=>Ui.Guard(()=>{if(select.SelectedItem is ComboBoxItem{Tag:ChatSession session}){_chatOffset=0;_chatSearch="";_c.SelectSession(session);}});
+        var sessionBar=new Grid();sessionBar.ColumnDefinitions.Add(new(){Width=new GridLength(1,GridUnitType.Star)});sessionBar.ColumnDefinitions.Add(new(){Width=GridLength.Auto});sessionBar.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
+        Grid.SetColumn(select,0);sessionBar.Children.Add(select);
+        var newSession=Ui.Button("新对话",()=>{_chatOffset=0;_chatSearch="";_c.NewSession();});Grid.SetColumn(newSession,1);sessionBar.Children.Add(newSession);
+        var deleteSession=Ui.Button("删除本次",()=>{if(Ui.Confirm("删除此会话和相关应用备份？已发送给服务商及外部导出副本不在删除范围内。"))_c.DeleteSession();});Grid.SetColumn(deleteSession,2);sessionBar.Children.Add(deleteSession);Place(sessionBar,1);
+
+        int memories=_c.Store.Memories().Count(x=>x.Enabled&&x.Provider==provider);
+        var optionActions=Ui.Row(Ui.Button("管理记忆",()=>Navigate("memory")),Ui.Button("角色与动作权限",()=>Navigate("settings")),Ui.Button("查看本次发送内容",()=>ChatRequests.Preview(_c,this)));
+        if(!_c.Secrets.Exists)optionActions.Children.Add(Ui.Button("连接 AI",()=>Navigate("settings")));
+        else optionActions.Children.Add(Ui.Button("给我一点鼓励（本地）",()=>Toast("今天不用做得完美。先照顾自己，再开始一件小事。")));
+        var optionItems=Ui.Stack(optionActions,Ui.Text(_c.Preferences.MemoryEnabled?$"记忆分享已开启 · 当前服务可用 {memories} 条 · 只发送预算内的已确认内容":"记忆分享已关闭 · 历史仍保存在本机",11,Ui.Muted));
         if(_c.Session is {} current)
         {
-            var savedNote=_c.Store.Note(current.Id);var summary=Ui.Input(savedNote?.Content??"",true,800,"会话摘要");
+            var savedNote=_c.Store.Note(current.Id);
+            var summary=Ui.Input(savedNote?.Content??"",true,800,"会话摘要");
             var title=Ui.Input(_c.Store.Sessions(0,1000).FirstOrDefault(x=>x.Id==current.Id)?.Title??current.Title,max:24,automationName:"会话标题");
-            p.Children.Add(new Expander{Header="会话标题与摘要（本地编辑，不调用 AI）",Content=Ui.Stack(title,Ui.Button("重命名会话",()=>{if(string.IsNullOrWhiteSpace(title.Text))throw new InvalidDataException("标题不能为空。");_c.Store.RenameSession(current.Id,title.Text.Trim());_c.Refresh();}),Ui.Text("摘要作为你确认的记忆，开启分享后随本次会话发送。绑定保存时的服务商。",11,Ui.Muted),summary,Ui.Button("保存会话摘要",()=>{_c.Store.SaveNote(new(current.Id,summary.Text.Trim(),provider));Toast("摘要已保存在本机。");}))});
+            var summaryExpander=new Expander{Header="会话标题与摘要 · 本地编辑",IsExpanded=_chatSummaryExpanded,Content=Ui.Stack(title,Ui.Button("重命名会话",()=>{if(string.IsNullOrWhiteSpace(title.Text))throw new InvalidDataException("标题不能为空。");_c.Store.RenameSession(current.Id,title.Text.Trim());_c.Refresh();}),Ui.Text("摘要只在你启用记忆分享后，才会随聊天发送。",11,Ui.Muted),summary,Ui.Button("保存会话摘要",()=>{_c.Store.SaveNote(new(current.Id,summary.Text.Trim(),provider));Toast("摘要已保存在本机。");}))};
+            summaryExpander.Expanded+=(_,_)=>_chatSummaryExpanded=true;summaryExpander.Collapsed+=(_,_)=>_chatSummaryExpanded=false;optionItems.Children.Add(summaryExpander);
         }
-        var search=Ui.Input(_chatSearch,max:80,automationName:"搜索当前会话");
-        p.Children.Add(Ui.Row(search,Ui.Button("搜索记录",()=>{_chatSearch=search.Text.Trim();_chatOffset=0;Navigate("chat");}),Ui.Button("清除搜索",()=>{_chatSearch="";_chatOffset=0;Navigate("chat");})));
-        if(sessions.Count==10 || _sessionOffset>0)p.Children.Add(Pager(_sessionOffset,sessions.Count,10,offset=>{_sessionOffset=offset;Navigate("chat");}));
-        if(!_c.Secrets.Exists)p.Children.Add(Ui.Card(Ui.Stack(Ui.Text("还没有连接 AI",16,null,true),Ui.Text("本地互动可以直接使用。自由对话需要你提供密钥，调用可能收费。",13,Ui.Muted),Ui.Button("连接 AI",()=>Navigate("settings")),Ui.Button("给我一点鼓励（本地）",()=>Toast("今天不用做得完美。先照顾自己，再开始一件小事。")))));
+        var search=Ui.Input(_chatSearch,max:80,automationName:"搜索当前会话");search.Margin=new Thickness(0,0,8,8);
+        var searchBar=new Grid();searchBar.ColumnDefinitions.Add(new(){Width=new GridLength(1,GridUnitType.Star)});searchBar.ColumnDefinitions.Add(new(){Width=GridLength.Auto});searchBar.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
+        Grid.SetColumn(search,0);searchBar.Children.Add(search);
+        var searchButton=Ui.Button("搜索记录",()=>{_chatSearch=search.Text.Trim();_chatOffset=0;_chatOptionsExpanded=true;Navigate("chat");});Grid.SetColumn(searchButton,1);searchBar.Children.Add(searchButton);
+        var clearSearch=Ui.Button("清除搜索",()=>{_chatSearch="";_chatOffset=0;_chatOptionsExpanded=true;Navigate("chat");});Grid.SetColumn(clearSearch,2);searchBar.Children.Add(clearSearch);optionItems.Children.Add(searchBar);
+        if(sessions.Count==10||_sessionOffset>0)optionItems.Children.Add(Pager(_sessionOffset,sessions.Count,10,offset=>{_sessionOffset=offset;_chatOptionsExpanded=true;Navigate("chat");}));
+        var optionScroll=new ScrollViewer{Content=optionItems,MaxHeight=230,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
+        var options=new Expander{Header="会话设置、记忆与搜索",IsExpanded=_chatOptionsExpanded,Content=optionScroll,Margin=new Thickness(0,0,0,6)};System.Windows.Automation.AutomationProperties.SetName(options,"聊天记录管理");
+        options.Expanded+=(_,_)=>_chatOptionsExpanded=true;options.Collapsed+=(_,_)=>_chatOptionsExpanded=false;Place(options,2);
+
         var messages=_c.Session is null?new List<ChatMessage>():_chatSearch.Length>0?_c.Store.SearchMessages(_c.Session.Id,_chatSearch,_chatOffset,20):_c.Store.Messages(_c.Session.Id,_chatOffset,20);
-        var transcript=new StackPanel();var transcriptScroll=new ScrollViewer{Content=transcript,MaxHeight=230,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Margin=new Thickness(0,0,0,10)};
-        foreach(var m in messages)
+        var history=new Grid();history.RowDefinitions.Add(new(){Height=GridLength.Auto});history.RowDefinitions.Add(new(){Height=new GridLength(1,GridUnitType.Star)});
+        var historyHeader=new Grid{Margin=new Thickness(0,0,0,6)};historyHeader.ColumnDefinitions.Add(new(){Width=new GridLength(1,GridUnitType.Star)});historyHeader.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
+        var historyTitle=Ui.Text(_chatSearch.Length>0?$"聊天记录 · 搜索“{_chatSearch}”":"聊天记录",15,null,true);historyTitle.VerticalAlignment=VerticalAlignment.Center;Grid.SetColumn(historyTitle,0);historyHeader.Children.Add(historyTitle);
+        if(_c.Session is not null){var pager=Pager(_chatOffset,messages.Count,20,offset=>{_chatOffset=offset;Navigate("chat");});Grid.SetColumn(pager,1);historyHeader.Children.Add(pager);}
+        Grid.SetRow(historyHeader,0);history.Children.Add(historyHeader);
+        var transcript=new StackPanel();
+        if(_c.PendingChatSave is {} unsaved)transcript.Children.Add(Ui.Card(Ui.Stack(Ui.Text("这条回复尚未保存到本机",13,Ui.Sage,true),Ui.Text(ChatDisplay.Message(unsaved.Content),13),Ui.Row(Ui.Button("复制暂存回复",()=>Clipboard.SetText(ChatDisplay.Message(unsaved.Content))),Ui.Button("重试保存",_c.RetryChatSave),Ui.Button("放弃保存",()=>{if(Ui.Confirm("放弃这条暂存回复的保存？"))_c.DiscardPendingSave();}))),new Thickness(12)));
+        foreach(var message in messages)
         {
-            if(m.Status=="streaming"&&_c.Busy)continue;
-            var content=Ui.Stack(Ui.Text(m.Role=="user"?"你":_c.Preferences.PetName,11,Ui.Muted,true),Ui.Text(m.Content.Length==0?"未收到内容":m.Content,14));
-            if(m.Status is "stopped" or "error")content.Children.Add(Ui.Text(m.Status=="stopped"?"已停止":"未完成",11,Ui.Muted));
-            content.Children.Add(Ui.Row(Ui.Button("复制",()=>Clipboard.SetText(m.Content)),Ui.Button("存为记忆…",()=>{string memory=CompanionCommands.ContextText(m.Content);_c.MemoryDraft=memory.Length>400?memory[..400]:memory;Navigate("memory");Toast("已放入记忆编辑框，确认内容和标题后再保存。");})));transcript.Children.Add(Ui.Card(content,new Thickness(16)));
+            if(message.Status=="streaming"&&_c.Busy)continue;
+            string visible=message.Role=="user"?message.Content:ChatDisplay.Message(message.Content);
+            if(message.Role!="user"&&visible.Length==0&&message.Content.Length>0)continue;
+            var content=Ui.Stack(Ui.Text(message.Role=="user"?"你":_c.Preferences.PetName,11,Ui.Muted,true),Ui.Text(message.Content.Length==0?"未收到内容":visible,14));
+            if(message.Status is "stopped" or "error")content.Children.Add(Ui.Text(message.Status=="stopped"?"已停止":"未完成",11,Ui.Muted));
+            content.Children.Add(Ui.Row(Ui.Button("复制",()=>Clipboard.SetText(message.Role=="user"?message.Content:visible)),Ui.Button("存为记忆…",()=>{string memory=CompanionCommands.ContextText(message.Content);_c.MemoryDraft=memory.Length>400?memory[..400]:memory;Navigate("memory");Toast("已放入记忆编辑框，确认内容和标题后再保存。");})));
+            transcript.Children.Add(new Border{Child=content,Background=Ui.Brush(message.Role=="user"?"#EEF1EA":"#FFFFFF"),CornerRadius=new CornerRadius(14),BorderBrush=Ui.Line,BorderThickness=new Thickness(1),Padding=new Thickness(12),Margin=new Thickness(0,0,0,8)});
         }
-        if(_c.Session is not null)p.Children.Add(Pager(_chatOffset,messages.Count,20,offset=>{_chatOffset=offset;Navigate("chat");}));
-        if(_c.Busy){_liveText=Ui.Text(_c.LiveReply.Length==0?"…":_c.LiveReply,14);transcript.Children.Add(Ui.Card(Ui.Stack(Ui.Text(_c.Preferences.PetName,11,Ui.Muted,true),_liveText)));}
-        p.Children.Add(transcriptScroll);if(_chatOffset==0)transcriptScroll.Loaded+=(_,_)=>transcriptScroll.ScrollToEnd();
-        _chatState=Ui.Text(_c.ChatStatus,12,Ui.Muted);p.Children.Add(_chatState);
-        var input=Ui.Input(_c.Draft,true,automationName:"聊天消息");input.TextChanged+=(_,_)=>_c.Draft=input.Text;
+        if(messages.Count==0&&!_c.Busy)transcript.Children.Add(Ui.Card(Ui.Stack(Ui.Text(_chatSearch.Length>0?"没有找到匹配的聊天记录":"这里还没有聊天记录",15,null,true),Ui.Text(_chatSearch.Length>0?"可以调整关键词，或清除搜索查看完整会话。":"在下方输入内容，就能和伙伴开始聊天。",12,Ui.Muted)),new Thickness(16)));
+        if(_c.Busy){_liveText=Ui.Text(_c.LiveReply.Length==0?"…":ChatDisplay.Message(_c.LiveReply),14);transcript.Children.Add(Ui.Card(Ui.Stack(Ui.Text(_c.Preferences.PetName,11,Ui.Muted,true),_liveText),new Thickness(12)));}
+        var transcriptScroll=new ScrollViewer{Name="聊天记录滚动区",Content=transcript,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Padding=new Thickness(0,2,8,0)};
+        Grid.SetRow(transcriptScroll,1);history.Children.Add(transcriptScroll);Place(history,3);
+        if(_chatOffset==0)transcriptScroll.Loaded+=(_,_)=>transcriptScroll.ScrollToEnd();
+
+        var composer=Ui.Stack();composer.Margin=new Thickness(0,8,0,0);
+        _chatState=Ui.Text(ChatDisplay.Status(_c.ChatStatus),11,Ui.Muted);_chatState.Margin=new Thickness(0,0,0,4);composer.Children.Add(_chatState);
+        var input=Ui.Input(_c.Draft,true,automationName:"聊天消息");input.MinHeight=58;input.MaxHeight=100;input.Margin=new Thickness(0,0,0,6);input.TextChanged+=(_,_)=>_c.Draft=input.Text;
         async Task Send()
         {
             _chatOffset=0;_chatSearch="";await ChatRequests.Send(_c);
@@ -344,14 +419,15 @@ internal sealed partial class MainWindow : Window
         {
             if(e.Key==Key.Enter && !Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) && !InputMethod.GetIsInputMethodEnabled(input)) {e.Handled=true;try{await Send();}catch(Exception ex) when(OperationErrors.Expected(ex)){Ui.Error(OperationErrors.Message(ex));}}
         };
-        // IME composition is tracked explicitly; Enter confirms a candidate before sending.
         bool composing=false;
         TextCompositionManager.AddPreviewTextInputStartHandler(input,(_,_)=>composing=true);
         TextCompositionManager.AddPreviewTextInputHandler(input,(_,_)=>composing=false);
         input.PreviewKeyDown+=async(_,e)=>{if(e.Handled)return;if(e.Key==Key.Enter&&!Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)&&!composing&&InputMethod.GetIsInputMethodEnabled(input)){e.Handled=true;try{await Send();}catch(Exception ex) when(OperationErrors.Expected(ex)){Ui.Error(OperationErrors.Message(ex));}}};
-        p.Children.Add(input);var send=Ui.AsyncButton("发送",Send,true);send.IsEnabled=!_c.Busy;
+        var send=Ui.AsyncButton("发送",Send,true);send.IsEnabled=!_c.Busy;
         var stop=Ui.Button("停止",_c.StopReply);stop.IsEnabled=_c.Busy;
         var lastUser=messages.LastOrDefault(x=>x.Role=="user");var retry=Ui.AsyncButton("重试最后消息",async()=>{if(lastUser is not null)await _c.Send(lastUser.Id);});retry.IsEnabled=!_c.Busy&&lastUser is not null&&_c.Secrets.Exists&&messages.LastOrDefault()?.Status is "error" or "stopped";
-        p.Children.Add(Ui.Row(send,stop,retry));p.Children.Add(Ui.Text("Enter 发送 · Shift+Enter 换行。分享本次消息、有限历史、角色设定，以及你明确启用的记忆；不会自动读取心情或任务。",11,Ui.Muted));return p;
+        composer.Children.Add(input);composer.Children.Add(Ui.Row(send,stop,retry));
+        composer.Children.Add(Ui.Text("Enter 发送 · Shift+Enter 换行。只分享本次消息、有限历史和已确认记忆；发送内容可预览，不自动读取心情或任务。",10,Ui.Muted));
+        Place(composer,4);return page;
     }
 }

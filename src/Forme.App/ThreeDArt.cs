@@ -298,7 +298,7 @@ internal sealed partial class Room3DView : Grid
         _c=c;_navigate=navigate;Height=560;MinWidth=280;ClipToBounds=true;
         _animator.Frame=_=>{if(_boatOpen&&_boatGame is {Complete:true})_heading.Angle=0;if(_moveTarget is not null&&!_throwDrag&&!_travel.Moving&&_pendingInteraction is null&&!ToyRunning){_moveTarget=null;PaintWorld();}if(_pendingInteraction is {} interaction&&!_travel.Moving){_pendingInteraction=null;CompleteInteraction(interaction);}};
         SizeChanged+=(_,_)=>{Clip=new RectangleGeometry(new Rect(RenderSize),18,18);Camera();};
-        MeshArt.Ellipse(_ballGroup,"#E7B84B",0,.22,0,.2,.2,.2);_ballGroup.Transform=_ballPosition;_ballVisual.Content=_ballGroup;
+        SetToyVisual("ball-yellow");_ballGroup.Transform=_ballPosition;_ballVisual.Content=_ballGroup;
         _viewport.Camera=_camera;_viewport.Children.Add(_model);_viewport.Children.Add(_ballVisual);_ballVisual.Content=null;Children.Add(_viewport);Camera();Refresh();
         _labels.Children.Add(_plantLabel);_labels.Children.Add(_gardenLabel);Children.Add(_labels);Loaded+=(_,_)=>Camera();
         var caption=_sceneCaption=Ui.Text("点击地面行走 · 远处奔跑 · 拖动旋转 · 滚轮缩放",11,Ui.Muted);caption.Margin=new Thickness(16);caption.VerticalAlignment=VerticalAlignment.Top;caption.IsHitTestVisible=false;Children.Add(caption);
@@ -351,7 +351,11 @@ internal sealed partial class Room3DView : Grid
         _animator.AttachTravel(_travel,(point,heading)=>{_position.OffsetX=point.X;_position.OffsetY=.035;_position.OffsetZ=point.Z;_heading.Angle=heading;});
     }
     internal void SwitchScene(bool outdoors){if(_outdoors==outdoors)return;StopWorld();if(_editing)CloseFurniture();if(_boatOpen)CloseBoats();_pendingInteraction=null;_ballVisual.Content=null;_outdoors=outdoors;_sceneButton.Content=outdoors?"回到小屋":"去户外 · 20m × 20m";_foodButton.Content=outdoors?"看池塘":"喂食";_bookButton.Content=outdoors?"去野餐":"读书";System.Windows.Automation.AutomationProperties.SetName(_foodButton,(string)_foodButton.Content);System.Windows.Automation.AutomationProperties.SetName(_bookButton,(string)_bookButton.Content);ResetTravel();if(!outdoors)RebuildWorldTravel();_appearance=null;_azimuth=30;_elevation=32;_zoom=1;ShowHint(null);Refresh();}
-    internal bool TryMove(GroundPoint point){StopWorld();if(_boatOpen&&_boatGame is not null)RetrieveBoat();_moveTarget=point;bool moved=_animator.MoveTo(point);PaintWorld();_hint.Text=moved?(_travel.Running?"伙伴正跑向那里":"伙伴正走向那里"):BlockedReason(point);return moved;}
+    internal bool TryMove(GroundPoint point)
+    {
+        StopWorld();if(_boatOpen&&_boatGame is not null)RetrieveBoat();_moveTarget=point;bool moved=_animator.MoveTo(point);PaintWorld();_hint.Text=moved?(_travel.Running?"伙伴正跑向那里":"伙伴正走向那里"):BlockedReason(point);
+        if(moved)Ui.Guard(()=>{var actions=_outdoors?new[]{"walk","outdoor"}:new[]{"walk"};if(_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),actions))_c.Refresh();});return moved;
+    }
     internal bool PlayBall()
     {
         var targets=_outdoors?new[]{new GroundPoint(2,2),new(-2,2),new(0,-4),new(4,4)}:new[]{new GroundPoint(.2,-.3),new(-.8,1),new(1,1),new(-1,-1)};
@@ -466,12 +470,10 @@ internal sealed partial class Room3DView : Grid
             if(cached){_model.Content=entry.Scene;foreach(var hit in entry.Hits)_hits.Add(hit.Key,hit.Value);}
             else _model.Content=_outdoors?MeshArt.Outdoors(p,_hits,_character):MeshArt.Room(p,points,_hits,_character);
             if(!cached&&!_outdoors&&_model.Content is Model3DGroup scene)
-            foreach(var (slot,item) in _c.Store.GameSlots())
+            foreach(var (slot,itemId) in _c.Store.GameSlots())
             {
-                var (x,z)=slot switch{"shelf"=>(2.15,-2.12),"garden"=>(2.25,1.65),_=>(-1.4,-.55)};
-                if(item=="plant-pot"){MeshArt.Ellipse(scene,"#B76D48",x,.20,z,.26,.20,.24);MeshArt.Ellipse(scene,"#6E9E72",x,.48,z,.22,.27,.21);}
-                else if(item=="lamp-paper"){MeshArt.Box(scene,"#80684F",x,.20,z,.055,.38,.055);MeshArt.Ellipse(scene,"#F3D88B",x,.51,z,.19,.22,.19);}
-                else if(item=="rug-blue")MeshArt.Ellipse(scene,"#A9C7D7",-.25,.035,1.45,1.05,.009,.54);
+                var slotDefinition=GameProgression.DecorSlots.FirstOrDefault(x=>x.Id==slot);var item=GameProgression.Catalog.FirstOrDefault(x=>x.Id==itemId);
+                if(slotDefinition is not null&&item is not null)AddGameDecor(scene,slotDefinition,item);
             }
             if(!cached&&_model.Content is Model3DGroup built){if(!_outdoors){ApplyFurniture(built);AddBoatKeepsake(built);}FreezeStatic(built);if(_sceneCache.Count>=2)_sceneCache.Remove(_sceneCache.Keys.First());_sceneCache[appearance]=(built,new(_hits));}
             _sceneCorners.Clear();CollectSceneCorners(_model.Content,Matrix3D.Identity);
@@ -484,6 +486,51 @@ internal sealed partial class Room3DView : Grid
             var now=DateTime.Now;var next=now.Hour<7?now.Date.AddHours(7):now.Hour<19?now.Date.AddHours(19):now.Date.AddDays(1).AddHours(7);
             _dayChange.Interval=next-now;_dayChange.Start();
         }
+    }
+    private static void AddGameDecor(Model3DGroup scene,GameSlotDefinition slot,GameItem item)
+    {
+        double x=slot.X,z=slot.Z,y=slot.Surface=="wall"?1.18:.12;string color=item.Color;
+        switch(item.Visual)
+        {
+            case "plant":
+                MeshArt.Ellipse(scene,"#B68C68",x,y,z,.22,.15,.20);MeshArt.Ellipse(scene,color,x,y+.28,z,.18,.29,.17);MeshArt.Ellipse(scene,color,x-.14,y+.31,z+.04,.15,.08,.10,-25);MeshArt.Ellipse(scene,color,x+.14,y+.39,z-.03,.14,.08,.10,28);break;
+            case "flower":
+                MeshArt.Ellipse(scene,"#B68C68",x,y,z,.23,.15,.20);MeshArt.Box(scene,"#77956F",x,y+.24,z,.035,.30,.035);MeshArt.Ellipse(scene,color,x,y+.43,z,.12,.12,.12);foreach(double dx in new[]{-.11,.11})MeshArt.Ellipse(scene,color,x+dx,y+.43,z,.10,.08,.10);break;
+            case "vine":
+                MeshArt.Box(scene,"#987B60",x,y+.22,z,.20,.28,.06);for(int i=0;i<4;i++){double dx=(i%2==0?-.15:.15),dy=.32+i*.13;MeshArt.Ellipse(scene,color,x+dx,y+dy,z+.04,.10,.17,.065,dx<0?-25:25);}break;
+            case "lamp":
+                MeshArt.Ellipse(scene,"#927D65",x,y,z,.15,.045,.15);MeshArt.Box(scene,"#927D65",x,y+.21,z,.045,.40,.045);MeshArt.Ellipse(scene,color,x,y+.47,z,.20,.18,.20);break;
+            case "lantern":
+                MeshArt.Box(scene,"#9A7857",x,y+.20,z,.29,.31,.29);MeshArt.Ellipse(scene,color,x,y+.39,z,.15,.17,.15);MeshArt.Box(scene,"#9A7857",x,y+.53,z,.24,.025,.24);break;
+            case "jar":
+                MeshArt.Ellipse(scene,"#A9C0B4",x,y+.13,z,.20,.22,.18);MeshArt.Ellipse(scene,color,x,y+.18,z,.09,.10,.08);MeshArt.Box(scene,"#927D65",x,y+.36,z,.13,.04,.13);break;
+            case "rug":
+                MeshArt.Ellipse(scene,color,x,.035,z,.82,.012,.48);MeshArt.Ellipse(scene,"#F3EBD8",x,.05,z,.60,.008,.31);MeshArt.Ellipse(scene,color,x,.061,z,.18,.006,.10);break;
+            case "wall":
+                MeshArt.Box(scene,"#B89A78",x,y,z,.56,.44,.06);MeshArt.Box(scene,color,x,y,z+.04,.45,.33,.025);MeshArt.Ellipse(scene,"#F4E8D0",x,y,z+.06,.10,.08,.018);break;
+            case "books":
+                for(int i=0;i<3;i++)MeshArt.Box(scene,i==1?"#D6B28F":color,x-.17+i*.17,y+.10,z,.14,.22+(i%2)*.06,.20,i==1?-7:0);break;
+            case "cushion":
+                MeshArt.Ellipse(scene,color,x,y,z,.34,.13,.28);MeshArt.Ellipse(scene,"#F0E7D8",x,y+.08,z,.23,.08,.18);break;
+            case "aquarium":
+                MeshArt.Box(scene,"#91BBC2",x,y+.24,z,.44,.38,.26);MeshArt.Ellipse(scene,"#E3C57E",x-.1,y+.25,z+.15,.09,.06,.025);MeshArt.Ellipse(scene,"#E3C57E",x+.1,y+.32,z+.15,.07,.05,.025);MeshArt.Ellipse(scene,color,x,y+.08,z,.33,.04,.20);break;
+            case "seasonal":
+                MeshArt.Box(scene,"#927D65",x,y+.18,z,.055,.34,.055);for(int i=0;i<3;i++)MeshArt.Ellipse(scene,color,x+(i-1)*.16,y+.18+i*.12,z,.13,.10,.06,(i-1)*18);break;
+        }
+    }
+    private void SetToyVisual(string id)
+    {
+        _ballGroup.Children.Clear();var item=GameProgression.Catalog.FirstOrDefault(x=>x.Id==id&&x.Kind=="toy")??GameProgression.Catalog.First(x=>x.Id=="ball-yellow");string color=item.Color;
+        switch(item.Action)
+        {
+            case "feather":MeshArt.Ellipse(_ballGroup,color,0,.22,0,.12,.34,.08,-24);MeshArt.Box(_ballGroup,"#E8D9B8",0,.22,.07,.018,.48,.016,-24);break;
+            case "yarn":MeshArt.Ellipse(_ballGroup,color,0,.22,0,.22,.22,.22);MeshArt.Box(_ballGroup,"#F5E8DC",-.02,.22,.19,.025,.30,.025,45);MeshArt.Box(_ballGroup,"#F5E8DC",.02,.22,.19,.025,.30,.025,-45);break;
+            case "frisbee":MeshArt.Ellipse(_ballGroup,color,0,.12,0,.34,.08,.27);MeshArt.Ellipse(_ballGroup,"#F4EBD4",0,.17,0,.23,.035,.18);break;
+            case "plane":MeshArt.Box(_ballGroup,color,0,.22,0,.42,.035,.23,0);MeshArt.Box(_ballGroup,"#BDAE8F",0,.24,.02,.38,.022,.06,0);break;
+            case "bell":MeshArt.Ellipse(_ballGroup,color,0,.22,0,.20,.22,.20);MeshArt.Box(_ballGroup,"#8C765A",0,.43,0,.09,.06,.09);MeshArt.Ellipse(_ballGroup,"#F3E6C8",0,.07,0,.05,.05,.05);break;
+            default:MeshArt.Ellipse(_ballGroup,color,0,.22,0,.2,.2,.2);break;
+        }
+        _ballGroup.Transform=_ballPosition;
     }
     public void ReplaceModel(IPetModelFactory factory)
     {

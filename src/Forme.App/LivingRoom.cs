@@ -23,12 +23,22 @@ internal sealed partial class Room3DView
     private GroundPoint _toyFrom,_toyTo;
     private double _toyTime;
     private long _toyStarted;
+    private string _selectedToy="ball-yellow",_activeToy="ball-yellow";
     internal LivingWorld CurrentWorld=>_worldPreview??_c.Store.World();
     internal string? SelectedFurniture=>_worldSelection;
     internal bool EditingFurniture=>_editing;
     internal bool HideActive=>_hideMode!="";
     internal string HideStatus=>_hideStatus;
     internal bool ToyRunning=>_toyTimer.IsEnabled;
+    internal IReadOnlyList<GameItem> OwnedToys
+    {
+        get{var owned=_c.Store.GameInventory().Where(x=>x.Quantity>0).Select(x=>x.ItemId).ToHashSet(StringComparer.Ordinal);return GameProgression.Catalog.Where(x=>x.Kind=="toy"&&owned.Contains(x.Id)).ToArray();}
+    }
+    internal string SelectedToy=>_selectedToy;
+    internal bool SelectToy(string id)
+    {
+        if(!OwnedToys.Any(x=>x.Id==id))return false;_selectedToy=id;SetToyVisual(id);return true;
+    }
     internal event Action? WorldChanged;
     private void InitLiving()
     {
@@ -116,7 +126,7 @@ internal sealed partial class Room3DView
         var item=CurrentWorld.Items.FirstOrDefault(i=>i.Id==id);if(item is null||!IsVisible||!_motionVisible||_c.AnimationSuspended)return false;
         if(item.Kind=="lamp"){Interact("lamp");return true;}StopWorld();var point=LivingWorld.Approach(item,_travel);if(point is null){_hint.Text="没有可达位置，请在布置页留出通道。";return false;}_animator.MoveTo(point.Value);_pendingInteraction=action??LivingWorld.Kind(item.Kind).Action;_moveTarget=point;_hint.Text="前往"+LivingWorld.Kind(item.Kind).Name;PaintWorld();if(!_travel.Moving){var pending=_pendingInteraction;_pendingInteraction=null;CompleteInteraction(pending!);}return true;
     }
-    internal void RunLife(LifeEvent life){if(!UseFurniture(life.Target,life.Action))return;if(_pendingInteraction is not null)_pendingLife=life.Id;else{_c.Store.DiscoverLife(life.Id);_c.Refresh();}_hint.Text=life.Title+"："+life.Description;}
+    internal void RunLife(LifeEvent life){if(!UseFurniture(life.Target,life.Action))return;if(_pendingInteraction is not null)_pendingLife=life.Id;else{_c.Store.DiscoverLife(life.Id);_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),"life");_c.Refresh();}_hint.Text=life.Title+"："+life.Description;}
     internal void StartHide(bool petHides,string? selected)
     {
         StopWorld();if(_outdoors)SwitchScene(false);var items=CurrentWorld.Items;if(items.Count<2)throw new InvalidDataException("至少摆两件家具再玩藏物。");_hideMode=petHides?"player":"pet";
@@ -127,7 +137,7 @@ internal sealed partial class Room3DView
     private readonly HashSet<string> _hideChecked=new();
     private void ContinuePetSearch()
     {
-        var items=CurrentWorld.Items.Where(i=>!_hideChecked.Contains(i.Id)).OrderBy(i=>i.Kind==(_modelId=="cat"?"fish":"cushion")?0:1).ThenBy(i=>Math.Abs(i.X-_travel.Position.X)+Math.Abs(i.Z-_travel.Position.Z)).ToArray();
+        string favorite=PetBehaviors.For(_modelId).FavoriteFurniture;var items=CurrentWorld.Items.Where(i=>!_hideChecked.Contains(i.Id)).OrderBy(i=>i.Kind==favorite?0:1).ThenBy(i=>Math.Abs(i.X-_travel.Position.X)+Math.Abs(i.Z-_travel.Position.Z)).ToArray();
         foreach(var item in items){var p=LivingWorld.Approach(item,_travel);if(p is null)continue;_hideChecked.Add(item.Id);_animator.MoveTo(p.Value);_pendingInteraction="search:"+item.Id;_moveTarget=p;_hint.Text="伙伴去看看"+LivingWorld.Kind(item.Kind).Name;PaintWorld();if(!_travel.Moving)FinishSearch(item.Id);return;}_hideStatus="伙伴找不到通道，调整家具或结束这一局。";WorldChanged?.Invoke();
     }
     private void FinishSearch(string id)
@@ -140,14 +150,20 @@ internal sealed partial class Room3DView
     private void ToyTick(object? sender,EventArgs e)
     {
         if(!IsVisible||!_motionVisible||_c.AnimationSuspended){_toyTimer.Stop();_ballVisual.Content=null;return;}_toyTime=_c.Preferences.ReducedMotion?.75:System.Diagnostics.Stopwatch.GetElapsedTime(_toyStarted).TotalSeconds;double t=Math.Min(1,_toyTime/.75);_ballPosition.OffsetX=_toyFrom.X+(_toyTo.X-_toyFrom.X)*t;_ballPosition.OffsetZ=_toyFrom.Z+(_toyTo.Z-_toyFrom.Z)*t;_ballPosition.OffsetY=Math.Sin(t*Math.PI)*1.1;
-        if(t>=1){_toyTimer.Stop();_animator.MoveTo(_toyTo);_pendingInteraction="ball";_moveTarget=_toyTo;PaintWorld();if(!_travel.Moving){_pendingInteraction=null;CompleteInteraction("ball");}}
+        if(t>=1){_toyTimer.Stop();_animator.MoveTo(_toyTo);_pendingInteraction="toy:"+_activeToy;_moveTarget=_toyTo;PaintWorld();if(!_travel.Moving){_pendingInteraction=null;CompleteInteraction("toy:"+_activeToy);}}
     }
-    internal bool ThrowToy(GroundPoint target)
+    internal bool ThrowToy(GroundPoint target,string? toyId=null)
     {
-        if(!_travel.Walkable(target)){_hint.Text="落点被家具挡住，换一块空地。";return false;}StopWorld();_toyFrom=_travel.Position;_toyTo=target;_toyTime=0;_ballPosition.OffsetX=_toyFrom.X;_ballPosition.OffsetZ=_toyFrom.Z;_ballPosition.OffsetY=.4;_ballVisual.Content=_ballGroup;_animator.Play(PetAction.Launch);_hint.Text="小球飞出去了，伙伴等落地再去捡。";
+        if(toyId is not null&&!SelectToy(toyId)){_hint.Text="这件玩具还没有放进收藏。";return false;}
+        if(!_travel.Walkable(target)){_hint.Text="落点被家具挡住，换一块空地。";return false;}StopWorld();_activeToy=_selectedToy;SetToyVisual(_activeToy);_toyFrom=_travel.Position;_toyTo=target;_toyTime=0;_ballPosition.OffsetX=_toyFrom.X;_ballPosition.OffsetZ=_toyFrom.Z;_ballPosition.OffsetY=.4;_ballVisual.Content=_ballGroup;_animator.Play(PetAction.Launch);_hint.Text=GameProgression.Catalog.First(x=>x.Id==_activeToy).Name+"飞出去了，伙伴随后去捡。";
         _toyStarted=System.Diagnostics.Stopwatch.GetTimestamp();if(_c.Preferences.ReducedMotion){_toyTime=.75;ToyTick(null,EventArgs.Empty);}else _toyTimer.Start();return true;
     }
-    internal void PickToy(){StopWorld();_ballPosition.OffsetX=_travel.Position.X;_ballPosition.OffsetY=.45;_ballPosition.OffsetZ=_travel.Position.Z+.5;_ballVisual.Content=_ballGroup;_animator.Play(PetAction.Launch);_hint.Text="已拿起小球 · 按住Shift拖动小球抛出，或使用方向按钮。";}
+    internal bool PlaySelectedToy()
+    {
+        var targets=_outdoors?new[]{new GroundPoint(2,2),new(-2,2),new(0,-4),new(4,4)}:new[]{new GroundPoint(.2,-.3),new(-.8,1),new(1,1),new(-1,-1)};
+        foreach(var target in targets)if(_travel.Walkable(target))return ThrowToy(target);_hint.Text="周围有些拥挤，换个场景或落点再玩。";return false;
+    }
+    internal void PickToy(){StopWorld();_activeToy=_selectedToy;SetToyVisual(_activeToy);_ballPosition.OffsetX=_travel.Position.X;_ballPosition.OffsetY=.45;_ballPosition.OffsetZ=_travel.Position.Z+.5;_ballVisual.Content=_ballGroup;_animator.Play(PetAction.Launch);_hint.Text="已拿起"+GameProgression.Catalog.First(x=>x.Id==_activeToy).Name+" · 按住 Shift 拖动抛出。";}
     private string BlockedReason(GroundPoint point)
     {
         if(!_outdoors){var item=CurrentWorld.Items.FirstOrDefault(i=>{var b=LivingWorld.Footprint(i);return i.Kind is not ("sleep" or "cushion" or "feed")&&Math.Abs(point.X-b.X)<b.Width/2+.38&&Math.Abs(point.Z-b.Z)<b.Depth/2+.38;});if(item is not null)return LivingWorld.Kind(item.Kind).Name+"挡住了落点，请选旁边的空地。";}

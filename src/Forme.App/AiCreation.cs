@@ -89,7 +89,7 @@ internal sealed partial class Room3DView
         return LifeRules.Evaluate(CurrentWorld,p.Weather,night,p.RoomLamp);
     }
     internal void RecordRequestedLife(LifeEvent life)
-    {if(_pendingInteraction is not null)_pendingLife=life.Id;else{_c.Store.DiscoverLife(life.Id);_c.Refresh();}_hint.Text=life.Title+"："+life.Description;}
+    {if(_pendingInteraction is not null)_pendingLife=life.Id;else{_c.Store.DiscoverLife(life.Id);_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),"life");_c.Refresh();}_hint.Text=life.Title+"："+life.Description;}
     internal string CreationContext()
     {
         var p=_c.Preferences;var parts=new List<string>{SceneDescription};

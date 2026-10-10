@@ -32,9 +32,8 @@ public sealed partial class Store
         if(game.Daily.Any(x=>!Day(x.Day)||x.Experience is <0 or >20)||game.Daily.Select(x=>x.Day).Distinct(StringComparer.Ordinal).Count()!=game.Daily.Count)throw new InvalidDataException("每日成长记录无效。");
         if(game.Discoveries.Any(x=>!catalog.TryGetValue(x.ItemId,out var item)||item.Kind!="discovery"||!Day(x.Day))||game.Discoveries.Select(x=>x.ItemId).Distinct(StringComparer.Ordinal).Count()!=game.Discoveries.Count)throw new InvalidDataException("户外收藏记录无效。");
         var owned=game.Inventory.Where(x=>x.Quantity>0).Select(x=>x.ItemId).ToHashSet(StringComparer.Ordinal);
-        if(game.Slots.Any(x=>x.SlotId is not ("desk" or "shelf" or "garden")||!catalog.TryGetValue(x.ItemId,out var item)||item.Kind is not ("decor" or "rug")||!owned.Contains(x.ItemId))||game.Slots.Select(x=>x.SlotId).Distinct(StringComparer.Ordinal).Count()!=game.Slots.Count||game.Slots.Select(x=>x.ItemId).Distinct(StringComparer.Ordinal).Count()!=game.Slots.Count)throw new InvalidDataException("家具摆放数据无效。");
-        var allowedAchievements=GameProgression.AchievementsCatalog.Select(x=>x.Id).ToHashSet(StringComparer.Ordinal);
-        if(game.Achievements.Any(x=>!allowedAchievements.Contains(x.Id)||!Day(x.Day))||game.Achievements.Select(x=>x.Id).Distinct(StringComparer.Ordinal).Count()!=game.Achievements.Count)throw new InvalidDataException("成就记录无效。");
+        if(game.Slots.Any(x=>!GameProgression.IsDecorSlot(x.SlotId)||!catalog.TryGetValue(x.ItemId,out var item)||item.Kind is not ("decor" or "rug")||!owned.Contains(x.ItemId))||game.Slots.Select(x=>x.SlotId).Distinct(StringComparer.Ordinal).Count()!=game.Slots.Count||game.Slots.Select(x=>x.ItemId).Distinct(StringComparer.Ordinal).Count()!=game.Slots.Count)throw new InvalidDataException("家具摆放数据无效。");
+        if(game.Achievements.Any(x=>!GameProgression.IsAchievementRecord(x.Id)||!Day(x.Day))||game.Achievements.Select(x=>x.Id).Distinct(StringComparer.Ordinal).Count()!=game.Achievements.Count)throw new InvalidDataException("成就记录无效。");
     }
     internal void ReplaceGame(GameExport game,SqliteTransaction tx)
     {
@@ -52,6 +51,18 @@ public sealed partial class Store
     {
         using var tx=_db.BeginTransaction();bool changed=CompleteGameTask(tx,day,taskId);if(changed)tx.Commit();return changed;
     }
+    public bool RecordGameAction(DateOnly day,params string[] actions)
+    {
+        if(actions is null||actions.Length==0)return false;
+        using var tx=_db.BeginTransaction();bool changed=RecordGameActions(tx,day,actions);if(changed)tx.Commit();return changed;
+    }
+    private bool RecordGameActions(SqliteTransaction tx,DateOnly day,IEnumerable<string> actions)
+    {
+        var requested=actions.ToHashSet(StringComparer.Ordinal);if(requested.Count==0)return false;
+        var selected=GameProgression.DailyTasks(day,new HashSet<string>(StringComparer.Ordinal));bool changed=false;
+        foreach(var task in selected.Where(x=>requested.Contains(x.Action)))changed|=CompleteGameTask(tx,day,task.Id);
+        return changed;
+    }
     private bool CompleteGameTask(SqliteTransaction tx,DateOnly day,string taskId)
     {
         if(!GameProgression.IsTask(taskId))throw new ArgumentException("任务无效。",nameof(taskId));
@@ -63,23 +74,50 @@ public sealed partial class Store
         Exec("INSERT INTO game_daily(day,xp) VALUES($0,0) ON CONFLICT(day) DO NOTHING",tx,date);
         Exec("UPDATE game_progress SET xp=xp+MIN($0,MAX(0,20-(SELECT xp FROM game_daily WHERE day=$1))),stars=stars+$2 WHERE id=1",tx,definition.RewardXp,date,definition.RewardStars);
         Exec("UPDATE game_daily SET xp=MIN(20,xp+$1) WHERE day=$0",tx,date,definition.RewardXp);
-        GrantGameAchievement(tx,"task-"+taskId,date);return true;
+        GrantGameAchievement(tx,"task-"+taskId,date);
+        using(var count=Command("SELECT count(*) FROM game_tasks WHERE completed=1",tx))
+        {
+            int total=Convert.ToInt32(count.ExecuteScalar());if(total>=5)GrantGameAchievement(tx,"tasks-5",date);if(total>=20)GrantGameAchievement(tx,"tasks-20",date);if(total>=50)GrantGameAchievement(tx,"tasks-50",date);
+        }
+        return true;
     }
-    public bool DiscoverOutdoor(DateOnly day)
+    public bool DiscoverOutdoor(DateOnly day,string weather="clear",int localHour=12)
     {
         var known=GameDiscoveries().Select(x=>x.ItemId).ToHashSet(StringComparer.Ordinal);
-        var remaining=GameProgression.Catalog.Where(x=>x.Kind=="discovery"&&!known.Contains(x.Id)).OrderBy(x=>x.Id,StringComparer.Ordinal).ToArray();
-        var next=remaining.Length==0?null:remaining[new Random(day.DayNumber).Next(remaining.Length)];
+        var next=GameProgression.NextDiscovery(day,known,weather,localHour);
         if(next is null)return CompleteGameTask(day,"discover");
         using var tx=_db.BeginTransaction();string date=day.ToString("yyyy-MM-dd");
         Exec("INSERT INTO game_discoveries(item_id,day) VALUES($0,$1)",tx,next.Id,date);Exec("INSERT INTO game_inventory VALUES($0,1) ON CONFLICT(item_id) DO UPDATE SET quantity=quantity+1",tx,next.Id);
-        GrantGameAchievement(tx,"first-discovery",date);
-        CompleteGameTask(tx,day,"discover");tx.Commit();return true;
+        GrantGameAchievement(tx,"first-discovery",date);int total=known.Count+1;
+        if(total>=5)GrantGameAchievement(tx,"discoveries-5",date);if(total>=10)GrantGameAchievement(tx,"discoveries-10",date);if(total>=GameProgression.Discoveries.Count)GrantGameAchievement(tx,"discoveries-all",date);
+        RecordGameActions(tx,day,["discover"]);tx.Commit();return true;
     }
     public bool RecordBallPlay(DateOnly day)
     {
-        if(!GameInventory().Any(x=>x.ItemId=="ball-yellow"&&x.Quantity>0))return false;
-        CompleteGameTask(day,"ball");return true;
+        return RecordToyPlay(day,"ball-yellow");
+    }
+    public bool RecordToyPlay(DateOnly day,string toyId)
+    {
+        if(!GameProgression.Catalog.Any(x=>x.Id==toyId&&x.Kind=="toy")||!GameInventory().Any(x=>x.ItemId==toyId&&x.Quantity>0))return false;
+        using var tx=_db.BeginTransaction();string date=day.ToString("yyyy-MM-dd");string used="toy-used-"+toyId;
+        GrantGameAchievement(tx,used,date);
+        using(var c=Command("SELECT count(*) FROM game_achievements WHERE id LIKE 'toy-used-%'",tx))
+        {
+            int count=Convert.ToInt32(c.ExecuteScalar());if(count>=1)GrantGameAchievement(tx,"toy-first",date);if(count>=3)GrantGameAchievement(tx,"toy-3",date);if(count>=GameProgression.Catalog.Count(x=>x.Kind=="toy"))GrantGameAchievement(tx,"toy-all",date);
+        }
+        RecordGameActions(tx,day,toyId=="ball-yellow"?["toy","ball"]:["toy"]);tx.Commit();return true;
+    }
+    public void RecordBoatCompleted(DateOnly day)
+    {
+        using var tx=_db.BeginTransaction();string date=day.ToString("yyyy-MM-dd");GrantGameAchievement(tx,"boat-first",date);RecordGameActions(tx,day,["boat"]);tx.Commit();
+    }
+    public void RecordPetModels(string previous,string current,DateOnly day)
+    {
+        var valid=new HashSet<string>(["sprout","cat","fox","penguin"],StringComparer.Ordinal);if(!valid.Contains(previous)||!valid.Contains(current))return;
+        using var tx=_db.BeginTransaction();string date=day.ToString("yyyy-MM-dd");
+        GrantGameAchievement(tx,"model-used-"+previous,date);GrantGameAchievement(tx,"model-used-"+current,date);
+        using(var c=Command("SELECT count(*) FROM game_achievements WHERE id LIKE 'model-used-%'",tx))if(Convert.ToInt32(c.ExecuteScalar())>=valid.Count)GrantGameAchievement(tx,"pet-all",date);
+        if(previous!=current)RecordGameActions(tx,day,["model"]);tx.Commit();
     }
     public bool PurchaseGameItem(string itemId)
     {
@@ -89,14 +127,25 @@ public sealed partial class Store
         using(var row=existing.ExecuteReader())if(row.Read()&&row.GetInt32(0)>=item.MaxOwned)return false;
         using(var wallet=Command("SELECT stars FROM game_progress WHERE id=1",tx))if(Convert.ToInt32(wallet.ExecuteScalar())<item.Price)return false;
         Exec("UPDATE game_progress SET stars=stars-$0 WHERE id=1",tx,item.Price);Exec("INSERT INTO game_inventory VALUES($0,1) ON CONFLICT(item_id) DO UPDATE SET quantity=quantity+1",tx,itemId);
-        GrantGameAchievement(tx,"first-purchase",DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd"));tx.Commit();return true;
+        string date=DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd");GrantGameAchievement(tx,"first-purchase",date);
+        var decorIds=GameProgression.Catalog.Where(x=>x.Kind is "decor" or "rug").Select(x=>x.Id).ToArray();
+        var placeholders=string.Join(",",Enumerable.Range(0,decorIds.Length).Select(i=>"$"+i));
+        using(var owned=Command($"SELECT count(*) FROM game_inventory WHERE quantity>0 AND item_id IN ({placeholders})",tx,decorIds.Cast<object?>().ToArray()))
+        {
+            int count=Convert.ToInt32(owned.ExecuteScalar());if(count>=5)GrantGameAchievement(tx,"decor-5",date);if(count>=10)GrantGameAchievement(tx,"decor-10",date);
+        }
+        tx.Commit();return true;
     }
     public bool PlaceGameItem(string slot,string itemId)
     {
-        if(slot is not ("desk" or "shelf" or "garden")||!GameProgression.Catalog.Any(x=>x.Id==itemId&&(x.Kind is "decor" or "rug")))return false;
+        if(!GameProgression.IsDecorSlot(slot)||!GameProgression.Catalog.Any(x=>x.Id==itemId&&(x.Kind is "decor" or "rug")))return false;
         using var tx=_db.BeginTransaction();using(var c=Command("SELECT quantity FROM game_inventory WHERE item_id=$0",tx,itemId))if(Convert.ToInt32(c.ExecuteScalar()??0)<1)return false;
         Exec("DELETE FROM game_slots WHERE item_id=$0",tx,itemId);
         Exec("INSERT INTO game_slots(slot_id,item_id) VALUES($0,$1) ON CONFLICT(slot_id) DO UPDATE SET item_id=excluded.item_id",tx,slot,itemId);tx.Commit();return true;
+    }
+    public bool ClearGameSlot(string slot)
+    {
+        if(!GameProgression.IsDecorSlot(slot))return false;using var command=Command("DELETE FROM game_slots WHERE slot_id=$0",null,slot);return command.ExecuteNonQuery()>0;
     }
     private void GrantGameAchievement(SqliteTransaction tx,string id,string day)=>Exec("INSERT OR IGNORE INTO game_achievements(id,day) VALUES($0,$1)",tx,id,day);
 }

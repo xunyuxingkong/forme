@@ -85,13 +85,17 @@ internal sealed partial class Room3DView
 {
     public string SceneDescription=>$"{(_outdoors?"20m×20m户外":"小屋和花园")}；宠物坐标X={_travel.Position.X:0.0},Z={_travel.Position.Z:0.0}；天气={_c.Preferences.Weather}；灯={_c.Preferences.RoomLamp}；壁炉={_c.Preferences.Fireplace}";
     private static string InteractionName(string id)=>id switch{"book"=>"小书架","feed"=>"零食碗","sleep"=>"软软的小窝","lamp"=>"落地灯","fireplace"=>"暖暖的壁炉","fish"=>"小鱼缸","pond"=>"池塘与木桥","picnic"=>"野餐毯","rest"=>"花园凉亭","bell"=>"风铃","water"=>"浇水","ball"=>"小球",_=>"互动"};
-    public void PlayAction(PetAction action){_activityGeneration++;_animator.Play(action);}
+    public void PlayAction(PetAction action)
+    {
+        _activityGeneration++;_animator.Play(action);
+        if(action is PetAction.DanceSway or PetAction.DanceHop or PetAction.DanceSpin)Ui.Guard(()=>{if(_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),"dance"))_c.Refresh();});
+    }
     internal string Interact(string id)
     {
         _activityGeneration++;
         if(!IsLoaded||!IsVisible||!_motionVisible||_c.AnimationSuspended)return "场景未显示，互动未执行";
-        if(id=="lamp"){_c.SavePreferences(_c.Preferences with{RoomLamp=!_c.Preferences.RoomLamp});return _hint.Text=_c.Preferences.RoomLamp?"灯亮了，小屋暖暖的。":"灯关好了。";}
-        if(id=="fireplace"){_c.SavePreferences(_c.Preferences with{Fireplace=!_c.Preferences.Fireplace});return _hint.Text=_c.Preferences.Fireplace?"壁炉点亮了。":"壁炉熄灭了。";}
+        if(id=="lamp"){_c.SavePreferences(_c.Preferences with{RoomLamp=!_c.Preferences.RoomLamp});if(_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),"furniture"))_c.Refresh();return _hint.Text=_c.Preferences.RoomLamp?"灯亮了，小屋暖暖的。":"灯关好了。";}
+        if(id=="fireplace"){_c.SavePreferences(_c.Preferences with{Fireplace=!_c.Preferences.Fireplace});if(_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),"furniture"))_c.Refresh();return _hint.Text=_c.Preferences.Fireplace?"壁炉点亮了。":"壁炉熄灭了。";}
         if(id=="ball"){if(!PlayBall())return "这里无法投球";return "小球正在飞向落点，伙伴随后去捡。";}
         if(!_outdoors&&CurrentWorld.Items.FirstOrDefault(i=>LivingWorld.Kind(i.Kind).Action==id) is {} furniture){UseFurniture(furniture.Id);return _hint.Text;}
         if(_outdoors&&id is "feed" or "book" or "sleep" or "fish")return _hint.Text="回小屋后可以使用这个物件。";
@@ -103,11 +107,21 @@ internal sealed partial class Room3DView
     }
     private void CompleteInteraction(string id)
     {
-        _moveTarget=null;PaintWorld();if(id.StartsWith("search:",StringComparison.Ordinal)){FinishSearch(id[7..]);return;}if(_pendingLife is {} life){_pendingLife=null;_c.Store.DiscoverLife(life);_c.Refresh();WorldChanged?.Invoke();}
-        _animator.Play(id switch{"bell"=>PetAction.DanceSway,"book"=>PetAction.Read,"sleep" or "rest"=>PetAction.Rest,"feed" or "picnic"=>PetAction.Eat,"fish" or "pond"=>PetAction.Look,_=>PetAction.Pat});
-        _hint.Text=id switch{"book"=>"翻开一本小书，今天的故事慢慢读。","feed"=>"吃到一口零食啦，不吃也不会变饿。","sleep"=>"小窝软软的，可以眯一会儿。","fish"=>"小鱼游过来打了个招呼。","pond"=>"坐在木桥旁，看水面和小小睡莲。","picnic"=>"一起坐下来，把忙碌放在一旁。","rest"=>"凉亭里有一小片安静。","bell"=>"风铃轻轻响了一下。","ball"=>"小球捡回来啦！",_=>"伙伴回应了你的互动。"};
-        if(id=="ball"){_ballVisual.Content=null;Ui.Guard(()=>{_c.Store.RecordBallPlay(DateOnly.FromDateTime(DateTime.Now));_c.Refresh();});}
-        if(id=="water")Ui.Guard(()=>{bool watered=_c.Store.Water(DateOnly.FromDateTime(DateTime.Now));_hint.Text=watered?"浇好水啦，谢谢你来看看它。":"今天已经浇过水了，陪它待一会儿就好。";_c.Refresh();});
+        _moveTarget=null;PaintWorld();if(id.StartsWith("search:",StringComparison.Ordinal)){FinishSearch(id[7..]);return;}if(_pendingLife is {} life){_pendingLife=null;_c.Store.DiscoverLife(life);_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),"life");_c.Refresh();WorldChanged?.Invoke();}
+        bool toy=id.StartsWith("toy:",StringComparison.Ordinal)||id=="ball";
+        if(toy)
+        {
+            string toyId=id=="ball"?"ball-yellow":id[4..];var item=GameProgression.Catalog.FirstOrDefault(x=>x.Id==toyId&&x.Kind=="toy");
+            if(item is not null){bool liked=PetBehaviors.LikesToy(_modelId,item.Action);_animator.Play(PetBehaviors.ToyReaction(_modelId,item.Action));_hint.Text=PetModels.Catalog.First(x=>x.Id==_modelId).Name.Split(' ')[0]+(liked?"最喜欢":"也很喜欢")+item.Name+"，开心地回应了你。";_ballVisual.Content=null;Ui.Guard(()=>{_c.Store.RecordToyPlay(DateOnly.FromDateTime(DateTime.Now),toyId);_c.Refresh();});}
+        }
+        else
+        {
+            _animator.Play(id switch{"bell"=>PetAction.DanceSway,"book"=>PetAction.Read,"sleep" or "rest"=>PetAction.Rest,"feed" or "picnic"=>PetAction.Eat,"fish" or "pond"=>PetAction.Look,_=>PetAction.Pat});
+            _hint.Text=id switch{"book"=>"翻开一本小书，今天的故事慢慢读。","feed"=>"吃到一口零食啦，不吃也不会变饿。","sleep"=>"小窝软软的，可以眯一会儿。","fish"=>"小鱼游过来打了个招呼。","pond"=>"坐在木桥旁，看水面和小小睡莲。","picnic"=>"一起坐下来，把忙碌放在一旁。","rest"=>"凉亭里有一小片安静。","bell"=>"风铃轻轻响了一下。",_=>"伙伴回应了你的互动。"};
+            if(id is "book" or "sleep" or "feed" or "fish" or "lamp" or "fireplace")if(_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),"furniture"))_c.Refresh();
+            if(_outdoors&&id is "pond" or "picnic" or "rest" or "bell")if(_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),"garden"))_c.Refresh();
+        }
+        if(id=="water")Ui.Guard(()=>{var day=DateOnly.FromDateTime(DateTime.Now);bool watered=_c.Store.Water(day);_hint.Text=watered?"浇好水啦，谢谢你来看看它。":"今天已经浇过水了，陪它待一会儿就好。";_c.Refresh();});
         if(id=="bell"&&_c.Preferences.Sounds&&!_c.Preferences.Quiet)System.Media.SystemSounds.Asterisk.Play();
     }
 }

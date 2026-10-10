@@ -51,7 +51,9 @@ internal sealed partial class Controller : IDisposable
     public void Refresh() => Changed?.Invoke();
     public void SavePreferences(Preferences next)
     {
-        Store.SavePreferences(next); Preferences=next; Changed?.Invoke();
+        next.Validate();string previous=Preferences.PetModel;Store.SavePreferences(next);Preferences=next;
+        if(previous!=next.PetModel)Store.RecordPetModels(previous,next.PetModel,DateOnly.FromDateTime(DateTime.Now));
+        Changed?.Invoke();
     }
     public void SaveAiConfiguration(Preferences next,string? replacementKey)
     {

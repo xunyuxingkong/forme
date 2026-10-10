@@ -27,8 +27,13 @@ internal sealed partial class MainWindow
         var panel=Ui.Stack(Ui.Text("小屋里的新生活",24,null,true),Ui.Text("摆放关系会改变可发生的事件。事件全部本地执行，没有签到和失败惩罚。",13,Ui.Muted),Ui.Row(Ui.Button("布置家具",()=>Navigate("furniture"),true),Ui.Button("伙伴藏物",()=>Navigate("hide")),Ui.Button("玩纸船",()=>Navigate("boat"))),Ui.Row(Ui.Button("叫回伙伴",_room.RecallFromUser),Ui.Button("停止当前活动",_room.StopFromUser)),Ui.Text("当前能发生的生活",18,null,true));
         foreach(var life in events)panel.Children.Add(Ui.Card(Ui.Stack(Ui.Text(life.Title,17,null,true),Ui.Text(life.Description,12,Ui.Muted),Ui.Button("体验"+life.Title,()=>{_room.SwitchScene(false);_room.RunLife(life);} ))));
         if(events.Count==0)panel.Children.Add(Ui.Text("把坐垫靠近书架或鱼缸，把小窝放到暖灯旁，试试新组合。",13,Ui.Muted));
-        panel.Children.Add(Ui.Card(Ui.Stack(Ui.Text("生活图鉴 · "+world.Discoveries.Count+"/8",18,null,true),Ui.Text(string.Join("\n",new[]{"reading|阅读角：坐垫靠近书架","rain-reading|听雨读书：阅读角＋暖灯＋雨天","sun-nap|晒太阳：白天晴天，坐垫靠窗","snack-rest|零食小憩：零食碗靠近小窝","fish-watch|看小鱼：坐垫靠近鱼缸","warm-nap|暖灯晚安：小窝旁亮着灯","night-book|夜读：书架旁亮灯＋夜晚","garden-break|花园歇脚：坐垫靠近前庭"}.Select(text=>(world.Discoveries.Contains(text.Split('|')[0])?"✓ ":"○ ")+text.Split('|')[1])),12,Ui.Muted))));
-        panel.Children.Add(Ui.Card(Ui.Stack(Ui.Text("抛接小球",18,null,true),Ui.Text("拿起后按住Shift拖动小球，松开抛出；金色点是落点。也可使用方向按钮。伙伴会等球落地后去捡。",12,Ui.Muted),Ui.Row(Ui.Button("拿起小球",_room.PickToy),Ui.Button("向左抛球",()=>_room.ThrowToy(new(-.8,1))),Ui.Button("向右抛球",()=>_room.ThrowToy(new(1,1))),Ui.Button("向前抛球",()=>_room.ThrowToy(new(0,2.5)))))));
+        var lifeBook=Ui.Stack(Ui.Text($"生活图鉴 · {world.Discoveries.Count}/{LifeRules.Catalog.Length}",18,null,true));
+        foreach(var entry in LifeRules.Catalog)lifeBook.Children.Add(Ui.Text((world.Discoveries.Contains(entry.Id)?"✓ ":"○ ")+entry.Title+" · "+entry.Description,12,world.Discoveries.Contains(entry.Id)?Ui.Sage:Ui.Muted));
+        panel.Children.Add(Ui.Card(lifeBook));
+        var toys=_room.OwnedToys;var selectedToy=toys.FirstOrDefault(x=>x.Id==_room.SelectedToy)??toys.First();
+        var toyChoice=Ui.Select(toys.Select(x=>x.Name),selectedToy.Name,"选择互动玩具");toyChoice.SelectionChanged+=(_,_)=>{var item=toys.FirstOrDefault(x=>x.Name==toyChoice.SelectedItem?.ToString());if(item is not null)_room.SelectToy(item.Id);};
+        var behavior=PetBehaviors.For(_c.Preferences.PetModel);
+        panel.Children.Add(Ui.Card(Ui.Stack(Ui.Text("玩具互动",18,null,true),Ui.Text(behavior.Personality+" 按 Shift 拖动场景里的玩具也可以抛出。",12,Ui.Muted),toyChoice,Ui.Row(Ui.Button("拿起当前玩具",_room.PickToy),Ui.Button("向左抛出",()=>_room.ThrowToy(new(-.8,1))),Ui.Button("向右抛出",()=>_room.ThrowToy(new(1,1))),Ui.Button("向前抛出",()=>_room.ThrowToy(new(0,2.5)))))));
         panel.Children.Add(Ui.Button("重置生活图鉴",()=>{if(Ui.Confirm("清除8条生活发现及应用恢复备份？家具和聊天保留，外部导出需自行删除。")){_c.Store.ResetLife();_c.Refresh();}}));
         return panel;
     }
@@ -36,6 +41,6 @@ internal sealed partial class MainWindow
     {
         if(_room.Outdoors)_room.SwitchScene(false);var select=new ComboBox{Margin=new Thickness(0,0,0,10),MinHeight=36};System.Windows.Automation.AutomationProperties.SetName(select,"藏物家具");foreach(var item in _room.CurrentWorld.Items)select.Items.Add(new ComboBoxItem{Content=LivingWorld.Kind(item.Kind).Name+" · "+item.X.ToString("0.0")+","+item.Z.ToString("0.0"),Tag=item.Id});select.SelectedIndex=0;string? chosen()=>select.SelectedItem is ComboBoxItem item?(string)item.Tag:null;
         var state=Ui.Text(_room.HideStatus,14);_worldPageUpdate=()=>state.Text=_room.HideStatus;_room.WorldChanged+=_worldPageUpdate;
-        return Ui.Stack(Ui.Text("伙伴藏物",24,null,true),Ui.Text("家具位置决定线索与搜索路线。奶糖先去鱼缸看看，芽芽先检查坐垫；有通道才能找过去。可以随时结束，无次数限制。",13,Ui.Muted),Ui.Card(Ui.Stack(state,select,Ui.Row(Ui.Button("我藏，伙伴找",()=>_room.StartHide(false,chosen()),true),Ui.Button("伙伴藏，我来找",()=>_room.StartHide(true,null)),Ui.Button("检查选中家具",()=>{if(chosen() is {} id)_room.GuessHidden(id);})),Ui.Row(Ui.Button("结束藏物",()=>{if(_c.Busy)_c.StopReply();_room.EndHide();}),Ui.Button("叫回伙伴",_room.RecallFromUser)))),Ui.Button("调整家具再玩",()=>Navigate("furniture")));
+        return Ui.Stack(Ui.Text("伙伴藏物",24,null,true),Ui.Text("家具位置决定线索与搜索路线。"+PetBehaviors.For(_c.Preferences.PetModel).Personality+"伙伴会先检查自己偏好的家具；有通道才能找过去。可以随时结束，无次数限制。",13,Ui.Muted),Ui.Card(Ui.Stack(state,select,Ui.Row(Ui.Button("我藏，伙伴找",()=>_room.StartHide(false,chosen()),true),Ui.Button("伙伴藏，我来找",()=>_room.StartHide(true,null)),Ui.Button("检查选中家具",()=>{if(chosen() is {} id)_room.GuessHidden(id);})),Ui.Row(Ui.Button("结束藏物",()=>{if(_c.Busy)_c.StopReply();_room.EndHide();}),Ui.Button("叫回伙伴",_room.RecallFromUser)))),Ui.Button("调整家具再玩",()=>Navigate("furniture")));
     }
 }

@@ -86,10 +86,11 @@ public sealed partial class Store : IDisposable
     public bool Water(DateOnly day)
     {
         using var tx = _db.BeginTransaction(); var id = "water:" + day.ToString("yyyy-MM-dd");
-        using var c = Command("SELECT count(*) FROM growth WHERE id=$0",tx,id); if (Convert.ToInt64(c.ExecuteScalar()) != 0) return false;
+        using var c = Command("SELECT count(*) FROM growth WHERE id=$0",tx,id); if (Convert.ToInt64(c.ExecuteScalar()) != 0){RecordGameActions(tx,day,["water"]);tx.Commit();return false;}
         Grant(id,"water",day.ToString("yyyy-MM-dd"),tx);
         using var count = Command("SELECT count(*) FROM growth WHERE type='water'",tx);
         if (Convert.ToInt64(count.ExecuteScalar()) >= 5) Grant("unlock:flower","unlock","",tx);
+        RecordGameActions(tx,day,["water"]);
         tx.Commit(); return true;
     }
     public int PlantPoints => Convert.ToInt32(Scalar("SELECT count(*) FROM growth WHERE type='water'"));

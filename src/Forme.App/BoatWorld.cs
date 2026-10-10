@@ -108,7 +108,7 @@ internal sealed partial class Room3DView
         _boatTimer.Stop();if(_boatGame is not {Complete:true} game)return;
         PositionShip(game.Position,game.Heading,0);_travel.Stop();_heading.Angle=0;_animator.Play(PetAction.Cheer);
         _boatLast=new(Guid.NewGuid().ToString("N"),PaperBoat.DockName(game.Dock)+"的小旅行",game.Layout.Copy(),game.Dock!,game.PetalFound,_c.Preferences.PetModel,DateTimeOffset.Now);
-        _hint.Text=game.PetalFound?"船带回了一片小花瓣，伙伴开心地拍了拍手。":"到岸啦！伙伴为你的小船欢呼。";BoatChanged?.Invoke();
+        _hint.Text=game.PetalFound?"船带回了一片小花瓣，伙伴开心地拍了拍手。":"到岸啦！伙伴为你的小船欢呼。";_c.Store.RecordBoatCompleted(DateOnly.FromDateTime(DateTime.Now));_c.Refresh();BoatChanged?.Invoke();
     }
     private void PositionShip(GroundPoint p,double heading,double elapsed)
     {var world=BoatPoint(p);_shipPosition.OffsetX=world.X;_shipPosition.OffsetY=world.Y+(elapsed==0?0:.009*Math.Sin(elapsed*4));_shipPosition.OffsetZ=world.Z;_shipHeading.Angle=heading;}

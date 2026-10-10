@@ -82,9 +82,17 @@ public sealed record FocusEntry(string Id, string Kind, string Title, DateTimeOf
 public sealed record ActivitySnapshot(string Id, string Kind, string Title, DateTimeOffset Started, int TargetSeconds, double ElapsedSeconds);
 public sealed record GrowthEvent(string Id, string Type, string Day);
 public sealed record GameProgress(int Experience,int Level,int Stars);
-public sealed record GameTask(string Id,string Title,string Hint,int RewardXp,int RewardStars,bool Completed);
-public sealed record GameTaskDefinition(string Id,string Title,string Hint,int RewardXp,int RewardStars);
-public sealed record GameItem(string Id,string Name,string Kind,int Price,int MaxOwned);
+public sealed record GameTask(string Id,string Title,string Hint,int RewardXp,int RewardStars,bool Completed,string Action="");
+public sealed record GameTaskDefinition(string Id,string Title,string Hint,int RewardXp,int RewardStars,string Action="");
+public sealed record GameItem(string Id,string Name,string Kind,int Price,int MaxOwned)
+{
+    public string Visual {get;init;}="";
+    public string Color {get;init;}="#8FA976";
+    public string Action {get;init;}="";
+    public string Condition {get;init;}="any";
+    public string Rarity {get;init;}="common";
+}
+public sealed record GameSlotDefinition(string Id,string Name,double X,double Z,string Surface);
 public sealed record GameAchievementDefinition(string Id,string Name,string Description);
 public sealed record GameInventoryItem(string ItemId,int Quantity);
 public sealed record GameDiscovery(string ItemId,string Day);

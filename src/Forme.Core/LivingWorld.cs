@@ -14,7 +14,7 @@ public sealed record LivingWorld(List<FurnitureItem> Items,List<string> Discover
     public PetTravel Travel()=>new(-4.3,4.3,-3.6,5.65,Obstacles);
     public void Validate()
     {
-        if(Items is null||Discoveries is null||Items.Count>24||Items.Any(i=>i is null||string.IsNullOrWhiteSpace(i.Id)||i.Id.Length>40)||Items.Select(i=>i.Id).Distinct().Count()!=Items.Count||Discoveries.Count>12||Discoveries.Distinct().Count()!=Discoveries.Count||Discoveries.Any(d=>!LifeRules.Ids.Contains(d)))throw new InvalidDataException("家具或生活图鉴数据无效。");
+        if(Items is null||Discoveries is null||Items.Count>24||Items.Any(i=>i is null||string.IsNullOrWhiteSpace(i.Id)||i.Id.Length>40)||Items.Select(i=>i.Id).Distinct().Count()!=Items.Count||Discoveries.Count>LifeRules.Ids.Length||Discoveries.Distinct().Count()!=Discoveries.Count||Discoveries.Any(d=>!LifeRules.Ids.Contains(d)))throw new InvalidDataException("家具或生活图鉴数据无效。");
         foreach(var i in Items){var box=Footprint(i);if(!double.IsFinite(i.X)||!double.IsFinite(i.Z)||i.Rotation is not (0 or 90 or 180 or 270)||Math.Abs(i.X)+box.Width/2>4.3||i.Z-box.Depth/2< -3.6||i.Z+box.Depth/2>5.65)throw new InvalidDataException("家具超出小屋范围。");}
     }
     public string? PlacementProblem()
@@ -42,21 +42,61 @@ public sealed record LivingWorld(List<FurnitureItem> Items,List<string> Discover
 public sealed record LifeEvent(string Id,string Title,string Description,string Action,string Target);
 public static class LifeRules
 {
-    public static readonly string[] Ids=["reading","rain-reading","sun-nap","snack-rest","fish-watch","warm-nap","night-book","garden-break"];
+    public static readonly LifeEvent[] Catalog=
+    [
+        new("reading","小小阅读角","坐垫靠近书架，伙伴可以坐下来读书。","book","cushion"),
+        new("rain-reading","听雨读书","阅读角开着暖灯，雨声成了故事的背景。","book","cushion"),
+        new("sun-nap","窗边晒太阳","晴天里，窗边坐垫接住了白天的阳光。","sleep","cushion"),
+        new("snack-rest","零食小憩","零食碗就在小窝旁，吃完可以休息。","feed","feed"),
+        new("fish-watch","陪小鱼发呆","坐垫靠近鱼缸，伙伴可以安静观察。","fish","cushion"),
+        new("warm-nap","暖灯晚安","小窝旁的灯亮着，休息角变暖了。","sleep","sleep"),
+        new("night-book","夜读一页","夜晚亮灯的书架留了一页故事。","book","book"),
+        new("garden-break","花园边歇脚","坐垫摆到前庭，可以看看花草。","sleep","cushion"),
+        new("rainy-nest","雨声小窝","雨天里，小窝和暖灯组成安静的角落。","sleep","sleep"),
+        new("snowy-window","窗边看雪","窗边坐垫正好能看见轻轻落下的雪。","fish","cushion"),
+        new("stargazing","看一会儿星星","晴朗夜晚，窗边留出了仰望天空的位置。","fish","cushion"),
+        new("daytime-story","午后故事","白天的书架和坐垫适合读一页故事。","book","book"),
+        new("night-fish","夜看游鱼","夜灯照着鱼缸，几条小鱼还没睡。","fish","fish"),
+        new("twin-cushions","双人软垫","两只坐垫挨在一起，像给伙伴留了个座位。","sleep","cushion"),
+        new("garden-reading","花园读本","把书架和坐垫一起挪到前庭，就能边看花边读书。","book","book"),
+        new("lamp-snack","灯下点心","零食碗放在暖灯旁，像一份小小夜宵。","feed","feed"),
+        new("morning-snack","晨间点心","晴朗白天，书架旁的零食碗留了一份早餐。","feed","feed"),
+        new("snowy-nest","雪日暖窝","下雪时，小窝靠窗摆着，屋里依旧暖和。","sleep","sleep"),
+        new("rainy-fish","雨天观鱼","雨声和鱼缸挨在一起，成了安静的角落。","fish","fish"),
+        new("garden-nap","花园打盹","前庭的坐垫靠近小窝，伙伴可以晒着太阳休息。","sleep","cushion")
+    ];
+    public static readonly string[] Ids=Catalog.Select(x=>x.Id).ToArray();
     public static IReadOnlyList<LifeEvent> Evaluate(LivingWorld world,string weather,bool night,bool lamp)
     {
         bool near(string a,string b)=>world.Items.Any(x=>x.Kind==a&&world.Items.Any(y=>y.Kind==b&&x.Id!=y.Id&&Distance(x,y)<2.1));
         bool window(string a)=>world.Items.Any(x=>x.Kind==a&&x.Z< -1.4);
+        bool front(string a)=>world.Items.Any(x=>x.Kind==a&&x.Z>2.3);
+        bool pair(string kind)=>world.Items.Where(x=>x.Kind==kind).Any(x=>world.Items.Any(y=>y.Kind==kind&&x.Id!=y.Id&&Distance(x,y)<1.6));
         string? target(string kind)=>world.Items.FirstOrDefault(x=>x.Kind==kind)?.Id;
-        var events=new List<LifeEvent>();void add(bool ok,string id,string title,string text,string action,string kind){if(ok&&target(kind) is{} itemId)events.Add(new(id,title,text,action,itemId));}
-        add(near("cushion","book"),"reading","小小阅读角","坐垫靠近书架，伙伴可以坐下来读书。","book","cushion");
-        add(near("cushion","book")&&near("cushion","lamp")&&weather=="rain"&&lamp,"rain-reading","听雨读书","阅读角开着暖灯，雨声成了故事的背景。","book","cushion");
-        add(window("cushion")&&weather=="clear"&&!night,"sun-nap","窗边晒太阳","窗边的坐垫接住了白天的阳光。","sleep","cushion");
-        add(near("feed","sleep"),"snack-rest","零食小憩","零食碗就在小窝旁，吃完可以休息。","feed","feed");
-        add(near("cushion","fish"),"fish-watch","陪小鱼发呆","坐垫靠近鱼缸，伙伴可以安静观察。","fish","cushion");
-        add(near("sleep","lamp")&&lamp,"warm-nap","暖灯晚安","小窝旁的灯亮着，休息角变暖了。","sleep","sleep");
-        add(near("book","lamp")&&night&&lamp,"night-book","夜读一页","夜晚亮灯的书架留了一页故事。","book","book");
-        add(world.Items.Any(x=>x.Kind=="cushion"&&x.Z>2.3),"garden-break","花园边歇脚","坐垫摆到前庭，可以看看花草。","sleep","cushion");return events;
+        var events=new List<LifeEvent>();
+        void add(bool ok,string id){if(!ok)return;var rule=Catalog.First(x=>x.Id==id);if(target(rule.Target) is{} itemId)events.Add(rule with{Target=itemId});}
+        bool clear=weather=="clear";
+        add(near("cushion","book"),"reading");
+        add(near("cushion","book")&&near("cushion","lamp")&&weather=="rain"&&lamp,"rain-reading");
+        add(window("cushion")&&clear&&!night,"sun-nap");
+        add(near("feed","sleep"),"snack-rest");
+        add(near("cushion","fish"),"fish-watch");
+        add(near("sleep","lamp")&&lamp,"warm-nap");
+        add(near("book","lamp")&&night&&lamp,"night-book");
+        add(front("cushion"),"garden-break");
+        add(near("sleep","lamp")&&weather=="rain"&&lamp,"rainy-nest");
+        add(window("cushion")&&weather=="snow"&&!night,"snowy-window");
+        add(window("cushion")&&clear&&night,"stargazing");
+        add(near("cushion","book")&&clear&&!night,"daytime-story");
+        add(near("fish","lamp")&&night&&lamp,"night-fish");
+        add(pair("cushion"),"twin-cushions");
+        add(front("book")&&front("cushion")&&near("book","cushion"),"garden-reading");
+        add(near("feed","lamp")&&lamp,"lamp-snack");
+        add(near("feed","book")&&clear&&!night,"morning-snack");
+        add(window("sleep")&&weather=="snow","snowy-nest");
+        add(near("fish","lamp")&&weather=="rain"&&lamp,"rainy-fish");
+        add(front("cushion")&&near("cushion","sleep"),"garden-nap");
+        return events;
     }
     private static double Distance(FurnitureItem a,FurnitureItem b)=>Math.Sqrt(Math.Pow(a.X-b.X,2)+Math.Pow(a.Z-b.Z,2));
 }

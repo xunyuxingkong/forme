@@ -35,6 +35,8 @@ internal static class CompanionChecks
     }
     public static async Task DesktopRules(DesktopHost host,Controller c)
     {
+        string hiddenReport="跟我走两步吧。\n\n"+CompanionCommands.ReportMarker+" 伙伴在桌面走几步，结束后停下；已发起伙伴动作";
+        if(ChatDisplay.Message(hiddenReport)!="跟我走两步吧。"||ChatDisplay.Message("本地规则匹配 · 未联网\n"+CompanionCommands.ReportMarker+" 已发起伙伴动作").Length!=0||ChatDisplay.Status("回复完成。 "+CompanionCommands.ReportMarker+" 已发起伙伴动作")!="已处理伙伴动作请求。"||ChatDisplay.Status("正在执行本地规则，不发送AI请求。")!="正在陪你互动…")throw new Exception("Chat exposed internal action details");
         var before=c.Preferences;string rules=c.RulesText();c.SaveRules(ActionRules.Default().Serialize());
         c.SavePreferences(before with{LocalActionRules=true,AllowPetControl=true,AllowPlayControl=true,PetIdleMode="idle",Quiet=false,ReducedMotion=false,DisplayMode="pet"});
         host.HidePet();host.ShowPet();await Task.Delay(150);host.ShowFloatingChat();await Task.Delay(80);
@@ -146,6 +148,7 @@ internal static class CompanionChecks
         Descendants(host.House).OfType<TextBox>().Single(x=>AutomationProperties.GetName(x)=="记忆内容").Text="我喜欢温热的红茶。";Click(host.House,"保存到当前服务商");
         if(!c.Store.Memories().Any(x=>x.Title=="饮品偏好"&&x.Provider==AiClient.ProviderIdentity(c.Preferences.Endpoint)))throw new Exception("Memory UI failed to save or bind provider");Image(host.House,"companion-memory");
         c.NewSession();host.House.Navigate("chat");host.House.UpdateLayout();
+        var chatOptions=Descendants(host.House).OfType<Expander>().Single(x=>AutomationProperties.GetName(x)=="聊天记录管理");chatOptions.IsExpanded=true;host.House.UpdateLayout();
         var expander=Descendants(host.House).OfType<Expander>().Single(x=>x.Header?.ToString()?.StartsWith("会话标题与摘要")==true);expander.IsExpanded=true;host.House.UpdateLayout();
         Descendants(host.House).OfType<TextBox>().Single(x=>AutomationProperties.GetName(x)=="会话摘要").Text="我们约好去池塘看看。";Click(host.House,"保存会话摘要");
         if(c.Store.Note(c.Session!.Id)?.Content!="我们约好去池塘看看。")throw new Exception("Session note UI failed");

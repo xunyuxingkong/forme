@@ -73,14 +73,16 @@ internal sealed class FloatingChatWindow : Window
         foreach(var message in history)
         {
             if(message.Status=="streaming"&&_c.Busy)continue;
-            var text=Ui.Text(message.Content.Length==0?"未收到内容":message.Content,13);text.Margin=new Thickness(0);
+            string visible=message.Role=="user"?message.Content:ChatDisplay.Message(message.Content);
+            if(message.Role!="user"&&visible.Length==0&&message.Content.Length>0)continue;
+            var text=Ui.Text(message.Content.Length==0?"未收到内容":visible,13);text.Margin=new Thickness(0);
             var label=message.Role=="user"?"你":_c.Preferences.PetName;
             if(message.Status is "stopped" or "error")label+=message.Status=="stopped"?" · 已停止":" · 未完成";
-            _messages.Children.Add(Ui.Card(Ui.Stack(Ui.Text(label,10,Ui.Muted),text,Ui.Row(Ui.Button("复制",()=>Clipboard.SetText(message.Content)),Ui.Button("存为记忆…",()=>{string memory=Forme.Core.CompanionCommands.ContextText(message.Content);_c.MemoryDraft=memory.Length>400?memory[..400]:memory;_openHouse("memory");}))),new Thickness(10)));
+            _messages.Children.Add(Ui.Card(Ui.Stack(Ui.Text(label,10,Ui.Muted),text,Ui.Row(Ui.Button("复制",()=>Clipboard.SetText(message.Role=="user"?message.Content:visible)),Ui.Button("存为记忆…",()=>{string memory=Forme.Core.CompanionCommands.ContextText(message.Content);_c.MemoryDraft=memory.Length>400?memory[..400]:memory;_openHouse("memory");}))),new Thickness(10)));
         }
         if(!_c.Secrets.Exists)_messages.Children.Add(Ui.Text("明确动作可按本地规则执行，例如“走两步”“跳个舞”；先开启对应权限。自由对话需在设置连接AI，调用可能收费。",12,Ui.Muted));
         else if(history.Count==0&&!_c.Busy)_messages.Children.Add(Ui.Text("我在这里，听你说。分享范围可在发送预览中查看。",13,Ui.Muted));
-        if(_c.PendingChatSave is {} unsaved)_messages.Children.Add(Ui.Card(Ui.Stack(Ui.Text("回复还未保存到磁盘",12,Ui.Sage),Ui.Text(unsaved.Content,13),Ui.Row(Ui.Button("复制",()=>Clipboard.SetText(unsaved.Content)),Ui.Button("重试保存",_c.RetryChatSave),Ui.Button("放弃保存",()=>{if(Ui.Confirm("放弃这条暂存回复的保存？"))_c.DiscardPendingSave();})))));
+        if(_c.PendingChatSave is {} unsaved)_messages.Children.Add(Ui.Card(Ui.Stack(Ui.Text("回复还未保存到磁盘",12,Ui.Sage),Ui.Text(ChatDisplay.Message(unsaved.Content),13),Ui.Row(Ui.Button("复制",()=>Clipboard.SetText(ChatDisplay.Message(unsaved.Content))),Ui.Button("重试保存",_c.RetryChatSave),Ui.Button("放弃保存",()=>{if(Ui.Confirm("放弃这条暂存回复的保存？"))_c.DiscardPendingSave();})))));
         if(_c.Busy){_live=Ui.Text("…",13);_messages.Children.Add(Ui.Card(Ui.Stack(Ui.Text(_c.Preferences.PetName,10,Ui.Muted),_live),new Thickness(10)));}
         if(_input.Text!=_c.Draft)_input.Text=_c.Draft;
         _send.IsEnabled=!_c.Busy;_stop.IsEnabled=_c.Busy;_new.IsEnabled=!_c.Busy;
@@ -88,7 +90,7 @@ internal sealed class FloatingChatWindow : Window
     }
     private void UpdateLive()
     {
-        if(_live is not null&&(_probeStreaming||_c.Busy)&&IsVisible&&WindowState!=WindowState.Minimized){_live.Text=_probeStreaming?"模拟生成中的回复 · 本机测试，不发送网络请求":_c.LiveReply.Length==0?"…":_c.LiveReply;_scroll.ScrollToEnd();}
-        _status.Text=_c.Waiting?"正在等待服务，可随时停止。":_c.ChatStatus;
+        if(_live is not null&&(_probeStreaming||_c.Busy)&&IsVisible&&WindowState!=WindowState.Minimized){_live.Text=_probeStreaming?"模拟生成中的回复 · 本机测试，不发送网络请求":_c.LiveReply.Length==0?"…":ChatDisplay.Message(_c.LiveReply);_scroll.ScrollToEnd();}
+        _status.Text=_c.Waiting?"正在等待服务，可随时停止。":ChatDisplay.Status(_c.ChatStatus);
     }
 }

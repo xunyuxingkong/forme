@@ -278,7 +278,7 @@ internal static class Smoke
             host.House.Navigate("room");host.House.UpdateLayout();var selectors=Descendants(host.House).OfType<System.Windows.Controls.ComboBox>().ToArray();selectors[0].SelectedIndex=2;
             if(c.Preferences.Theme!="auto")throw new Exception("Room preview mutated saved preferences");host.House.Navigate("home");if(c.Preferences.Theme!="auto")throw new Exception("Cancelled preview persisted");
             host.House.Navigate("play");host.House.UpdateLayout();
-            if(host.House.CurrentPage!="play"||c.Store.GameTasks(DateOnly.FromDateTime(DateTime.Now)).Count!=3||!Descendants(host.House).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text=="收藏图鉴"))throw new Exception("Progression, daily tasks or collection UI missing");
+            if(host.House.CurrentPage!="play"||c.Store.GameTasks(DateOnly.FromDateTime(DateTime.Now)).Count!=3||GameProgression.TaskCatalog.Count!=14||GameProgression.Catalog.Count(x=>x.Kind is "decor" or "rug")!=30||GameProgression.Catalog.Count(x=>x.Kind=="toy")!=6||GameProgression.Discoveries.Count!=16||GameProgression.AchievementsCatalog.Count!=30||!Descendants(host.House).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text=="收藏图鉴")||!Descendants(host.House).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text.StartsWith("小小纪念 ·",StringComparison.Ordinal)))throw new Exception("Expanded progression, daily tasks, collection or achievement UI missing");
             Save(host.House,"artifacts/screenshots/game-play.png");
             if(!roomView.PlayBall()||!roomView.ToyRunning)throw new Exception("Ball interaction did not start throw feedback");await Task.Delay(100);Save(host.House,"artifacts/screenshots/game-ball.png");for(int i=0;i<150&&roomView.ToyRunning;i++)await Task.Delay(20);if(roomView.ToyRunning||!roomView.PetMoving)throw new Exception("Pet did not follow toy landing");
             roomView.SwitchScene(true);roomView.SwitchScene(false);host.House.Navigate("home");
@@ -338,6 +338,19 @@ internal static class Smoke
             floating.Close();if(host.FloatingChat is not null||host.Pet?.IsVisible!=true||c.Draft!="小窗口修改后的草稿")throw new Exception("Closing floating chat lost draft or pet");
             host.ShowFloatingChat();Click(host.FloatingChat!,"完整聊天");await Task.Delay(100);
             if(host.FloatingChat is not null||host.House?.CurrentPage!="chat"||host.Pet is not null||c.Draft!="小窗口修改后的草稿")throw new Exception("Floating chat transfer failed");
+            var chat=host.House??throw new Exception("Full chat window missing after transfer");chat.Width=1080;chat.Height=685;c.SavePreferences(c.Preferences with{ShowHome3D=false});chat.UpdateLayout();
+            var chatInput=Descendants(chat).OfType<System.Windows.Controls.TextBox>().Single(x=>System.Windows.Automation.AutomationProperties.GetName(x)=="聊天消息");
+            var chatHistory=Descendants(chat).OfType<System.Windows.Controls.ScrollViewer>().Single(x=>x.Name=="聊天记录滚动区");
+            var chatNav=Descendants(chat).OfType<System.Windows.Controls.Button>().Single(x=>x.Content?.ToString()=="聊一会儿");
+            var inputBounds=chatInput.TransformToAncestor(chat).TransformBounds(new Rect(chatInput.RenderSize));var historyBounds=chatHistory.TransformToAncestor(chat).TransformBounds(new Rect(chatHistory.RenderSize));var navBounds=chatNav.TransformToAncestor(chat).TransformBounds(new Rect(chatNav.RenderSize));
+            if(!chatInput.IsVisible||chatInput.ActualWidth<300||chatHistory.ActualHeight<120||historyBounds.Bottom>inputBounds.Top||inputBounds.Bottom>navBounds.Top)throw new Exception("Chat history and bottom composer overlap or leave the viewport");
+            Save(chat,"artifacts/screenshots/chat-layout.png");
+            var chatOptions=Descendants(chat).OfType<System.Windows.Controls.Expander>().Single(x=>System.Windows.Automation.AutomationProperties.GetName(x)=="聊天记录管理");chatOptions.IsExpanded=true;chat.UpdateLayout();
+            var searchInput=Descendants(chat).OfType<System.Windows.Controls.TextBox>().Single(x=>System.Windows.Automation.AutomationProperties.GetName(x)=="搜索当前会话");
+            if(!searchInput.IsVisible||searchInput.ActualWidth<240)throw new Exception("Chat history search field collapsed in the management panel");
+            searchInput.Text="本地界面检查";Click(chat,"搜索记录");chat.UpdateLayout();
+            if(!Descendants(chat).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text=="聊天记录 · 搜索“本地界面检查”")||!Descendants(chat).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text=="本地界面检查"))throw new Exception("Chat history search did not show the matching message");
+            Click(chat,"清除搜索");chat.UpdateLayout();if(!Descendants(chat).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text=="聊天记录"))throw new Exception("Clearing chat history search did not restore the session");
             host.HidePet();host.ShowPet();await Task.Delay(100);
             petSource=(System.Windows.Interop.HwndSource)PresentationSource.FromVisual(host.Pet!)!;
             animatedPet=Descendants(host.Pet!).OfType<Pet3DView>().Single();

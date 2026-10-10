@@ -23,7 +23,8 @@ public sealed class LivingTests
     {
         var world=new LivingWorld([new("a","cushion",0,-2,0),new("b","book",1,-2,0),new("c","lamp",0,-1,0),new("d","sleep",.5,-1,0),new("e","feed",.5,0,0),new("f","fish",-.5,-2,0),new("g","cushion",0,3,0)],[]);
         var rain=LifeRules.Evaluate(world,"rain",false,true).Select(e=>e.Id).ToHashSet();Assert.IsTrue(rain.Contains("rain-reading"));Assert.IsFalse(rain.Contains("sun-nap"));Assert.IsFalse(LifeRules.Evaluate(world,"rain",false,false).Any(e=>e.Id=="rain-reading"));
-        var ids=rain.Concat(LifeRules.Evaluate(world,"clear",false,true).Select(e=>e.Id)).Concat(LifeRules.Evaluate(world,"clear",true,true).Select(e=>e.Id)).Distinct().ToArray();CollectionAssert.AreEquivalent(LifeRules.Ids,ids);
+        var expanded=world with{Items=world.Items.Concat([new("c2","cushion",.6,-2,0),new("book2","book",.1,3.3,0),new("sleep-window","sleep",.1,-2.1,0),new("sleep-garden","sleep",.3,4.2,0)]).ToList()};
+        var ids=rain.Concat(LifeRules.Evaluate(world,"clear",false,true).Select(e=>e.Id)).Concat(LifeRules.Evaluate(world,"clear",true,true).Select(e=>e.Id)).Concat(LifeRules.Evaluate(expanded,"snow",false,true).Select(e=>e.Id)).Distinct().ToArray();CollectionAssert.AreEquivalent(LifeRules.Ids,ids);
         var separated=world with{Items=world.Items.Select((i,n)=>i with{X=n*10,Z=0}).ToList()};Assert.AreEqual(0,LifeRules.Evaluate(separated,"clear",false,false).Count);
     }
     [TestMethod]
