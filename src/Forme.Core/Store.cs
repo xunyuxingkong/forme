@@ -6,7 +6,7 @@ namespace Forme.Core;
 public sealed partial class Store : IDisposable
 {
     public const int Version = DatabaseMigrator.CurrentVersion;
-    public const int ExportVersion = 2; // JSON compatibility evolves independently of SQLite indexes.
+    public const int ExportVersion = 6; // JSON compatibility evolves independently of SQLite indexes.
     private readonly SqliteConnection _db;
     public string DirectoryPath { get; }
     public string BackupPath => Path.Combine(DirectoryPath, "recovery.json");
@@ -53,7 +53,7 @@ public sealed partial class Store : IDisposable
     public List<MoodEntry> Moods(int offset = 0, int limit = 20) => Query("SELECT * FROM moods ORDER BY created DESC LIMIT $0 OFFSET $1", r => new MoodEntry(r.GetString(0),r.GetString(1),r.GetString(2),ReadDate(r,3),ReadDate(r,4)), limit, offset);
     public void SaveMood(MoodEntry m) { ValidateMood(m); Exec("INSERT INTO moods VALUES($0,$1,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET mood=excluded.mood,note=excluded.note,updated=excluded.updated", null, m.Id,m.Mood,m.Note,Date(m.Created),Date(m.Updated)); }
     public void DeleteMood(string id) { Exec("DELETE FROM moods WHERE id=$0", null, id); RemoveBackup(); }
-    public List<ChatSession> Sessions(int offset = 0, int limit = 20) => Query("SELECT * FROM sessions ORDER BY created DESC LIMIT $0 OFFSET $1", r => new ChatSession(r.GetString(0),r.GetString(1),ReadDate(r,2),r.GetString(3)),limit,offset);
+    public List<ChatSession> Sessions(int offset = 0, int limit = 20) => Query("SELECT sessions.* FROM sessions ORDER BY COALESCE((SELECT MAX(created) FROM messages WHERE session=sessions.id),created) DESC LIMIT $0 OFFSET $1", r => new ChatSession(r.GetString(0),r.GetString(1),ReadDate(r,2),r.GetString(3)),limit,offset);
     public ChatSession NewSession(string endpoint) { var s = new ChatSession(Guid.NewGuid().ToString("N"), "聊一会儿", DateTimeOffset.Now, endpoint); Exec("INSERT INTO sessions VALUES($0,$1,$2,$3)",null,s.Id,s.Title,Date(s.Created),s.Endpoint); return s; }
     public bool HasSession(string id) => Convert.ToInt64(Scalar("SELECT count(*) FROM sessions WHERE id=$0",id)) > 0;
     public void RenameSession(string id, string title) => Exec("UPDATE sessions SET title=$1 WHERE id=$0",null,id,title.Length > 24 ? title[..24] : title);
@@ -62,7 +62,7 @@ public sealed partial class Store : IDisposable
     public void SaveMessage(ChatMessage m) { if (!HasSession(m.SessionId)) return; Exec("INSERT INTO messages VALUES($0,$1,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET content=excluded.content,status=excluded.status",null,m.Id,m.SessionId,m.Role,m.Content,m.Status,Date(m.Created)); }
     public void DeleteSession(string id)
     {
-        using var tx = _db.BeginTransaction(); Exec("DELETE FROM messages WHERE session=$0",tx,id); Exec("DELETE FROM sessions WHERE id=$0",tx,id); tx.Commit(); RemoveBackup();
+        using var tx = _db.BeginTransaction(); Exec("DELETE FROM messages WHERE session=$0",tx,id);Exec("DELETE FROM chat_notes WHERE session=$0",tx,id); Exec("DELETE FROM sessions WHERE id=$0",tx,id); tx.Commit(); RemoveBackup();
     }
     public List<FocusEntry> Focus(int offset = 0, int limit = 20) => Query("SELECT * FROM focus ORDER BY started DESC LIMIT $0 OFFSET $1",r => new FocusEntry(r.GetString(0),r.GetString(1),r.GetString(2),ReadDate(r,3),r.GetInt32(4),r.GetDouble(5),r.GetString(6)),limit,offset);
     public void FinishFocus(FocusEntry f)
@@ -104,8 +104,9 @@ public sealed partial class Store : IDisposable
             {
                 Sessions = sessions,
                 Messages = sessions?.SelectMany(s=>Messages(s.Id,0,int.MaxValue)).ToList(),
+                Memories=chat?Memories():null,Notes=chat?Notes():null,
                 Moods = moods ? Moods(0,int.MaxValue) : null, Focus = focus ? Focus(0,int.MaxValue) : null,
-                Room = room ? new RoomExport(p.PetName,p.Theme,p.Rug,p.Ornament,Growth()){Game=GameExportData()} : null
+                Room = room ? new RoomExport(p.PetName,p.Theme,p.Rug,p.Ornament,Growth()){Game=GameExportData(),Boats=Boats(),World=World(),PetModel=p.PetModel,Weather=p.Weather,RoomLamp=p.RoomLamp,Fireplace=p.Fireplace} : null
             };
             Exec("COMMIT");return document;
         }
@@ -114,17 +115,20 @@ public sealed partial class Store : IDisposable
     private static void ValidateMood(MoodEntry m) { if (string.IsNullOrWhiteSpace(m.Id) || m.Mood.Length > 30 || m.Note.Length > 1000) throw new InvalidDataException("心情记录格式错误。"); }
     public static void ValidateExport(ExportDocument d)
     {
-        if (d.SchemaVersion is not (1 or ExportVersion)) throw new InvalidDataException("不支持的导出版本，原数据未修改。");
+        if (d.SchemaVersion is not (1 or 2 or 3 or 4 or 5 or ExportVersion)) throw new InvalidDataException("不支持的导出版本，原数据未修改。");
         if ((d.Sessions is null) != (d.Messages is null)) throw new InvalidDataException("聊天数据不完整。");
+        if(d.Sessions is null&&(d.Memories is not null||d.Notes is not null))throw new InvalidDataException("记忆和摘要需要随聊天类别一起导入。");
         if (d.Sessions is null && d.Moods is null && d.Focus is null && d.Room is null) throw new InvalidDataException("文件没有可导入的数据。");
         void Unique(IEnumerable<string> ids) { var all = ids.ToList(); if (all.Any(string.IsNullOrWhiteSpace) || all.Distinct().Count()!=all.Count) throw new InvalidDataException("记录 ID 无效或重复。"); }
         if (d.Moods is not null) { Unique(d.Moods.Select(x=>x.Id)); foreach(var m in d.Moods) ValidateMood(m); }
         if (d.Sessions is not null)
         {
+            if(d.Memories is {} memories){if(memories.Count>30)throw new InvalidDataException("记忆超过30条。");Unique(memories.Select(x=>x.Id));foreach(var memory in memories)ValidateMemory(memory);}
+            if(d.Notes is {} notes){Unique(notes.Select(x=>x.SessionId));foreach(var note in notes){ValidateNote(note);if(!d.Sessions.Any(x=>x.Id==note.SessionId))throw new InvalidDataException("摘要所属会话缺失。");}}
             Unique(d.Sessions.Select(x=>x.Id)); Unique(d.Messages!.Select(x=>x.Id));
             foreach (var s in d.Sessions) { AiClient.ValidateEndpoint(s.Endpoint); if (s.Title.Length > 120) throw new InvalidDataException("会话标题过长。"); }
             var ids = d.Sessions.Select(x=>x.Id).ToHashSet();
-            if (d.Messages!.Any(x=>!ids.Contains(x.SessionId) || x.Role is not ("user" or "assistant") || x.Status is not ("complete" or "stopped" or "error" or "streaming") || x.Content.Length>32000)) throw new InvalidDataException("消息记录无效。");
+            if (d.Messages!.Any(x=>!ids.Contains(x.SessionId) || x.Role is not ("user" or "assistant") || x.Status is not ("complete" or "stopped" or "error" or "streaming" or "local") || x.Content.Length>32000)) throw new InvalidDataException("消息记录无效。");
         }
         if (d.Focus is not null)
         {
@@ -133,7 +137,8 @@ public sealed partial class Store : IDisposable
         }
         if(d.Room is not null)
         {
-            new Preferences {PetName=d.Room.PetName,Theme=d.Room.Theme,Rug=d.Room.Rug,Ornament=d.Room.Ornament}.Validate(); Unique(d.Room.Events.Select(x=>x.Id));if(d.Room.Game is {} game)ValidateGameExport(game);
+            new Preferences {PetName=d.Room.PetName,Theme=d.Room.Theme,Rug=d.Room.Rug,Ornament=d.Room.Ornament,PetModel=d.Room.PetModel,Weather=d.Room.Weather,RoomLamp=d.Room.RoomLamp,Fireplace=d.Room.Fireplace}.Validate(); Unique(d.Room.Events.Select(x=>x.Id));if(d.Room.Game is {} game)ValidateGameExport(game);
+            d.Room.Boats?.Validate();if(d.Room.World is {} world&&world.PlacementProblem() is {} placement)throw new InvalidDataException(placement);
             if(d.Room.Events.Any(x=>x.Type=="water" ? !DateOnly.TryParseExact(x.Day,"yyyy-MM-dd",out _) || x.Id!="water:"+x.Day : x.Type!="unlock" || !new[]{"unlock:star","unlock:cloud","unlock:flower"}.Contains(x.Id))) throw new InvalidDataException("成长记录无效。");
         }
     }
@@ -146,27 +151,32 @@ public sealed partial class Store : IDisposable
         using var tx = _db.BeginTransaction();
         if(d.Sessions is not null)
         {
-            Exec("DELETE FROM messages; DELETE FROM sessions;",tx);
+            existingPreferences=existingPreferences with{MemoryEnabled=false};
+            Exec("INSERT INTO settings VALUES('preferences',$0) ON CONFLICT(k) DO UPDATE SET v=excluded.v",tx,JsonSerializer.Serialize(existingPreferences));
+            Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_memories; DELETE FROM chat_notes;",tx);
             foreach(var s in d.Sessions) Exec("INSERT INTO sessions VALUES($0,$1,$2,$3)",tx,s.Id,s.Title,Date(s.Created),s.Endpoint);
             foreach(var m in d.Messages!) Exec("INSERT INTO messages VALUES($0,$1,$2,$3,$4,$5)",tx,m.Id,m.SessionId,m.Role,m.Content,m.Status=="streaming"?"stopped":m.Status,Date(m.Created));
+            foreach(var memory in d.Memories??[])Exec("INSERT INTO chat_memories VALUES($0,$1,$2,$3,$4,$5,$6)",tx,memory.Id,memory.Title,memory.Content,memory.Provider,memory.Enabled?1:0,Date(memory.Created),Date(memory.Updated));
+            foreach(var note in d.Notes??[])Exec("INSERT INTO chat_notes VALUES($0,$1,$2)",tx,note.SessionId,note.Content,note.Provider);
         }
         if(d.Moods is not null) { Exec("DELETE FROM moods",tx); foreach(var m in d.Moods) Exec("INSERT INTO moods VALUES($0,$1,$2,$3,$4)",tx,m.Id,m.Mood,m.Note,Date(m.Created),Date(m.Updated)); }
         if(d.Focus is not null) { Exec("DELETE FROM focus",tx); foreach(var f in d.Focus) Exec("INSERT INTO focus VALUES($0,$1,$2,$3,$4,$5,$6)",tx,f.Id,f.Kind,f.Title,Date(f.Started),f.TargetSeconds,f.ElapsedSeconds,f.Result); }
         if(d.Room is not null)
         {
-            var p=existingPreferences with {}; p.PetName=d.Room.PetName; p.Theme=d.Room.Theme; p.Rug=d.Room.Rug; p.Ornament=d.Room.Ornament;
+            var p=existingPreferences with {}; p.PetName=d.Room.PetName; p.Theme=d.Room.Theme; p.Rug=d.Room.Rug; p.Ornament=d.Room.Ornament;p.PetModel=d.Room.PetModel;p.Weather=d.Room.Weather;p.RoomLamp=d.Room.RoomLamp;p.Fireplace=d.Room.Fireplace;
             Exec("INSERT INTO settings VALUES('preferences',$0) ON CONFLICT(k) DO UPDATE SET v=excluded.v",tx,JsonSerializer.Serialize(p));
             Exec("DELETE FROM growth",tx); foreach(var e in d.Room.Events) Grant(e.Id,e.Type,e.Day,tx);
             if(d.Room.Game is {} game)ReplaceGame(game,tx);
+            if(d.Room.Boats is {} boats)ReplaceBoats(boats,tx);if(d.Room.World is {} world)ReplaceWorld(world,tx);
         }
         tx.Commit();
     }
     public void ClearCategory(string category)
     {
         if(category is not ("chat" or "moods" or "focus")) throw new ArgumentException("类别无效。");
-        Exec(category=="chat"?"DELETE FROM messages; DELETE FROM sessions;":$"DELETE FROM {category}"); RemoveBackup();
+        Exec(category=="chat"?"DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_notes; DELETE FROM chat_memories;":$"DELETE FROM {category}"); RemoveBackup();
     }
-    public void ResetAll() { Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM moods; DELETE FROM focus; DELETE FROM growth; DELETE FROM settings; DELETE FROM game_progress; INSERT INTO game_progress(id,xp,stars) VALUES(1,0,0); DELETE FROM game_inventory; INSERT INTO game_inventory VALUES('ball-yellow',1); DELETE FROM game_tasks; DELETE FROM game_daily; DELETE FROM game_discoveries; DELETE FROM game_slots; DELETE FROM game_achievements;"); RemoveBackup(); Exec("VACUUM"); }
+    public void ResetAll() { Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_memories; DELETE FROM chat_notes; DELETE FROM moods; DELETE FROM focus; DELETE FROM growth; DELETE FROM settings; DELETE FROM game_progress; INSERT INTO game_progress(id,xp,stars) VALUES(1,0,0); DELETE FROM game_inventory; INSERT INTO game_inventory VALUES('ball-yellow',1); DELETE FROM game_tasks; DELETE FROM game_daily; DELETE FROM game_discoveries; DELETE FROM game_slots; DELETE FROM game_achievements;"); RemoveBackup(); Exec("VACUUM"); }
     public void RemoveBackup()
     {
         if(File.Exists(BackupPath))File.Delete(BackupPath);

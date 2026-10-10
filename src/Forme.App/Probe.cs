@@ -38,6 +38,7 @@ internal static class Probe
         host.HidePet();
         if(state.StartsWith("house-",StringComparison.Ordinal))
         {
+            if(state.StartsWith("house-boat-",StringComparison.Ordinal)){host.ShowHouse("boat");await Task.Delay(150);if(state=="house-boat-playing")Descendants(host.House!).OfType<Room3DView>().First().StartBoat();return;}
             host.ShowHouse("home");var room=Descendants(host.House!).OfType<Room3DView>().FirstOrDefault();
             if(state.StartsWith("house-outdoor-",StringComparison.Ordinal))room?.SwitchScene(true);else room?.SwitchScene(false);
             if(state.EndsWith("-moving",StringComparison.Ordinal))room?.TryMove(state.StartsWith("house-outdoor-",StringComparison.Ordinal)?new(3,3):new(0,1));
@@ -56,13 +57,14 @@ internal static class Probe
     {
         try
         {
-            c.SavePreferences(new(){Onboarded=true});
+            var bootArgs=Environment.GetCommandLineArgs();int modelIndex=Array.IndexOf(bootArgs,"--probe-model");
+            c.SavePreferences(new(){Onboarded=true,PetModel=modelIndex>=0&&modelIndex+1<bootArgs.Length?bootArgs[modelIndex+1]:"sprout",PerformanceMode=bootArgs.Contains("--probe-economy")?"economy":"balanced"});
             int cycles=Option("--probe-cycles",0,0,1000);
             if(cycles>0){await Cycles(host,c,cycles);return;}
             int seconds=Option("--probe-seconds",600,10,28800),warmup=Option("--probe-warmup",120,0,600);
             var args=Environment.GetCommandLineArgs();int i=Array.IndexOf(args,"--probe-state");
             string[] states=i>=0&&i+1<args.Length?[args[i+1]]:["house-indoor-idle","pet-idle","tray-cold"];
-            var allowed=new HashSet<string>(StringComparer.Ordinal){"pet-idle","pet-sleep","pet-walk","pet-run","house-indoor-idle","house-indoor-moving","house-outdoor-idle","house-outdoor-moving","floating-chat-idle","floating-chat-streaming-mock","tray-cold","tray-after-100-switches"};
+            var allowed=new HashSet<string>(StringComparer.Ordinal){"house-boat-idle","house-boat-playing","pet-idle","pet-sleep","pet-walk","pet-run","house-indoor-idle","house-indoor-moving","house-outdoor-idle","house-outdoor-moving","floating-chat-idle","floating-chat-streaming-mock","tray-cold","tray-after-100-switches"};
             if(states.Any(s=>!allowed.Contains(s)))throw new ArgumentException("Unknown probe state");
             var reports=new List<object>();
             foreach(var state in states)
@@ -74,6 +76,7 @@ internal static class Probe
                 for(int n=0;n<seconds;n++)
                 {
                     await Task.Delay(1000);samples.Add(Measure(process,watch.Elapsed.TotalSeconds));
+                    if(state=="house-boat-playing"&&host.House is {} boatHouse){var boatRoom=Descendants(boatHouse).OfType<Room3DView>().First();if(!boatRoom.BoatRunning)boatRoom.StartBoat();}
                     var window=state.StartsWith("floating-chat-",StringComparison.Ordinal)?(Window?)host.FloatingChat:state.StartsWith("tray-",StringComparison.Ordinal)?null:(Window?)host.House??host.Pet;
                     bool active=state.StartsWith("tray-",StringComparison.Ordinal)?window is null:window is {IsVisible:true,WindowState:WindowState.Normal};
                     if(active)activeSamples++;
@@ -84,7 +87,7 @@ internal static class Probe
                     AveragePrivateMB=samples.Average(s=>s.PrivateBytes)/1048576,PeakPrivateMB=samples.Max(s=>s.PrivateBytes)/1048576d,
                     WriteBytes=after.WriteBytes-before.WriteBytes,WriteOperations=after.WriteOperations-before.WriteOperations,Initial=initial,Samples=samples,ActiveSamples=activeSamples,PresentationValid=activeSamples==seconds,Presentation=presentation});
                 Save("performance.json",new{Date=DateTimeOffset.Now,OS=Environment.OSVersion.ToString(),CpuCount=Environment.ProcessorCount,
-                    WarmupSeconds=warmup,DurationPerState=seconds,FreshProcessPerState=states.Length==1,GpuMeasured=false,Results=reports});
+                    WarmupSeconds=warmup,DurationPerState=seconds,FreshProcessPerState=states.Length==1,PetModel=c.Preferences.PetModel,PerformanceMode=c.Preferences.PerformanceMode,GpuMeasured=false,Results=reports});
             }
         }
         catch(Exception ex){Save("probe-error.json",new{Type=ex.GetType().FullName});Environment.ExitCode=1;}
@@ -120,7 +123,7 @@ internal static class Probe
         var references=new List<(string Type,WeakReference Reference)>();
         for(int n=0;n<count;n++)
         {
-            await Enter(host,c,"house-indoor-idle");await Task.Delay(70);Track(host.House!,references);
+            await Enter(host,c,Environment.GetCommandLineArgs().Contains("--probe-boat-cycles")?"house-boat-playing":"house-indoor-idle");await Task.Delay(70);Track(host.House!,references);
             await Enter(host,c,"pet-idle");await Task.Delay(70);Track(host.Pet!,references);
             await Enter(host,c,"tray-cold");await Task.Delay(70);
             if(n%10==9)samples.Add(Measure(process,watch.Elapsed.TotalSeconds));

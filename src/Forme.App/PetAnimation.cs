@@ -27,7 +27,7 @@ internal sealed class PetAnimator : IDisposable
     public bool ExternalActive {get;set;}
     public Func<bool>? ExternalMoving {get;set;}
     public Action<double>? Frame {get;set;}
-    public void StopAction(){_motion.Reset();Configure(_motion.State,_visible,_reduced,_quiet,_suspended);}
+    public void StopAction(){_motion.Reset();_configured=false;Configure(_motion.State,_visible,_reduced,_quiet,_suspended);}
     public void AttachTravel(PetTravel travel,Action<GroundPoint,double> place){_travel?.Stop();_travel=travel;_place=place;place(travel.Position,travel.Heading);}
     public bool MoveTo(GroundPoint target)
     {
@@ -36,11 +36,16 @@ internal sealed class PetAnimator : IDisposable
         if(!_reduced){_time.Start();Step();}return true;
     }
     private bool _visible,_reduced,_quiet,_suspended,_disposed;
+    private bool _configured,_lastExternalActive;
+    public bool Economy {get;set;}
     public bool Running=>_timer.IsEnabled;
+    internal bool Reacting=>_motion.Reacting;
     public PetAnimator(IPetModel model){_model=model;_timer.Tick+=Tick;}
     public void Configure(string state,bool visible,bool reduced,bool quiet,bool suspended)
     {
         if(_disposed)return;
+        if(_configured&&_motion.State==state&&_visible==visible&&_reduced==reduced&&_quiet==quiet&&_suspended==suspended&&_lastExternalActive==ExternalActive)return;
+        _configured=true;_lastExternalActive=ExternalActive;
         _motion.State=state;_visible=visible;_reduced=reduced;_quiet=quiet;_suspended=suspended;
         if(!visible||reduced||suspended){Stop();return;}
         if(quiet&&!_motion.Reacting&&_travel?.Moving!=true&&!ExternalActive){Stop();return;}
@@ -50,7 +55,7 @@ internal sealed class PetAnimator : IDisposable
     public void Play(PetAction action)
     {
         if(_disposed||!_visible||_suspended)return;
-        if(_reduced){_model.Apply(PetPose.Neutral("happy"));return;}
+        if(_reduced){_model.Apply(PetPose.Neutral(action switch{PetAction.Read=>"focus",PetAction.Rest=>"rest",PetAction.Look=>"thinking",_=>"happy"}));return;}
         _time.Start();_motion.Play(action,_time.Elapsed.TotalSeconds);Step();
     }
     public void Drag(bool dragging)
@@ -72,13 +77,15 @@ internal sealed class PetAnimator : IDisposable
         Frame?.Invoke(Math.Max(0,now-_lastFrame));_lastFrame=now;_model.Apply(pose);
         if(_quiet&&!_motion.Reacting&&_travel?.Moving!=true&&!ExternalActive){Stop();return;}
         bool movingExternal=ExternalActive&&ExternalMoving?.Invoke()==true;
-        _timer.Interval=TimeSpan.FromMilliseconds(_motion.Reacting||_travel?.Moving==true||movingExternal?1000d/30:_motion.State=="sleep"||ExternalActive?200:1000d/15);
+        bool moving=_travel?.Moving==true||movingExternal;
+        double interval=moving?1000d/(Economy?20:30):_motion.ActiveAction==PetAction.Rest?500:_motion.ActiveAction is PetAction.Read or PetAction.Look?200:_motion.ActiveAction==PetAction.Eat?1000d/15:_motion.Reacting?1000d/(Economy?20:30):_motion.State=="sleep"?500:ExternalActive?200:Economy?200:100;
+        _timer.Interval=TimeSpan.FromMilliseconds(interval);
         _timer.Start();
     }
     private void Stop(){_timer.Stop();_time.Reset();_lastFrame=0;_travel?.Stop();_motion.Reset();_model.Apply(_motion.State=="sleep"?_motion.Sample(0):PetPose.Neutral(_motion.State));}
     public void Replace(IPetModel model)
     {
-        Stop();_model.Dispose();_model=model;Configure(_motion.State,_visible,_reduced,_quiet,_suspended);
+        Stop();_model.Dispose();_model=model;_configured=false;Configure(_motion.State,_visible,_reduced,_quiet,_suspended);
     }
     public void Dispose(){if(_disposed)return;Stop();_disposed=true;_timer.Tick-=Tick;_model.Dispose();}
 }

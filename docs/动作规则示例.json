@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "rules": [
+    { "phrases": ["走两步", "走几步"], "commands": [{ "action": "stroll", "value": "walk" }] },
+    { "phrases": ["跑几步"], "commands": [{ "action": "stroll", "value": "run" }] },
+    { "phrases": ["跳个舞", "跳舞"], "commands": [{ "action": "dance", "value": "sway" }] },
+    { "phrases": ["睡觉", "睡一会儿"], "commands": [{ "action": "idle", "value": "sleep" }] },
+    { "phrases": ["随机走动"], "commands": [{ "action": "idle", "value": "walk" }] },
+    { "phrases": ["别动", "停下"], "commands": [{ "action": "stop" }] },
+    { "phrases": ["陪我玩藏物", "你藏我找"], "commands": [{ "action": "hide", "value": "pet-hides" }] },
+    { "phrases": ["玩纸船"], "commands": [{ "action": "boat", "value": "open" }] },
+    { "phrases": ["先走两步再跳个舞"], "commands": [{ "action": "stroll", "value": "walk" }, { "action": "dance", "value": "sway" }] }
+  ]
+}

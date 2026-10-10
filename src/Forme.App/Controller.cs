@@ -3,18 +3,26 @@ using System.Windows.Threading;
 
 namespace Forme.App;
 
-internal sealed class Controller : IDisposable
+internal sealed partial class Controller : IDisposable
 {
     public Store Store { get; }
     public Preferences Preferences { get; private set; }
     public FocusClock Clock { get; } = new();
     public Secrets Secrets { get; }
-    public AiClient Ai { get; } = new();
+    public AiClient Ai { get; }
     public event Action? Changed;
     public event Action? Tick;
     public event Action<string>? Notice;
     public event Action<string>? Finished;
     public ChatSession? Session { get; private set; }
+    public Func<CompanionCommand,string>? CommandHandler {get;set;}
+    public Func<CompanionCommand,CancellationToken,Task<bool>>? CommandWaiter {get;set;}
+    public Action? StopCommands {get;set;}
+    public Func<string>? SceneContext {get;set;}
+    public ChatMessage? PendingChatSave {get;private set;}
+    public string MemoryDraft {get;set;}="";
+    public void RetryChatSave(){if(PendingChatSave is not {} message)return;if(!Store.HasSession(message.SessionId)){PendingChatSave=null;Refresh();return;}Store.SaveMessage(message);PendingChatSave=null;Refresh();}
+    public void DiscardPendingSave(){PendingChatSave=null;Refresh();}
     public string Draft { get; set; } = "";
     // Unstarted focus inputs remain local, in memory for this app session only.
     public string FocusDraft { get; set; } = "";
@@ -31,9 +39,10 @@ internal sealed class Controller : IDisposable
     private readonly DispatcherTimer _timer;
     private int _saveTicks;
 
-    public Controller(string directory)
+    public Controller(string directory,AiClient? ai=null)
     {
-        Store=new(directory); Preferences=Store.LoadPreferences(); Preferences.Validate(); Secrets=new(directory);
+        Store=new(directory); Preferences=Store.LoadPreferences(); Preferences.Validate(); Secrets=new(directory);Ai=ai??new();
+        LoadActionRules();
         if(Store.Get<ActivitySnapshot>("activity") is { } snapshot) {Clock.Restore(snapshot);}
         Session=Store.Sessions().FirstOrDefault();
         _timer=new DispatcherTimer(DispatcherPriority.Background) {Interval=TimeSpan.FromSeconds(1)};
@@ -85,30 +94,30 @@ internal sealed class Controller : IDisposable
     private void SyncTimer(){if(Clock.Running || Busy)_timer.Start();else _timer.Stop();}
     public void SelectSession(ChatSession session){if(Busy)throw new OperationFailureException("请先停止当前回复。");Session=session;LiveReply="";ChatStatus="";Changed?.Invoke();}
     public void NewSession(){if(Busy)throw new OperationFailureException("请先停止当前回复。");Session=Store.NewSession(Preferences.Endpoint);LiveReply="";ChatStatus="";Changed?.Invoke();}
-    public void DeleteSession(){Cancel();if(Session is not null)Store.DeleteSession(Session.Id);Session=Store.Sessions().FirstOrDefault();LiveReply="";ChatStatus="";Changed?.Invoke();}
-    public void Cancel(){_epoch++;_request?.Cancel();}
-    public void StopReply(){Cancel();ChatStatus="已停止。服务端已发生的用量可能仍计费。";Changed?.Invoke();}
+    public void DeleteSession(){Cancel();if(Session is not null){Store.DeleteSession(Session.Id);if(PendingChatSave?.SessionId==Session.Id)PendingChatSave=null;}Session=Store.Sessions().FirstOrDefault();LiveReply="";ChatStatus="";Changed?.Invoke();}
+    public void Cancel(){_epoch++;_request?.Cancel();if(_request is not null)StopCommands?.Invoke();}
+    public void StopReply(){Cancel();ChatStatus=_localExecuting?"已停止本地动作，没有发起AI请求。":"已停止。服务端已发生的用量可能仍计费。";Changed?.Invoke();}
     public async Task Send(string? retryId=null)
     {
         if(Busy) return;
+        if(PendingChatSave is not null)throw new OperationFailureException("请先保存或放弃暂存回复，再继续聊天。");
         var key=Secrets.Read(); if(string.IsNullOrEmpty(key)) throw new OperationFailureException("请先在设置中连接 AI；也可以继续使用本地活动。");
         Session??=Store.NewSession(Preferences.Endpoint);
         if(!AiClient.SameEndpoint(Session.Endpoint,Preferences.Endpoint)) throw new OperationFailureException("此会话属于另一服务，请新建会话，或确认转移上下文后继续。");
-        var history=Store.Messages(Session.Id,0,60);
+        var history=Store.ContextMessages(Session.Id);
         string input=Draft.Trim();
         if(retryId is not null)
         {
             var user=history.LastOrDefault(x=>x.Role=="user" && x.Id==retryId)??throw new OperationFailureException("找不到重试消息。");
             input=user.Content;history=history.TakeWhile(x=>x.Id!=retryId).ToList();
         }
-        var turns=AiClient.BuildContext(Preferences,history,input,out bool trimmed);
+        var turns=AiClient.BuildContext(Preferences,history,input,out bool trimmed,Preferences.MemoryEnabled?Store.Memories():null,Preferences.MemoryEnabled?Store.Note(Session.Id):null,CompanionCommands.HasControl(Preferences)?SceneContext?.Invoke():null);
         var userMessage=new ChatMessage(retryId??Guid.NewGuid().ToString("N"),Session.Id,"user",input,"complete",DateTimeOffset.Now);
-        if(retryId is null){Store.SaveMessage(userMessage);Store.RenameSession(Session.Id,input);Draft="";}
         var response=new ChatMessage(Guid.NewGuid().ToString("N"),Session.Id,"assistant","","streaming",DateTimeOffset.Now.AddTicks(1));
-        Store.SaveMessage(response); LiveReply="";ChatStatus=trimmed?"较早对话未发送。正在回应…":"正在回应…";
+        Store.BeginChatTurn(retryId is null?userMessage:null,response);if(retryId is null)Draft="";LiveReply="";ChatStatus=trimmed?"上下文已按预算裁剪。正在回应…":"正在回应…";
         var request=new CancellationTokenSource();_request=request;int epoch=++_epoch;_requestedAt=DateTimeOffset.UtcNow;
         var p=Preferences with {};SyncTimer();Changed?.Invoke();
-        DateTimeOffset lastSave=DateTimeOffset.MinValue;
+        DateTimeOffset lastSave=DateTimeOffset.UtcNow;int savedLength=0;bool limited=false;
         string text="",status="error";
         var pending=new ReplyBuffer();
         var paint=new DispatcherTimer(DispatcherPriority.Background){Interval=TimeSpan.FromMilliseconds(80)};
@@ -116,26 +125,37 @@ internal sealed class Controller : IDisposable
         {
             if(epoch!=_epoch)return;
             if(pending.ReadChanges() is not {} partial)return;
-            text=partial;LiveReply=partial;
-            if(DateTimeOffset.UtcNow-lastSave>TimeSpan.FromSeconds(2)){Store.SaveMessage(response with{Content=partial});lastSave=DateTimeOffset.UtcNow;}
+            text=partial;LiveReply=CompanionCommands.VisibleText(partial);
+            try{if(DateTimeOffset.UtcNow-lastSave>TimeSpan.FromSeconds(3)&&partial.Length-savedLength>=64){Store.SaveMessage(response with{Content=LiveReply});lastSave=DateTimeOffset.UtcNow;savedLength=partial.Length;}}
+            catch(Exception ex) when(OperationErrors.Expected(ex)){request.Cancel();ChatStatus="本地保存失败，已停止请求："+OperationErrors.Message(ex);}
             Tick?.Invoke();
         };
         paint.Start();
         try
         {
             var result=await Ai.SendAsync(p,key,turns,pending.Append,request.Token,trimmed);
-            if(epoch==_epoch){text=result.Content;status="complete";}else status="stopped";
-            if(epoch==_epoch)ChatStatus=result.LengthLimited?"已达到单次回复上限，未自动续写。":trimmed?"回复完成；较早对话未发送。":"回复完成。";
+            limited=result.LengthLimited;if(epoch==_epoch){text=result.Content;status="complete";}else status="stopped";
+            if(epoch==_epoch)ChatStatus=result.LengthLimited?"已达到单次回复上限，未自动续写，未执行动作。":trimmed?"回复完成；上下文已按预算裁剪。":"回复完成。";
         }
         catch(OperationCanceledException){status="stopped";if(epoch==_epoch)ChatStatus="已停止。";}
         catch(Exception ex) when(OperationErrors.Expected(ex)){if(epoch==_epoch)ChatStatus=OperationErrors.Message(ex);}
         finally
         {
-            paint.Stop();text=pending.Snapshot();
+            paint.Stop();text=pending.Snapshot();var parsed=CompanionCommands.Parse(text,p);text=parsed.Text;
+            if(status=="complete"&&epoch==_epoch&&!limited&&!request.IsCancellationRequested)
+            {
+                var reports=await ExecuteCommands(parsed.Commands,epoch,request.Token,text);
+                if(parsed.Rejected>0)reports.Add("已忽略无效或未授权动作");
+                if(reports.Count>0){string report=string.Join("；",reports);ChatStatus+=" "+report;text+="\n\n"+CompanionCommands.ReportMarker+" "+report;}
+            }
             try
             {
                 if(Store.HasSession(response.SessionId) && (epoch==_epoch || request.IsCancellationRequested))
-                    Store.SaveMessage(response with {Content=text,Status=request.IsCancellationRequested?"stopped":status});
+                {
+                    var final=response with {Content=text,Status=request.IsCancellationRequested?"stopped":status};
+                    try{Store.SaveMessage(final);}
+                    catch(Exception ex) when(OperationErrors.Expected(ex)){PendingChatSave=final;ChatStatus="回复暂存于内存，可复制或重试保存："+OperationErrors.Message(ex);Notice?.Invoke(ChatStatus);}
+                }
             }
             finally{_request=null;request.Dispose();LiveReply="";SyncTimer();Changed?.Invoke();}
         }
@@ -144,14 +164,14 @@ internal sealed class Controller : IDisposable
     {
         if(Busy) throw new OperationFailureException("已有请求正在处理。");
         var request=new CancellationTokenSource();_request=request;SyncTimer();Changed?.Invoke();
-        try{await Ai.SendAsync(Preferences with {Endpoint=endpoint,Model=model},key,[new("user","请只回复：连接成功")],_=>{},request.Token);}
+        try{await Ai.SendAsync(Preferences with {Endpoint=endpoint,Model=model,MaxReplyTokens=128},key,[new("user","请只回复：连接成功")],_=>{},request.Token);}
         finally{_request=null;request.Dispose();SyncTimer();Changed?.Invoke();}
     }
-    public void AfterImport(){Preferences=Store.LoadPreferences();Session=Store.Sessions().FirstOrDefault();Draft="";LiveReply="";Changed?.Invoke();}
+    public void AfterImport(){Preferences=Store.LoadPreferences();Session=Store.Sessions().FirstOrDefault();PendingChatSave=null;MemoryDraft="";Draft="";LiveReply="";Changed?.Invoke();}
     public void ClearAll()
     {
         if(Busy)throw new OperationFailureException("请先停止请求并等待结束，再清除数据。");
-        if(Clock.Active)Clock.Finish();Store.ResetAll();Secrets.Delete();Preferences=new(){Onboarded=true};Store.SavePreferences(Preferences);Session=null;Draft="";FocusDraft="";FocusDurationDraft=null;RestDurationDraft=null;LiveReply="";ChatStatus="";SyncTimer();Changed?.Invoke();
+        if(Clock.Active)Clock.Finish();File.Delete(ActionRulesPath);File.Delete(ActionRulesPath+".tmp");Store.ResetAll();Secrets.Delete();LoadActionRules();Preferences=new(){Onboarded=true};Store.SavePreferences(Preferences);Session=null;PendingChatSave=null;MemoryDraft="";Draft="";FocusDraft="";FocusDurationDraft=null;RestDurationDraft=null;LiveReply="";ChatStatus="";SyncTimer();Changed?.Invoke();
     }
     public void Dispose(){Cancel();_timer.Stop();Clock.Pause();try{Store.SaveActivity(Clock.Snapshot());}finally{Ai.Dispose();Store.Dispose();}}
 }

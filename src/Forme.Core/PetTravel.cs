@@ -10,11 +10,27 @@ public sealed class PetTravel(double minX,double maxX,double minZ,double maxZ,IR
     private readonly Queue<GroundPoint> _route=new();
     public GroundPoint Position {get;private set;}
     public bool Moving=>_route.Count>0;
+    public IReadOnlyList<GroundPoint> Route=>_route.ToArray();
     public bool Running {get;private set;}
     public double Heading {get;private set;}
     private double _phase;
     public void Reset(GroundPoint point){_route.Clear();Position=point;_phase=0;}
     public void Stop()=>_route.Clear();
+    public void SetGait(bool running){if(Moving)Running=running;}
+    public bool CanReach(GroundPoint point){var probe=new PetTravel(minX,maxX,minZ,maxZ,obstacles);probe.Reset(Position);return probe.MoveTo(point);}
+    public GroundPoint? NearbyTarget(double distance)
+    {
+        if(!double.IsFinite(distance)||distance is <.5 or >4)throw new ArgumentOutOfRangeException(nameof(distance));
+        var probe=new PetTravel(minX,maxX,minZ,maxZ,obstacles);probe.Reset(Position);
+        foreach(double radius in new[]{distance,distance/2})
+            for(int direction=0;direction<8;direction++)
+            {
+                double angle=(Heading+direction*45)*Math.PI/180;
+                var point=new GroundPoint(Position.X+Math.Sin(angle)*radius,Position.Z+Math.Cos(angle)*radius);
+                if(probe.MoveTo(point))return point;
+            }
+        return null;
+    }
     public bool Walkable(GroundPoint p)=>double.IsFinite(p.X)&&double.IsFinite(p.Z)&&p.X>=minX+Radius&&p.X<=maxX-Radius&&p.Z>=minZ+Radius&&p.Z<=maxZ-Radius&&!obstacles.Any(o=>Math.Abs(p.X-o.X)<o.Width/2+Radius&&Math.Abs(p.Z-o.Z)<o.Depth/2+Radius);
     public bool MoveTo(GroundPoint target,bool instant=false)
     {

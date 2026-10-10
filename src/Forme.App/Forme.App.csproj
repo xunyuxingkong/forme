@@ -18,7 +18,7 @@
     <DefineConstants>$(DefineConstants);FORME_DEVELOPMENT_TOOLS</DefineConstants>
   </PropertyGroup>
   <ItemGroup Condition="'$(FormeDevelopmentTools)' != 'true'">
-    <Compile Remove="Probe.cs;PetAnimationChecks.cs" />
+    <Compile Remove="Probe.cs;PetAnimationChecks.cs;CompanionChecks.cs;BoatChecks.cs;LivingChecks.cs" />
   </ItemGroup>
   <ItemGroup><ProjectReference Include="../Forme.Core/Forme.Core.csproj" /></ItemGroup>
   <ItemGroup><EmbeddedResource Include="Assets/forme.ico" LogicalName="Forme.Icon" /></ItemGroup>

@@ -48,14 +48,16 @@ public sealed partial class Store
                     writer.WriteStartObject();writer.WriteNumber("SchemaVersion",ExportVersion);writer.WriteString("ExportedAt",DateTimeOffset.Now);
                     Array("Sessions",chat,Enumerate("SELECT * FROM sessions ORDER BY created",r=>new ChatSession(r.GetString(0),r.GetString(1),ReadDate(r,2),r.GetString(3))));
                     Array("Messages",chat,Enumerate("SELECT * FROM messages ORDER BY created,rowid",r=>new ChatMessage(r.GetString(0),r.GetString(1),r.GetString(2),r.GetString(3),r.GetString(4),ReadDate(r,5))));
+                    Array("Memories",chat,Memories());Array("Notes",chat,Notes());
                     Array("Moods",moods,Enumerate("SELECT * FROM moods ORDER BY created",r=>new MoodEntry(r.GetString(0),r.GetString(1),r.GetString(2),ReadDate(r,3),ReadDate(r,4))));
                     Array("Focus",focus,Enumerate("SELECT * FROM focus ORDER BY started",r=>new FocusEntry(r.GetString(0),r.GetString(1),r.GetString(2),ReadDate(r,3),r.GetInt32(4),r.GetDouble(5),r.GetString(6))));
                     writer.WritePropertyName("Room");
                     if(room)
                     {
                         var p=LoadPreferences();writer.WriteStartObject();writer.WriteString("PetName",p.PetName);writer.WriteString("Theme",p.Theme);writer.WriteString("Rug",p.Rug);writer.WriteString("Ornament",p.Ornament);
+                        writer.WriteString("PetModel",p.PetModel);writer.WriteString("Weather",p.Weather);writer.WriteBoolean("RoomLamp",p.RoomLamp);writer.WriteBoolean("Fireplace",p.Fireplace);
                         Array("Events",true,Enumerate("SELECT * FROM growth",r=>new GrowthEvent(r.GetString(0),r.GetString(1),r.GetString(2))));
-                        writer.WritePropertyName("Game");JsonSerializer.Serialize(writer,GameExportData());writer.WriteEndObject();
+                        writer.WritePropertyName("Game");JsonSerializer.Serialize(writer,GameExportData());writer.WritePropertyName("Boats");JsonSerializer.Serialize(writer,Boats());writer.WritePropertyName("World");JsonSerializer.Serialize(writer,World());writer.WriteEndObject();
                     }
                     else writer.WriteNullValue();
                     writer.WriteEndObject();writer.Flush();Exec("COMMIT");
@@ -74,15 +76,17 @@ public sealed partial class Store
         try
         {
             using var tx=_db.BeginTransaction();
-            if(plan.HasChat)Exec("DELETE FROM messages; DELETE FROM sessions; INSERT INTO sessions SELECT * FROM staged.sessions; INSERT INTO messages SELECT * FROM staged.messages;",tx);
+            if(plan.HasChat){prefs=prefs with{MemoryEnabled=false};Exec("INSERT INTO settings VALUES('preferences',$0) ON CONFLICT(k) DO UPDATE SET v=excluded.v",tx,JsonSerializer.Serialize(prefs));}
+            if(plan.HasChat)Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_memories; DELETE FROM chat_notes; INSERT INTO sessions SELECT * FROM staged.sessions; INSERT INTO messages SELECT * FROM staged.messages; INSERT INTO chat_memories SELECT * FROM staged.chat_memories; INSERT INTO chat_notes SELECT * FROM staged.chat_notes;",tx);
             if(plan.HasMoods)Exec("DELETE FROM moods; INSERT INTO moods SELECT * FROM staged.moods;",tx);
             if(plan.HasFocus)Exec("DELETE FROM focus; INSERT INTO focus SELECT * FROM staged.focus;",tx);
             if(plan.Room is {} room)
             {
-                prefs=prefs with{PetName=room.PetName,Theme=room.Theme,Rug=room.Rug,Ornament=room.Ornament};
+                prefs=prefs with{PetName=room.PetName,Theme=room.Theme,Rug=room.Rug,Ornament=room.Ornament,PetModel=room.PetModel,Weather=room.Weather,RoomLamp=room.RoomLamp,Fireplace=room.Fireplace};
                 Exec("INSERT INTO settings VALUES('preferences',$0) ON CONFLICT(k) DO UPDATE SET v=excluded.v",tx,JsonSerializer.Serialize(prefs));
                 Exec("DELETE FROM growth; INSERT INTO growth SELECT * FROM staged.growth;",tx);
                 if(room.Game is {} game)ReplaceGame(game,tx);
+                if(room.Boats is {} boats)ReplaceBoats(boats,tx);if(room.World is {} world)ReplaceWorld(world,tx);
             }
             tx.Commit();
         }

@@ -64,7 +64,7 @@ internal static class Program
     }
 }
 
-internal sealed class DesktopHost : IDisposable
+internal sealed partial class DesktopHost : IDisposable
 {
     private readonly Application _app;
     private readonly Controller _c;
@@ -85,6 +85,9 @@ internal sealed class DesktopHost : IDisposable
     public DesktopHost(Application app,Controller c,string pipeName,bool smoke)
     {
         _app=app;_c=c;_smoke=smoke;
+        c.CommandHandler=ExecuteCompanionCommand;c.SceneContext=()=>House?.SceneDescription??"桌面悬浮伙伴；房间坐标移动暂不可用";
+        c.CommandWaiter=(command,token)=>House?.WaitCreation(command,token)??_pet?.WaitCommand(command,token)??Task.FromResult(true);
+        c.StopCommands=()=>{House?.StopCompanion();_pet?.StopCommands();};
         _petWanted=c.Preferences.DisplayMode!="tray";
         using(var iconStream=System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("Forme.Icon"))if(iconStream is not null)_icon=new System.Drawing.Icon(iconStream);
         _tray=new(){Icon=_icon??System.Drawing.SystemIcons.Application,Text="Forme · 陪伴小屋",Visible=!smoke};
@@ -110,7 +113,8 @@ internal sealed class DesktopHost : IDisposable
     }
     public void ShowPet(bool expand=true)
     {
-        _petWanted=true;if(expand&&_c.Preferences.DisplayMode!="pet")_c.SavePreferences(_c.Preferences with{DisplayMode="pet"});if(House is not null)return;
+        _petWanted=true;if(expand&&_c.Preferences.DisplayMode!="pet")_c.SavePreferences(_c.Preferences with{DisplayMode="pet"});
+        if(House is not null){FloatingChat?.CloseForTransfer();House.Close();return;}
         _pet??=new(_c,page=>{if(page=="chat")ShowFloatingChat();else ShowHouse(page);},HidePet,()=>_ =Exit());_pet.Show();Changed();
     }
     public void ShowFloatingChat()
@@ -202,6 +206,8 @@ internal sealed class DesktopHost : IDisposable
     }
     public void Dispose()
     {
+        _c.CommandHandler=null;_c.SceneContext=null;
+        _c.CommandWaiter=null;_c.StopCommands=null;
         _exit=true;_pipeCancel.Cancel();_greetings.Stop();SystemEvents.PowerModeChanged-=Power;SystemEvents.SessionSwitch-=Session;SystemEvents.DisplaySettingsChanged-=Displays;
         _c.Finished-=Finished;_c.Changed-=Changed;_c.Tick-=TrayTick;_c.Notice-=Notice;_tray.Dispose();_icon?.Dispose();_pet?.Close();House?.Close();_pipeCancel.Dispose();
     }
@@ -215,6 +221,9 @@ internal static class Smoke
         try
         {
             Directory.CreateDirectory("artifacts/screenshots");
+            if(Environment.GetCommandLineArgs().Contains("--rules-only")){c.SavePreferences(new Preferences{Onboarded=true});await CompanionChecks.DesktopRules(host,c);Environment.ExitCode=0;await host.Exit();return;}
+            if(Environment.GetCommandLineArgs().Contains("--creation-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);var creationRoom=Descendants(host.House!).OfType<Room3DView>().Single();await CompanionChecks.Creation(host,c,creationRoom);Environment.ExitCode=0;await host.Exit();return;}
+            if(Environment.GetCommandLineArgs().Contains("--living-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);var living=Descendants(host.House!).OfType<Room3DView>().Single();await LivingChecks.Run(host,c,living);Environment.ExitCode=0;await host.Exit();return;}
             await PetAnimationChecks.Run();
             foreach(double scale in new[]{1d,1.25,1.5,2d})
             {int px=ScreenCoordinateService.DipToPhysical(-123.5,scale);double dip=ScreenCoordinateService.PhysicalToDip(px,scale);if(Math.Abs(dip+123.5)>1/scale)throw new Exception("DPI coordinate conversion drifted");}
@@ -223,6 +232,7 @@ internal static class Smoke
             IconAsset.Ensure();
             c.SavePreferences(new Preferences{Onboarded=true});
             host.ShowHouse("home");await Task.Delay(300);
+            await CompanionChecks.DesktopRules(host,c);
             host.House!.UpdateLayout();var roomView=Descendants(host.House).OfType<Room3DView>().Single();var hitPages=new HashSet<string>();
             int moodTargets=0,exactMoodTargets=0;var exactHit=typeof(Room3DView).GetMethod("ExactHit",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
             for(int x=5;x<roomView.ActualWidth;x+=10)for(int y=5;y<roomView.ActualHeight;y+=10)
@@ -231,6 +241,9 @@ internal static class Smoke
             if(moodTargets<=exactMoodTargets)throw new Exception("Notebook click target was not enlarged");
             PetAnimationChecks.CheckRoomReplacement(roomView);
             await CheckTravel(host,roomView,c);
+            await CompanionChecks.Run(host,c,roomView);
+            await CompanionChecks.Creation(host,c,roomView);
+            await BoatChecks.Run(host,c,roomView);await LivingChecks.Run(host,c,roomView);
             foreach(string page in new[]{"home","chat","focus","mood","relax","plant","room","settings"})
             {
                 host.House!.Navigate(page);await Task.Delay(80);Save(host.House,$"artifacts/screenshots/{page}.png");
@@ -267,7 +280,7 @@ internal static class Smoke
             host.House.Navigate("play");host.House.UpdateLayout();
             if(host.House.CurrentPage!="play"||c.Store.GameTasks(DateOnly.FromDateTime(DateTime.Now)).Count!=3||!Descendants(host.House).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text=="收藏图鉴"))throw new Exception("Progression, daily tasks or collection UI missing");
             Save(host.House,"artifacts/screenshots/game-play.png");
-            if(!roomView.PlayBall()||!roomView.PetMoving)throw new Exception("Ball interaction did not start pet travel");await Task.Delay(100);Save(host.House,"artifacts/screenshots/game-ball.png");
+            if(!roomView.PlayBall()||!roomView.ToyRunning)throw new Exception("Ball interaction did not start throw feedback");await Task.Delay(100);Save(host.House,"artifacts/screenshots/game-ball.png");for(int i=0;i<150&&roomView.ToyRunning;i++)await Task.Delay(20);if(roomView.ToyRunning||!roomView.PetMoving)throw new Exception("Pet did not follow toy landing");
             roomView.SwitchScene(true);roomView.SwitchScene(false);host.House.Navigate("home");
             host.House.Navigate("relax");Click(host.House,"戳泡泡");host.House.UpdateLayout();var bubbleButtons=Descendants(host.House).OfType<System.Windows.Controls.Button>().Where(x=>x.Content?.ToString()=="○").ToArray();if(bubbleButtons.Length!=20)throw new Exception("Expected 20 bubble controls");foreach(var b in bubbleButtons)b.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
             if(!c.Store.Unlocked("cloud"))throw new Exception("Bubble UI did not unlock reward");Save(host.House,"artifacts/screenshots/bubbles.png");
@@ -339,7 +352,7 @@ internal static class Smoke
             c.AnimationSuspended=false;c.Refresh();host.Pet.SetIdleMode("run");await Task.Delay(2600);
             host.Pet.Greet("待机模式与动作选择");await Task.Delay(100);Save(host.Pet,"artifacts/screenshots/pet-controls.png");
             var petSelectors=Descendants(host.Pet).OfType<System.Windows.Controls.ComboBox>().ToArray();
-            if(petSelectors.Length!=2||petSelectors[0].Items.Count!=4||petSelectors[1].Items.Count!=5||System.Windows.Automation.AutomationProperties.GetName(petSelectors[0])!="桌宠待机模式")throw new Exception("Desktop choices or screen-reader names missing");
+            if(petSelectors.Length!=2||petSelectors[0].Items.Count!=4||petSelectors[1].Items.Count!=9||System.Windows.Automation.AutomationProperties.GetName(petSelectors[0])!="桌宠待机模式")throw new Exception("Desktop choices or screen-reader names missing");
             petSelectors[1].SelectedIndex=4;Click(host.Pet,"执行");await Task.Delay(150);if(!animatedPet.AnimationRunning)throw new Exception("Selected dance did not play");
             Click(host.Pet,"停止动作");host.Pet.SetIdleMode("idle");
             host.Pet.CollapseToEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="edge"||host.Pet.Width>50||animatedPet.AnimationRunning)throw new Exception("Edge collapse not persisted or animation active");host.Pet.ExpandFromEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="pet"||host.Pet.Width<100||!animatedPet.AnimationRunning)throw new Exception("Edge restore failed");
@@ -364,7 +377,7 @@ internal static class Smoke
         Save(host.House,"artifacts/screenshots/outdoors.png");
         host.House.WindowState=WindowState.Normal;host.House.Show();
         await host.House.Dispatcher.InvokeAsync(()=>host.House.UpdateLayout(),System.Windows.Threading.DispatcherPriority.ContextIdle);
-        point=room.ProjectGround(new(4,4))??throw new Exception("Outdoor projection failed");
+        point=room.ProjectGround(new(1.2,6))??throw new Exception("Outdoor projection failed");
         if(!room.ClickGround(point)||!room.PetMoving)throw new Exception($"Outdoor click did not start run: window={host.House.WindowState}, motionVisible={room.MotionVisible}, visible={room.IsVisible}, hit={room.ObjectAt(point)}, ground={room.GroundAt(point)}");
         await Task.Delay(120);var position=room.PetPosition;
         host.House.WindowState=WindowState.Minimized;await Task.Delay(120);

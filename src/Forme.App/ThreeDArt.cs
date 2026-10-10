@@ -8,7 +8,7 @@ using System.Windows.Media.Media3D;
 namespace Forme.App;
 
 // Shared local mesh primitives and lights; character geometry lives in its adapter.
-internal static class MeshArt
+internal static partial class MeshArt
 {
     private static readonly MeshGeometry3D SphereMesh=Sphere();
     private static readonly MeshGeometry3D CubeMesh=Cube();
@@ -24,7 +24,7 @@ internal static class MeshArt
     }
     private static MeshGeometry3D Sphere()
     {
-        const int rings=16,segments=24;var mesh=new MeshGeometry3D();
+        const int rings=12,segments=18;var mesh=new MeshGeometry3D();
         for(int r=0;r<=rings;r++)for(int s=0;s<=segments;s++)
         {
             double theta=Math.PI*r/rings,phi=2*Math.PI*s/segments;var v=new Vector3D(Math.Sin(theta)*Math.Cos(phi),Math.Cos(theta),Math.Sin(theta)*Math.Sin(phi));mesh.Positions.Add(new(v.X,v.Y,v.Z));mesh.Normals.Add(v);mesh.TextureCoordinates.Add(new((double)s/segments,(double)r/rings));
@@ -162,7 +162,7 @@ internal static class MeshArt
             var shrub=new Model3DGroup();Ellipse(shrub,"#729263",x,.19,z,.44,.19,.33);Ellipse(shrub,"#8FA976",x-.11,.30,z,.27,.19,.24);
             foreach(var model in shrub.Children)Mark(model,"garden");world.Children.Add(shrub);
         }
-        return world;
+        RoomDetails(world,p,hits);return world;
     }
     public static Model3DGroup Outdoors(Preferences p,Dictionary<Model3D,string> hits,Model3D petModel)
     {
@@ -186,7 +186,7 @@ internal static class MeshArt
         foreach(double x in new[]{-4.5,-3.5})foreach(double z in new[]{4.5,5.5})
         {Box(g,"#779867",x,.6,z,.03,.55,.03);Ellipse(g,"#DDA6A0",x,.9,z,.15,.15,.08);Ellipse(g,"#91AD7D",x-.1,.6,z,.19,.055,.08);}
         foreach(var shape in g.Children.Skip(planter))hits[shape]="garden";
-        foreach(var shape in g.Children)shape.Freeze();g.Children.Add(petModel);return g;
+        OutdoorDetails(g,p,hits);foreach(var shape in g.Children)shape.Freeze();g.Children.Add(petModel);return g;
     }
 }
 
@@ -219,6 +219,7 @@ internal sealed class Pet3DView : Grid
     {
         _reduced=reduced;_quiet=quiet;_suspended=suspended;Configure();
     }
+    public void Economy(bool economy)=>_animator.Economy=economy;
     public void ReplaceModel(IPetModelFactory factory)
     {var rig=factory.Create();_character.Children.Clear();_animator.Replace(rig);_character.Children.Add(rig.Root);}
     public bool HasMeshAt(Point local)
@@ -232,13 +233,14 @@ internal sealed class Pet3DView : Grid
     public void Pat()=>_animator.Play(PetAction.Pat);
     public void Play(PetAction action)=>_animator.Play(action);
     public void StopAction()=>_animator.StopAction();
+    internal bool Reacting=>_animator.Reacting;
     public void DesktopMotion(Func<double,bool,PetPose?> source,bool active,Func<bool>? moving=null){_animator.ExternalMotion=source;_animator.ExternalActive=active;_animator.ExternalMoving=moving;Configure();}
     public void Drag(bool dragging)=>_animator.Drag(dragging);
     public void Turn(double delta)=>_rotation.Angle=Math.Clamp(_rotation.Angle+delta,-65,65);
     public void Release(){if(_released)return;_released=true;_animator.Dispose();_character.Children.Clear();_model.Content=null;_viewport.Children.Clear();}
 }
 
-internal sealed class Room3DView : Grid
+internal sealed partial class Room3DView : Grid
 {
     private readonly Controller _c;
     private readonly Action<string> _navigate;
@@ -251,13 +253,18 @@ internal sealed class Room3DView : Grid
     private readonly PetAnimator _animator;
     private readonly Model3DGroup _character=new();
     private readonly TranslateTransform3D _position=new();
+    private readonly ScaleTransform3D _worldPetScale=new(1,1,1);
+    private readonly TextBlock _sceneCaption;
+    private readonly WrapPanel _roomInteractions;
     private readonly AxisAngleRotation3D _heading=new(new(0,1,0),0);
     private readonly Button _sceneButton;
+    private readonly Button _foodButton,_bookButton;
     private PetTravel _travel=null!;
     private bool _outdoors;
     internal bool Outdoors=>_outdoors;
     internal GroundPoint PetPosition=>_travel.Position;
     internal bool PetMoving=>_travel.Moving;
+    internal int SceneCacheCount=>_sceneCache.Count;
     private bool _motionVisible=true,_released;
     internal bool AnimationRunning=>_animator.Running;
     public bool MotionVisible {get=>_motionVisible;set{_motionVisible=value;Refresh();}}
@@ -271,6 +278,9 @@ internal sealed class Room3DView : Grid
     private DateTimeOffset _lastHover;
     private string? _selected;
     private string? _appearance;
+    private string _modelId="sprout";
+    private readonly Dictionary<string,(Model3DGroup Scene,Dictionary<Model3D,string> Hits)> _sceneCache=new();
+    private string? _pendingInteraction;
     private readonly TextBlock _hint=Ui.Text("点击物件，进入活动",11,Ui.Muted);
     private readonly Canvas _labels=new(){IsHitTestVisible=false};
     private readonly Border _plantLabel=Badge("成长盆栽");
@@ -282,64 +292,72 @@ internal sealed class Room3DView : Grid
     public Room3DView(Controller c,Action<string> navigate,IPetModelFactory? factory=null)
     {
         System.Windows.Automation.AutomationProperties.SetName(this,"Forme 3D 小屋和户外场景；点击地面移动，点击物件打开活动");
-        _pet=(factory??new SproutPetFactory()).Create();_animator=new(_pet);
-        var characterTransform=new Transform3DGroup();characterTransform.Children.Add(new RotateTransform3D(_heading));characterTransform.Children.Add(_position);_character.Transform=characterTransform;
+        _modelId=c.Preferences.PetModel;_pet=(factory??PetModels.For(_modelId)).Create();_animator=new(_pet);
+        var characterTransform=new Transform3DGroup();characterTransform.Children.Add(_worldPetScale);characterTransform.Children.Add(new RotateTransform3D(_heading));characterTransform.Children.Add(_position);_character.Transform=characterTransform;
         MeshArt.Ellipse(_character,"#AFA68C",0,.015,0,.66,.006,.42);_character.Children.Add(_pet.Root);ResetTravel();
         _c=c;_navigate=navigate;Height=560;MinWidth=280;ClipToBounds=true;
+        _animator.Frame=_=>{if(_boatOpen&&_boatGame is {Complete:true})_heading.Angle=0;if(_moveTarget is not null&&!_throwDrag&&!_travel.Moving&&_pendingInteraction is null&&!ToyRunning){_moveTarget=null;PaintWorld();}if(_pendingInteraction is {} interaction&&!_travel.Moving){_pendingInteraction=null;CompleteInteraction(interaction);}};
         SizeChanged+=(_,_)=>{Clip=new RectangleGeometry(new Rect(RenderSize),18,18);Camera();};
         MeshArt.Ellipse(_ballGroup,"#E7B84B",0,.22,0,.2,.2,.2);_ballGroup.Transform=_ballPosition;_ballVisual.Content=_ballGroup;
         _viewport.Camera=_camera;_viewport.Children.Add(_model);_viewport.Children.Add(_ballVisual);_ballVisual.Content=null;Children.Add(_viewport);Camera();Refresh();
         _labels.Children.Add(_plantLabel);_labels.Children.Add(_gardenLabel);Children.Add(_labels);Loaded+=(_,_)=>Camera();
-        var caption=Ui.Text("点击地面行走 · 远处奔跑 · 拖动旋转 · 滚轮缩放",11,Ui.Muted);caption.Margin=new Thickness(16);caption.VerticalAlignment=VerticalAlignment.Top;caption.IsHitTestVisible=false;Children.Add(caption);
-        var scene=_sceneButton=Ui.Button("去户外 · 20m × 20m",()=>SwitchScene(!_outdoors));
+        var caption=_sceneCaption=Ui.Text("点击地面行走 · 远处奔跑 · 拖动旋转 · 滚轮缩放",11,Ui.Muted);caption.Margin=new Thickness(16);caption.VerticalAlignment=VerticalAlignment.Top;caption.IsHitTestVisible=false;Children.Add(caption);
+        var scene=_sceneButton=Ui.Button("去户外 · 20m × 20m",()=>{bool boat=_boatOpen;SwitchScene(!_outdoors);if(boat)_navigate("home");});
         scene.FontSize=11;scene.Padding=new Thickness(10,6,10,6);scene.HorizontalAlignment=HorizontalAlignment.Right;scene.VerticalAlignment=VerticalAlignment.Top;scene.Margin=new Thickness(12,42,12,0);Children.Add(scene);
         var hintBorder=new Border{Child=_hint,Background=Ui.Brush("#F8F6EF"),CornerRadius=new CornerRadius(8),Padding=new Thickness(10,6,10,6),Margin=new Thickness(12),HorizontalAlignment=HorizontalAlignment.Left,VerticalAlignment=VerticalAlignment.Bottom,IsHitTestVisible=false};Children.Add(hintBorder);
         var reset=Ui.Button("复位视角",()=>{_azimuth=30;_elevation=32;_zoom=1;Camera();});reset.FontSize=11;reset.Padding=new Thickness(8,5,8,5);reset.MinHeight=26;reset.HorizontalAlignment=HorizontalAlignment.Right;reset.VerticalAlignment=VerticalAlignment.Bottom;reset.Margin=new Thickness(8);Children.Add(reset);
+        InitBoats();InitLiving();RebuildWorldTravel();
         _viewport.MouseLeftButtonDown+=(_,e)=>
         {
-            _origin=e.GetPosition(_viewport);_rotating=false;_selected=Hit(_origin);_viewport.CaptureMouse();e.Handled=true;
+            _activityGeneration++;
+            _origin=e.GetPosition(_viewport);_selected=Hit(_origin);if(BeginFurnitureDrag(_origin)){e.Handled=true;return;}if(_selected=="toy"&&Keyboard.Modifiers==ModifierKeys.Shift){_throwDrag=true;_viewport.CaptureMouse();e.Handled=true;return;}if(BeginBoatDrag(_origin)){e.Handled=true;return;}_rotating=false;_selected=Hit(_origin);_viewport.CaptureMouse();e.Handled=true;
         };
         _viewport.MouseMove+=(_,e)=>
         {
             var now=e.GetPosition(_viewport);
+            if(_furnitureDrag){MoveFurnitureDrag(now);e.Handled=true;return;}if(_throwDrag){if(FloorRay(now) is {} target){_moveTarget=target;PaintWorld();_hint.Text="松开放球 · 金色标记为落点 · Esc取消";}return;}if(_boatDragging>=0){MoveBoatDrag(now);e.Handled=true;return;}
             if(!_viewport.IsMouseCaptured)
             {
                 if(DateTimeOffset.UtcNow-_lastHover<TimeSpan.FromMilliseconds(60))return;
-                _lastHover=DateTimeOffset.UtcNow;ShowHint(Hit(now));return;
+                _lastHover=DateTimeOffset.UtcNow;if(BoatLeafAt(now)>=0){_viewport.Cursor=Cursors.Hand;_hint.Text="拖动导流叶片改变路线 · 侧栏可调整方向";}else ShowHint(Hit(now));return;
             }
             double dx=now.X-_origin.X,dy=now.Y-_origin.Y;
-            if(Math.Abs(dx)+Math.Abs(dy)>4)_rotating=true;
+            if(Math.Abs(dx)+Math.Abs(dy)>6)_rotating=true;
             if(_rotating&&DateTimeOffset.UtcNow-_lastCamera>TimeSpan.FromMilliseconds(34)){_lastCamera=DateTimeOffset.UtcNow;_azimuth=Math.Clamp(_azimuth+dx*.35,10,65);_elevation=Math.Clamp(_elevation+dy*.20,15,48);_origin=now;_viewport.Cursor=Cursors.SizeAll;_hint.Text="松开鼠标，停在喜欢的视角";Camera();}
         };
         _viewport.MouseLeftButtonUp+=(_,e)=>
         {
+            if(_furnitureDrag){EndFurnitureDrag();e.Handled=true;return;}if(_throwDrag){_throwDrag=false;_viewport.ReleaseMouseCapture();if(FloorRay(e.GetPosition(_viewport)) is {} target)ThrowToy(target);e.Handled=true;return;}if(_boatDragging>=0){EndBoatDrag();e.Handled=true;return;}
             var page=Hit(e.GetPosition(_viewport));bool activate=_viewport.IsMouseCaptured&&!_rotating&&page is not null&&page==_selected;
             bool move=_viewport.IsMouseCaptured&&!_rotating&&page is null;var point=e.GetPosition(_viewport);
-            _viewport.ReleaseMouseCapture();ShowHint(page);if(activate)Ui.Guard(()=>_navigate(PageOf(page)!));else if(move)ClickGround(point);e.Handled=true;
+            _viewport.ReleaseMouseCapture();ShowHint(page);if(activate)Ui.Guard(()=>{ActivateObject(page!);});else if(move)ClickGround(point);e.Handled=true;
         };
-        _viewport.LostMouseCapture+=(_,_)=>_selected=null;
+        _viewport.LostMouseCapture+=(_,_)=>{_selected=null;if(_throwDrag){_throwDrag=false;_moveTarget=null;PaintWorld();}if(_furnitureDrag)EndFurnitureDrag(true);if(_boatDragging>=0)EndBoatDrag(true);};
         _viewport.MouseLeave+=(_,_)=>{if(!_viewport.IsMouseCaptured)ShowHint(null);};
         _viewport.MouseWheel+=(_,e)=>{_zoom=Math.Clamp(_zoom-e.Delta/120*.08,.65,1.7);Camera();e.Handled=true;};
         _dayChange.Tick+=(_,_)=>{_dayChange.Stop();Refresh();};
         IsVisibleChanged+=(_,_)=>{Refresh();if(!IsVisible)_dayChange.Stop();};
         Loaded+=(_,_)=>Refresh();Unloaded+=(_,_)=>_animator.Configure("idle",false,false,false,false);
         ToolTip="点击伙伴聊天、书桌专注、心情本记录、沙发放松、植物浇水；底部导航同样可用。";
+        _foodButton=Ui.Button("喂食",()=>Interact(_outdoors?"pond":"feed"));_bookButton=Ui.Button("读书",()=>Interact(_outdoors?"picnic":"book"));
+        var interactionButtons=_roomInteractions=Ui.Row(Ui.Button("投球",()=>Interact("ball")),_foodButton,_bookButton,Ui.Button("纸船",()=>_navigate("boat")),Ui.Button("叫回",RecallFromUser),Ui.Button("停止",StopFromUser));
+        interactionButtons.HorizontalAlignment=HorizontalAlignment.Left;interactionButtons.VerticalAlignment=VerticalAlignment.Top;interactionButtons.Margin=new Thickness(12,70,0,0);Children.Add(interactionButtons);
     }
     private void ResetTravel()
     {
         GroundObstacle[] obstacles=_outdoors?[new(-5,-1,2.2,1.2),new(5,-1,2.2,1.2),new(-4,5,2,2),new(-7,-7,1,1),new(7,-7,1,1),new(-8,6,1,1),new(8,6,1,1)]:[new(-2.25,-2.29,2.83,1.28),new(-2.32,-1.19,.8,.8),new(2.36,-2.1,3.25,1.7),new(-1.96,4.32,1.45,1.88),new(2.12,3.73,.75,.75),new(1.85,5.05,1.6,.6),new(-3.95,4.75,1.4,3.2),new(3.95,4.75,1.4,3.2)];
+        obstacles=obstacles.Concat(_outdoors?new GroundObstacle[]{new(-3.6,-5.0,4.3,2.5),new(5.45,-5.7,2.0,.8),new(4.44,4.23,.6,.45)}:new GroundObstacle[]{new(-3.65,-.5,.75,1.2),new(3.48,-.4,.5,.5)}).ToArray();
         _travel=new(_outdoors?-10:-4.3,_outdoors?10:4.3,_outdoors?-10:-3.6,_outdoors?10:5.65,obstacles);_travel.Reset(new(.15,1.25));
         _animator.AttachTravel(_travel,(point,heading)=>{_position.OffsetX=point.X;_position.OffsetY=.035;_position.OffsetZ=point.Z;_heading.Angle=heading;});
     }
-    internal void SwitchScene(bool outdoors){if(_outdoors==outdoors)return;_outdoors=outdoors;_sceneButton.Content=outdoors?"回到小屋":"去户外 · 20m × 20m";ResetTravel();_appearance=null;_azimuth=30;_elevation=32;_zoom=1;ShowHint(null);Refresh();}
-    internal bool TryMove(GroundPoint point){bool moved=_animator.MoveTo(point);_hint.Text=moved?(_travel.Running?"伙伴正跑向那里":"伙伴正走向那里"):"这里被家具挡住了，请点击空地";return moved;}
+    internal void SwitchScene(bool outdoors){if(_outdoors==outdoors)return;StopWorld();if(_editing)CloseFurniture();if(_boatOpen)CloseBoats();_pendingInteraction=null;_ballVisual.Content=null;_outdoors=outdoors;_sceneButton.Content=outdoors?"回到小屋":"去户外 · 20m × 20m";_foodButton.Content=outdoors?"看池塘":"喂食";_bookButton.Content=outdoors?"去野餐":"读书";System.Windows.Automation.AutomationProperties.SetName(_foodButton,(string)_foodButton.Content);System.Windows.Automation.AutomationProperties.SetName(_bookButton,(string)_bookButton.Content);ResetTravel();if(!outdoors)RebuildWorldTravel();_appearance=null;_azimuth=30;_elevation=32;_zoom=1;ShowHint(null);Refresh();}
+    internal bool TryMove(GroundPoint point){StopWorld();if(_boatOpen&&_boatGame is not null)RetrieveBoat();_moveTarget=point;bool moved=_animator.MoveTo(point);PaintWorld();_hint.Text=moved?(_travel.Running?"伙伴正跑向那里":"伙伴正走向那里"):BlockedReason(point);return moved;}
     internal bool PlayBall()
     {
         var targets=_outdoors?new[]{new GroundPoint(2,2),new(-2,2),new(0,-4),new(4,4)}:new[]{new GroundPoint(.2,-.3),new(-.8,1),new(1,1),new(-1,-1)};
         foreach(var target in targets)
         {
-            if(!_travel.Walkable(target)||!_animator.MoveTo(target))continue;
-            _ballPosition.OffsetX=target.X;_ballPosition.OffsetY=.22;_ballPosition.OffsetZ=target.Z;_ballVisual.Content=_ballGroup;_hint.Text="小球滚到了那里，伙伴跑去捡啦！";return true;
+            if(!_travel.Walkable(target))continue;return ThrowToy(target);
         }
         _hint.Text="周围有些拥挤，换个场景再玩小球吧。";return false;
     }
@@ -361,12 +379,12 @@ internal sealed class Room3DView : Grid
             return HitTestResultBehavior.Stop;
         },new PointHitTestParameters(point));return ground;
     }
-    private static string? PageOf(string? id)=>id=="garden"?"plant":id;
+    private string? PageOf(string? id)=>FurnitureHit(id) is {} key?"interact:"+LivingWorld.Kind(CurrentWorld.Items.First(i=>i.Id==key).Kind).Action:id=="garden"?"plant":id;
     public string? ObjectAt(Point point)=>PageOf(Hit(point));
     private void ShowHint(string? page)
     {
-        _viewport.Cursor=page is null?Cursors.Arrow:Cursors.Hand;
-        _hint.Text=page switch{"chat"=>"伙伴 · 点击聊一会儿","focus"=>"书桌 · 点击开始专注","mood"=>"心情本 · 点击记录心情","relax"=>"沙发 · 点击放松一下","plant"=>"成长盆栽 · 浇水会帮助它成长","garden"=>"装饰花草 · 点击查看植物照顾","room"=>"小屋布置 · 点击调整风格",_=>"点击空地移动 · 点击物件进入活动"};
+        PaintWorld(HoverFurniture(page));if(FurnitureHit(page) is {} key){_viewport.Cursor=Cursors.Hand;_hint.Text=LivingWorld.Kind(CurrentWorld.Items.First(i=>i.Id==key).Kind).Name+(_editing?" · 拖动摆放，侧栏旋转":" · 点击使用，右键更多动作");return;}_viewport.Cursor=page is null?Cursors.Arrow:Cursors.Hand;
+        _hint.Text=page is not null&&page.StartsWith("interact:",StringComparison.Ordinal)?InteractionName(page[9..])+" · 点击与伙伴互动":page switch{"chat"=>"伙伴 · 点击聊一会儿","focus"=>"书桌 · 点击开始专注","mood"=>"心情本 · 点击记录心情","relax"=>"沙发 · 点击放松一下","plant"=>"成长盆栽 · 浇水会帮助它成长","garden"=>"装饰花草 · 点击查看植物照顾","room"=>"小屋布置 · 点击调整风格","boat"=>"纪念船 · 点击查看或重玩旅行",_=>_boatOpen?"拖动绿叶 · 放船看路线 · Esc捞回":"点击空地移动 · 点击物件进入活动"};
     }
     private string? Hit(Point point)
     {
@@ -381,6 +399,7 @@ internal sealed class Room3DView : Grid
         {
             if(result is RayMeshGeometry3DHitTestResult mesh)
             {
+                if(_ballVisual.Content is not null&&_ballGroup.Children.Contains(mesh.ModelHit)){hit="toy";return HitTestResultBehavior.Stop;}
                 if(_pet.Contains(mesh.ModelHit)){hit="chat";return HitTestResultBehavior.Stop;}
                 if(_hits.TryGetValue(mesh.ModelHit,out var page)){hit=page;return HitTestResultBehavior.Stop;}
             }
@@ -391,19 +410,20 @@ internal sealed class Room3DView : Grid
     private void Camera()
     {
         if(ActualWidth<=0||ActualHeight<=0)return;
-        double a=_azimuth*Math.PI/180,e=_elevation*Math.PI/180;var target=new Point3D(0,.8,_outdoors?0:1.4);
+        double a=_azimuth*Math.PI/180,e=_elevation*Math.PI/180;var target=_boatOpen?new Point3D(-3.6,.35,-4.5):new Point3D(0,.8,_outdoors?0:1.4);
         var forward=new Vector3D(-Math.Sin(a)*Math.Cos(e),-Math.Sin(e),-Math.Cos(a)*Math.Cos(e));
         var right=Vector3D.CrossProduct(forward,new Vector3D(0,1,0));right.Normalize();var up=Vector3D.CrossProduct(right,forward);
         double horizontal=Math.Tan(41*Math.PI/360),vertical=horizontal*ActualHeight/ActualWidth;
-        double usableX=horizontal*Math.Max(.3,(ActualWidth-40)/ActualWidth),usableY=vertical*Math.Max(.3,(ActualHeight-86)/ActualHeight),fit=9.5;
+        double usableX=horizontal*Math.Max(.3,(ActualWidth-40)/ActualWidth),usableY=vertical*Math.Max(.3,(ActualHeight-86)/ActualHeight),fit=_boatOpen?6:9.5;
         var bounds=_model.Content?.Bounds??new Rect3D(-3.4,-.32,-2.85,6.8,3.62,8.6);
-        foreach(var corner in _sceneCorners.Count>0?_sceneCorners:Corners(bounds))
+        foreach(var corner in _boatOpen?Corners(new Rect3D(-6.1,0,-6.5,5.3,2.0,4.0)):_sceneCorners.Count>0?_sceneCorners:Corners(bounds))
         {
             var relative=corner-target;double depth=Vector3D.DotProduct(relative,forward);
             fit=Math.Max(fit,Math.Max(Math.Abs(Vector3D.DotProduct(relative,right))/usableX,Math.Abs(Vector3D.DotProduct(relative,up))/usableY)-depth);
         }
         double distance=fit*_zoom;_camera.Position=target-forward*distance;_camera.LookDirection=forward;_camera.UpDirection=up;_camera.FieldOfView=41;_camera.NearPlaneDistance=.1;_camera.FarPlaneDistance=Math.Max(40,distance+20);
         PlaceBadge(_plantLabel,new Point3D(2.12,.4,3.73),"plant");PlaceBadge(_gardenLabel,new Point3D(-1.96,.29,4.32),"garden");
+        PositionBoatLabels();
     }
     private static IEnumerable<Point3D> Corners(Rect3D bounds)
     {foreach(double x in new[]{bounds.X,bounds.X+bounds.SizeX})foreach(double y in new[]{bounds.Y,bounds.Y+bounds.SizeY})foreach(double z in new[]{bounds.Z,bounds.Z+bounds.SizeZ})yield return new(x,y,z);}
@@ -432,15 +452,20 @@ internal sealed class Room3DView : Grid
     public void Refresh()
     {
         if(_released)return;
-        string state=_c.Clock.Active?(_c.Clock.Running&&_c.Clock.Activity!.Kind=="focus"?"focus":"rest"):_c.Busy?"thinking":_c.Preferences.Quiet?"quiet":"idle";
+        SyncBoatTimer();if(!IsVisible||!_motionVisible||_c.AnimationSuspended){_toyTimer.Stop();_ballVisual.Content=null;_pendingInteraction=null;_pendingLife=null;_moveTarget=null;if(_hideMode!="")_hideStatus="窗口收起或暂停，本局已结束。";_hideMode="";}
+        if(_modelId!=_c.Preferences.PetModel){_modelId=_c.Preferences.PetModel;ReplaceModel(PetModels.For(_modelId));return;}
+        string state=_c.Clock.Active?(_c.Clock.Running&&_c.Clock.Activity!.Kind=="focus"?"focus":"rest"):_c.Busy?"thinking":_c.Preferences.PetIdleMode=="sleep"?"sleep":_c.Preferences.Quiet?"quiet":"idle";
         var p=_preview??_c.Preferences;int points=_c.Store.PlantPoints;bool night=p.Theme=="night"||p.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7);
-        _animator.Configure(state,IsLoaded&&IsVisible&&_motionVisible,p.ReducedMotion,p.Quiet,_c.AnimationSuspended);
+        _animator.Economy=p.PerformanceMode=="economy";_animator.Configure(state,IsLoaded&&IsVisible&&_motionVisible,p.ReducedMotion,p.Quiet,_c.AnimationSuspended);
         string furniture=string.Join("/",_c.Store.GameSlots().OrderBy(x=>x.Key,StringComparer.Ordinal).Select(x=>$"{x.Key}:{x.Value}"));
-        string appearance=$"{_outdoors}/{p.Theme}/{p.Rug}/{p.Ornament}/{points}/{night}/{furniture}";
+        var album=_c.Store.Boats();var displayed=album.Entries.FirstOrDefault(b=>b.Id==album.DisplayedId);
+        string appearance=$"{System.Text.Json.JsonSerializer.Serialize(CurrentWorld.Items)}/{_outdoors}/{p.Theme}/{p.Rug}/{p.Ornament}/{points}/{night}/{furniture}/{p.Weather}/{p.RoomLamp}/{p.Fireplace}/{album.DisplayedId}/{displayed?.Layout.Shape}/{displayed?.Layout.Color}/{displayed?.PetalFound}";
         if(_appearance!=appearance)
         {
-            _appearance=appearance;_hits.Clear();_model.Content=_outdoors?MeshArt.Outdoors(p,_hits,_character):MeshArt.Room(p,points,_hits,_character);
-            if(!_outdoors&&_model.Content is Model3DGroup scene)
+            _appearance=appearance;_hits.Clear();bool cached=_sceneCache.TryGetValue(appearance,out var entry);
+            if(cached){_model.Content=entry.Scene;foreach(var hit in entry.Hits)_hits.Add(hit.Key,hit.Value);}
+            else _model.Content=_outdoors?MeshArt.Outdoors(p,_hits,_character):MeshArt.Room(p,points,_hits,_character);
+            if(!cached&&!_outdoors&&_model.Content is Model3DGroup scene)
             foreach(var (slot,item) in _c.Store.GameSlots())
             {
                 var (x,z)=slot switch{"shelf"=>(2.15,-2.12),"garden"=>(2.25,1.65),_=>(-1.4,-.55)};
@@ -448,6 +473,7 @@ internal sealed class Room3DView : Grid
                 else if(item=="lamp-paper"){MeshArt.Box(scene,"#80684F",x,.20,z,.055,.38,.055);MeshArt.Ellipse(scene,"#F3D88B",x,.51,z,.19,.22,.19);}
                 else if(item=="rug-blue")MeshArt.Ellipse(scene,"#A9C7D7",-.25,.035,1.45,1.05,.009,.54);
             }
+            if(!cached&&_model.Content is Model3DGroup built){if(!_outdoors){ApplyFurniture(built);AddBoatKeepsake(built);}FreezeStatic(built);if(_sceneCache.Count>=2)_sceneCache.Remove(_sceneCache.Keys.First());_sceneCache[appearance]=(built,new(_hits));}
             _sceneCorners.Clear();CollectSceneCorners(_model.Content,Matrix3D.Identity);
             var backdrop=new LinearGradientBrush(Ui.Brush(night?"#D8E0E3":"#F1EDE1").Color,Ui.Brush(night?"#B7C6CD":"#DCE5D7").Color,new Point(0,0),new Point(1,1));backdrop.Freeze();Background=backdrop;
             Camera();
@@ -463,5 +489,11 @@ internal sealed class Room3DView : Grid
     {
         var rig=factory.Create();_animator.Replace(rig);_character.Children.Remove(_pet.Root);_pet=rig;_character.Children.Add(rig.Root);_appearance=null;Refresh();
     }
-    public void Release(){if(_released)return;_released=true;_animator.Dispose();_dayChange.Stop();_model.Content=null;_viewport.Children.Clear();_hits.Clear();_sceneCorners.Clear();_appearance=null;}
+    private bool FreezeStatic(Model3D model)
+    {
+        if(ReferenceEquals(model,_character))return false;
+        bool frozen=model is not Model3DGroup group||group.Children.Select(FreezeStatic).ToArray().All(x=>x);
+        if(frozen&&model.CanFreeze)model.Freeze();return frozen;
+    }
+    public void Release(){if(_released)return;_released=true;_toyTimer.Stop();_toyTimer.Tick-=ToyTick;WorldChanged=null;_worldMarks.Children.Clear();_boatTimer.Stop();_boatTimer.Tick-=BoatTick;_boatView.Content=null;_boatLeafHits.Clear();BoatChanged=null;_animator.Dispose();_dayChange.Stop();_sceneCache.Clear();_model.Content=null;_viewport.Children.Clear();_hits.Clear();_sceneCorners.Clear();_appearance=null;}
 }

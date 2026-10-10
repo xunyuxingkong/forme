@@ -69,12 +69,12 @@ public sealed class PreparedImport : IDisposable
                 if(!names.Add(name))throw new InvalidDataException("重复的数据类别。");
                 if(name=="SchemaVersion"){version=json.Value<int>();continue;}
                 if(name=="ExportedAt"){json.Value<DateTimeOffset>();continue;}
-                    if(name is not ("Sessions" or "Messages" or "Moods" or "Focus" or "Room"))throw new InvalidDataException("未知的数据类别。");
+                    if(name is not ("Sessions" or "Messages" or "Memories" or "Notes" or "Moods" or "Focus" or "Room"))throw new InvalidDataException("未知的数据类别。");
                 if(json.Peek()==JsonTokenType.Null){json.Read(JsonTokenType.Null);continue;}
                 plan._categories.Add(name);
                 if(name=="Room")
                 {
-                    json.Read(JsonTokenType.StartObject);var fields=new Dictionary<string,string>();bool events=false,hasGame=false;GameExport? game=null;
+                    json.Read(JsonTokenType.StartObject);var fields=new Dictionary<string,string>();bool events=false,hasGame=false,lamp=true,fire=false;var extras=new HashSet<string>();GameExport? game=null;BoatAlbum? boats=null;LivingWorld? world=null;
                     while(json.Peek()!=JsonTokenType.EndObject)
                     {
                         string field=json.Read(JsonTokenType.PropertyName)!;
@@ -102,13 +102,18 @@ public sealed class PreparedImport : IDisposable
                             foreach(var x in game.Achievements)Insert("INSERT INTO game_achievements VALUES($0,$1)",x.Id,x.Day);
                             if(!game.Inventory.Any(x=>x.ItemId=="ball-yellow"&&x.Quantity>0))Insert("INSERT INTO game_inventory VALUES('ball-yellow',1)");
                         }
-                        else if(field is "PetName" or "Theme" or "Rug" or "Ornament")
+                        else if(field=="World"){if(!extras.Add(field))throw new InvalidDataException("重复的家具数据。");world=json.Value<LivingWorld>();if(world is null)throw new InvalidDataException("家具数据缺失。");world.Validate();}
+                        else if(field=="Boats")
+                        {if(!extras.Add(field))throw new InvalidDataException("重复的纪念船数据。");boats=json.Value<BoatAlbum>();if(boats is null)throw new InvalidDataException("纪念船数据缺失。");boats.Validate();}
+                        else if(field is "PetName" or "Theme" or "Rug" or "Ornament" or "PetModel" or "Weather")
                         {if(!fields.TryAdd(field,json.Value<string>()))throw new InvalidDataException("重复的房间字段。");}
+                        else if(field is "RoomLamp" or "Fireplace")
+                        {if(!extras.Add(field))throw new InvalidDataException("重复的场景字段。");bool value=json.Value<bool>();if(field=="RoomLamp")lamp=value;else fire=value;}
                         else throw new InvalidDataException("未知的房间字段。");
                     }
                     json.Read(JsonTokenType.EndObject);
-                    if(!events||fields.Count!=4)throw new InvalidDataException("房间数据不完整。");
-                    plan.Room=new RoomExport(fields["PetName"],fields["Theme"],fields["Rug"],fields["Ornament"],[]){Game=game};
+                    if(!events||!new[]{"PetName","Theme","Rug","Ornament"}.All(fields.ContainsKey))throw new InvalidDataException("房间数据不完整。");
+                    plan.Room=new RoomExport(fields["PetName"],fields["Theme"],fields["Rug"],fields["Ornament"],[]){Game=game,Boats=boats,World=world,PetModel=fields.GetValueOrDefault("PetModel","sprout"),Weather=fields.GetValueOrDefault("Weather","clear"),RoomLamp=lamp,Fireplace=fire};
                     Store.ValidateExport(new(){Room=plan.Room});continue;
                 }
                 json.Read(JsonTokenType.StartArray);
@@ -121,11 +126,16 @@ public sealed class PreparedImport : IDisposable
                             Insert("INSERT INTO sessions VALUES($0,$1,$2,$3)",s.Id,s.Title,s.Created.ToString("O"),s.Endpoint);plan.Sessions++;break;
                         case "Messages":
                             var m=json.Value<ChatMessage>();
-                            if(m is null||string.IsNullOrWhiteSpace(m.Id)||string.IsNullOrWhiteSpace(m.SessionId)||m.Content is null||m.Content.Length>32000||m.Role is not ("user" or "assistant")||m.Status is not ("complete" or "stopped" or "error" or "streaming"))throw new InvalidDataException("消息记录无效。");
+                            if(m is null||string.IsNullOrWhiteSpace(m.Id)||string.IsNullOrWhiteSpace(m.SessionId)||m.Content is null||m.Content.Length>32000||m.Role is not ("user" or "assistant")||m.Status is not ("complete" or "stopped" or "error" or "streaming" or "local"))throw new InvalidDataException("消息记录无效。");
                             Insert("INSERT INTO messages VALUES($0,$1,$2,$3,$4,$5)",m.Id,m.SessionId,m.Role,m.Content,m.Status=="streaming"?"stopped":m.Status,m.Created.ToString("O"));plan.Messages++;break;
                         case "Moods":
                             var mood=json.Value<MoodEntry>();Store.ValidateExport(new(){Moods=[mood]});
                             Insert("INSERT INTO moods VALUES($0,$1,$2,$3,$4)",mood.Id,mood.Mood,mood.Note,mood.Created.ToString("O"),mood.Updated.ToString("O"));plan.Moods++;break;
+                        case "Memories":
+                            var memory=json.Value<ChatMemory>();Store.ValidateMemory(memory);
+                            Insert("INSERT INTO chat_memories VALUES($0,$1,$2,$3,$4,$5,$6)",memory.Id,memory.Title,memory.Content,memory.Provider,memory.Enabled?1:0,memory.Created.ToString("O"),memory.Updated.ToString("O"));break;
+                        case "Notes":
+                            var note=json.Value<ChatNote>();Store.ValidateNote(note);Insert("INSERT INTO chat_notes VALUES($0,$1,$2)",note.SessionId,note.Content,note.Provider);break;
                         case "Focus":
                             var f=json.Value<FocusEntry>();Store.ValidateExport(new(){Focus=[f]});
                             Insert("INSERT INTO focus VALUES($0,$1,$2,$3,$4,$5,$6)",f.Id,f.Kind,f.Title,f.Started.ToString("O"),f.TargetSeconds,f.ElapsedSeconds,f.Result);plan.Focus++;break;
@@ -134,9 +144,11 @@ public sealed class PreparedImport : IDisposable
                 json.Read(JsonTokenType.EndArray);
             }
             json.Read(JsonTokenType.EndObject);
-            if(json.Peek()!=JsonTokenType.None||version is not (1 or Store.ExportVersion)||plan._categories.Count==0||plan.HasChat!=plan._categories.Contains("Messages"))throw new InvalidDataException("导入文件结构或版本无效。");
+            if(json.Peek()!=JsonTokenType.None||version is not (1 or 2 or 3 or 4 or 5 or Store.ExportVersion)||plan._categories.Count==0||plan.HasChat!=plan._categories.Contains("Messages")||(!plan.HasChat&&(plan._categories.Contains("Memories")||plan._categories.Contains("Notes"))))throw new InvalidDataException("导入文件结构或版本无效。");
             using var orphan=db.CreateCommand();orphan.Transaction=tx;orphan.CommandText="SELECT count(*) FROM messages WHERE session NOT IN (SELECT id FROM sessions)";
             if(Convert.ToInt64(orphan.ExecuteScalar())!=0)throw new InvalidDataException("消息所属会话缺失。");
+            orphan.CommandText="SELECT count(*) FROM chat_notes WHERE session NOT IN (SELECT id FROM sessions)";if(Convert.ToInt64(orphan.ExecuteScalar())!=0)throw new InvalidDataException("摘要所属会话缺失。");
+            orphan.CommandText="SELECT count(*) FROM chat_memories";if(Convert.ToInt64(orphan.ExecuteScalar())>30)throw new InvalidDataException("记忆超过30条。");
             tx.Commit();return plan;
         }
         catch(Exception ex) when(ex is JsonException or NullReferenceException or SqliteException)

@@ -8,6 +8,7 @@ namespace Forme.App;
 internal sealed class FloatingChatWindow : Window
 {
     private readonly Controller _c;
+    private readonly Action<string> _openHouse;
     private readonly TextBlock _target=Ui.Text("",11,Ui.Muted);
     private readonly TextBlock _status=Ui.Text("",11,Ui.Muted);
     private readonly StackPanel _messages=new();
@@ -18,19 +19,19 @@ internal sealed class FloatingChatWindow : Window
     private bool _transfer,_composing,_probeStreaming;
     public FloatingChatWindow(Controller c,PetWindow pet,Action<string> openHouse)
     {
-        _c=c;Title="Forme · 聊一会儿";Width=380;Height=500;MinWidth=300;MinHeight=360;
+        _c=c;_openHouse=openHouse;Title="Forme · 聊一会儿";Width=380;Height=500;MinWidth=300;MinHeight=360;
         WindowStyle=WindowStyle.ToolWindow;ShowInTaskbar=false;Topmost=c.Preferences.Topmost;Background=Ui.Cream;Owner=pet;
         var grid=new Grid{Margin=new Thickness(14)};
         foreach(var height in new[]{GridLength.Auto,GridLength.Auto,new GridLength(1,GridUnitType.Star),GridLength.Auto,GridLength.Auto,GridLength.Auto})grid.RowDefinitions.Add(new(){Height=height});
         void Row(UIElement child,int row){Grid.SetRow(child,row);grid.Children.Add(child);}
         Row(_target,0);
         _new=Ui.Button("新对话",c.NewSession);
-        Row(Ui.Row(_new,Ui.Button("完整聊天",()=>openHouse("chat")),Ui.Button("AI设置",()=>openHouse("settings"))),1);
+        Row(Ui.Row(_new,Ui.Button("完整聊天",()=>openHouse("chat")),Ui.Button("角色设置",()=>openHouse("settings")),Ui.Button("记忆",()=>openHouse("memory"))),1);
         _scroll=new(){Content=_messages,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Margin=new Thickness(0,0,0,8)};Row(_scroll,2);
         Row(_status,3);
         _input=Ui.Input(c.Draft,true);_input.MinHeight=70;_input.MaxHeight=110;_input.TextChanged+=(_,_)=>c.Draft=_input.Text;Row(_input,4);
         _send=Ui.AsyncButton("发送",()=>ChatRequests.Send(c),true);_stop=Ui.Button("停止",c.StopReply);
-        Row(Ui.Row(_send,_stop,Ui.Text("Enter发送 · Shift+Enter换行",10,Ui.Muted)),5);
+        Row(Ui.Row(_send,_stop,Ui.Button("发送预览",()=>ChatRequests.Preview(c,this)),Ui.Text("Enter发送 · Shift+Enter换行",10,Ui.Muted)),5);
         Content=new Border{Background=Ui.Cream,Child=grid};
         TextCompositionManager.AddPreviewTextInputStartHandler(_input,(_,_)=>_composing=true);
         TextCompositionManager.AddPreviewTextInputHandler(_input,(_,_)=>_composing=false);
@@ -66,7 +67,7 @@ internal sealed class FloatingChatWindow : Window
     private void Render()
     {
         Topmost=_c.Preferences.Topmost;
-        _target.Text="发送至 "+_c.Preferences.Endpoint+"\n"+_c.Preferences.Model;
+        _target.Text=(_c.Preferences.LocalActionRules?"本地规则优先 · 未匹配才发送至 ":"发送至 ")+_c.Preferences.Endpoint+"\n"+_c.Preferences.Model+(_c.Preferences.MemoryEnabled?" · 记忆开启":" · 记忆关闭");
         _messages.Children.Clear();_live=null;
         var history=_c.Session is null?[]:_c.Store.Messages(_c.Session.Id,0,20);
         foreach(var message in history)
@@ -75,13 +76,14 @@ internal sealed class FloatingChatWindow : Window
             var text=Ui.Text(message.Content.Length==0?"未收到内容":message.Content,13);text.Margin=new Thickness(0);
             var label=message.Role=="user"?"你":_c.Preferences.PetName;
             if(message.Status is "stopped" or "error")label+=message.Status=="stopped"?" · 已停止":" · 未完成";
-            _messages.Children.Add(Ui.Card(Ui.Stack(Ui.Text(label,10,Ui.Muted),text),new Thickness(10)));
+            _messages.Children.Add(Ui.Card(Ui.Stack(Ui.Text(label,10,Ui.Muted),text,Ui.Row(Ui.Button("复制",()=>Clipboard.SetText(message.Content)),Ui.Button("存为记忆…",()=>{string memory=Forme.Core.CompanionCommands.ContextText(message.Content);_c.MemoryDraft=memory.Length>400?memory[..400]:memory;_openHouse("memory");}))),new Thickness(10)));
         }
-        if(!_c.Secrets.Exists)_messages.Children.Add(Ui.Text("还没有连接AI。在AI设置中填写密钥后即可聊天；调用可能收费。",12,Ui.Muted));
-        else if(history.Count==0&&!_c.Busy)_messages.Children.Add(Ui.Text("我在这里，听你说。这里只分享你发送的内容。",13,Ui.Muted));
+        if(!_c.Secrets.Exists)_messages.Children.Add(Ui.Text("明确动作可按本地规则执行，例如“走两步”“跳个舞”；先开启对应权限。自由对话需在设置连接AI，调用可能收费。",12,Ui.Muted));
+        else if(history.Count==0&&!_c.Busy)_messages.Children.Add(Ui.Text("我在这里，听你说。分享范围可在发送预览中查看。",13,Ui.Muted));
+        if(_c.PendingChatSave is {} unsaved)_messages.Children.Add(Ui.Card(Ui.Stack(Ui.Text("回复还未保存到磁盘",12,Ui.Sage),Ui.Text(unsaved.Content,13),Ui.Row(Ui.Button("复制",()=>Clipboard.SetText(unsaved.Content)),Ui.Button("重试保存",_c.RetryChatSave),Ui.Button("放弃保存",()=>{if(Ui.Confirm("放弃这条暂存回复的保存？"))_c.DiscardPendingSave();})))));
         if(_c.Busy){_live=Ui.Text("…",13);_messages.Children.Add(Ui.Card(Ui.Stack(Ui.Text(_c.Preferences.PetName,10,Ui.Muted),_live),new Thickness(10)));}
         if(_input.Text!=_c.Draft)_input.Text=_c.Draft;
-        _send.IsEnabled=!_c.Busy&&_c.Secrets.Exists;_stop.IsEnabled=_c.Busy;_new.IsEnabled=!_c.Busy;
+        _send.IsEnabled=!_c.Busy;_stop.IsEnabled=_c.Busy;_new.IsEnabled=!_c.Busy;
         UpdateLive();_scroll.ScrollToEnd();
     }
     private void UpdateLive()

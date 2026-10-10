@@ -16,9 +16,12 @@ internal sealed partial class MainWindow : Window
     private readonly TextBlock _petName=Ui.Text("",22,null,true);
     private readonly Room3DView _room;
     private readonly Grid _body=new();
+    private readonly Border _root=new();
     private readonly StackPanel _left=new();
     private readonly Button _sceneToggle;
-    private bool _compactScene;
+    private readonly Button _roomVisibility;
+    private bool _compactScene,_sidebarCollapsed;
+    private readonly Button _sidebarToggle;
     private readonly TextBlock _toast=Ui.Text("",12,Ui.Sage);
     private readonly DispatcherTimer _toastTimer=new(){Interval=TimeSpan.FromSeconds(6)};
     private TextBlock? _clockText;
@@ -26,6 +29,7 @@ internal sealed partial class MainWindow : Window
     private TextBlock? _chatState;
     private string _page="home";
     private int _focusOffset,_moodOffset,_chatOffset,_sessionOffset;
+    private string _chatSearch="";
     private readonly Dictionary<string,Button> _navigation=new();
     private DispatcherTimer? _relaxTimer;
     private Pet3DView? _relaxPet;
@@ -39,41 +43,62 @@ internal sealed partial class MainWindow : Window
         header.Children.Add(Ui.Stack(Ui.Text("FORME   /   陪伴小屋",11,Ui.Muted,true),_petName));
         var quiet=Ui.Button("安静模式",()=>c.SavePreferences(c.Preferences with{Quiet=!c.Preferences.Quiet}));quiet.ToolTip="关闭声音、主动招呼和自动动作；点击仍会回应";
         _sceneToggle=Ui.Button("查看3D小屋",()=>{_compactScene=!_compactScene;ApplyLayout();});_sceneToggle.Visibility=Visibility.Collapsed;
-        var right=Ui.Stack(Ui.Row(quiet,Ui.Button("设置",()=>Navigate("settings")),_sceneToggle),_status);Grid.SetColumn(right,1);header.Children.Add(right);shell.Children.Add(header);
+        _sidebarToggle=Ui.Button("收起侧栏",()=>{_sidebarCollapsed=!_sidebarCollapsed;ApplyLayout();});
+        var controls=Ui.Button("伙伴控制",ShowPetControls);
+        _roomVisibility=Ui.Button(c.Preferences.ShowHome3D?"隐藏动画":"显示动画",()=>
+        {
+            bool show=!_c.Preferences.ShowHome3D;_c.SavePreferences(_c.Preferences with{ShowHome3D=show});
+            _roomVisibility!.Content=show?"隐藏动画":"显示动画";ApplyLayout();
+        });
+        var right=Ui.Stack(Ui.Row(_roomVisibility,_sidebarToggle,controls,quiet,Ui.Button("设置",()=>Navigate("settings")),_sceneToggle),_status);Grid.SetColumn(right,1);header.Children.Add(right);shell.Children.Add(header);
         _body.ColumnDefinitions.Add(new(){Width=new GridLength(0.56,GridUnitType.Star)});_body.ColumnDefinitions.Add(new(){Width=new GridLength(24)});_body.ColumnDefinitions.Add(new(){Width=new GridLength(0.44,GridUnitType.Star)});
         _room=new(c,Navigate){MaxHeight=560,HorizontalAlignment=HorizontalAlignment.Stretch};_left.Children.Add(_room);_left.Children.Add(Ui.Text("你的节奏，就是这里的节奏。",13,Ui.Muted));_left.Children.Add(_toast);
         _body.Children.Add(_left);Grid.SetColumn(_panel,2);_body.Children.Add(_panel);Grid.SetRow(_body,1);shell.Children.Add(_body);
         var footer=new WrapPanel{Margin=new Thickness(0,16,0,0)};
-        foreach(var (id,label) in new[]{("home","⌂  小屋"),("play","成长"),("chat","聊一会儿"),("focus","专注"),("relax","放松"),("mood","心情"),("room","布置")})
+        foreach(var (id,label) in new[]{("home","⌂  小屋"),("boat","玩纸船"),("living","玩耍与生活"),("play","成长"),("chat","聊一会儿"),("focus","专注"),("relax","放松"),("mood","心情"),("room","布置")})
         {var b=Ui.Button(label,()=>Navigate(id));_navigation[id]=b;footer.Children.Add(b);}
-        Grid.SetRow(footer,2);shell.Children.Add(footer);Content=new Border{Background=Ui.Cream,Padding=new Thickness(26),Child=shell};
+        Grid.SetRow(footer,2);shell.Children.Add(footer);_root.Background=Ui.Brush(c.Preferences.AppBackground);_root.Padding=new Thickness(26);_root.Child=shell;Content=_root;ApplyColors();
         SizeChanged+=(_,_)=>ApplyLayout();
         StateChanged+=(_,_)=>UpdateMotion();
         c.Changed+=OnChanged;c.Tick+=OnTick;c.Notice+=Toast;
         _toastTimer.Tick+=(_,_)=>{_toastTimer.Stop();_toast.Text="";};
-        Closed+=(_,_)=>{c.Changed-=OnChanged;c.Tick-=OnTick;c.Notice-=Toast;_toastTimer.Stop();StopRelax();_room.Release();};
+        Closed+=(_,_)=>{c.Changed-=OnChanged;c.Tick-=OnTick;c.Notice-=Toast;_toastTimer.Stop();StopRelax();DetachBoatPage();DetachWorldPage();_room.Release();};
         Navigate(c.Preferences.Onboarded?"home":"welcome");
     }
     public void Toast(string text){_toast.Text=text;_toastTimer.Stop();_toastTimer.Start();}
+    private void ShowPetControls(){var menu=new ContextMenu();foreach(var (title,action) in new (string,Action)[]{("叫回伙伴",_room.RecallFromUser),("停止当前活动",_room.StopFromUser)}){var entry=new MenuItem{Header=title};entry.Click+=(_,_)=>Ui.Guard(action);menu.Items.Add(entry);}menu.IsOpen=true;}
     public void Navigate(string page)
         =>RenderPage(page,false);
     private void RenderPage(string page,bool preserveView)
     {
+        DetachWorldPage();if(_page=="furniture"&&page!="furniture")_room.CloseFurniture();if(_page=="hide"&&page!="hide")_room.EndHide();
+        DetachBoatPage();if(_page=="boat"&&page!="boat")_room.CloseBoats();
         if(_page=="relax" && page!="relax")StopRelax();
         if(_page=="room" && page!="room")_room.Preview=null;
         _page=page;_clockText=null;_liveText=null;_chatState=null;
-        if(!preserveView)_compactScene=false;ApplyLayout();
+        if(!preserveView){_compactScene=false;_sidebarCollapsed=false;}ApplyLayout();
         UpdateHeader();foreach(var (id,b) in _navigation)b.Background=id==page?Ui.Brush("#DDE8D7"):Ui.Brush("#EFF2EB");
         var content=page switch
         {
-            "welcome"=>Welcome(),"chat"=>Chat(),"focus"=>FocusPage(),"relax"=>Relax(),"mood"=>Mood(),"plant"=>Plant(),"room"=>Room(),"play"=>Play(),"settings"=>Settings(),_=>Home()
+            "furniture"=>FurniturePage(),"living"=>LivingPage(),"hide"=>HidePage(),"welcome"=>Welcome(),"boat"=>BoatPage(),"chat"=>Chat(),"memory"=>MemorySettings(),"focus"=>FocusPage(),"relax"=>Relax(),"mood"=>Mood(),"plant"=>Plant(),"room"=>Room(),"play"=>Play(),"settings"=>Settings(),_=>Home()
         };
         _panel.Content=new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Padding=new Thickness(0,0,8,0)};
     }
     private void ApplyLayout()
     {
-        if(ActualHeight>0)_room.Height=Math.Clamp(ActualHeight-230,220,560);
-        bool narrow=ActualWidth>0&&ActualWidth<940;bool showScene=!narrow||_compactScene;
+        if(ActualHeight>0)_room.Height=Math.Clamp(ActualHeight-320,120,560);
+        bool narrow=ActualWidth>0&&ActualWidth<940;bool showScene=(!narrow||_compactScene)&&_c.Preferences.ShowHome3D;
+        _sidebarToggle.Content=_sidebarCollapsed?"展开侧栏":"收起侧栏";System.Windows.Automation.AutomationProperties.SetName(_sidebarToggle,(string)_sidebarToggle.Content);
+        if(_sidebarCollapsed&&!_c.Preferences.ShowHome3D)_sidebarCollapsed=false;
+        if(_sidebarCollapsed){_sceneToggle.Visibility=Visibility.Collapsed;_body.RowDefinitions.Clear();Grid.SetRow(_panel,0);Grid.SetColumn(_panel,2);_left.Visibility=Visibility.Visible;_panel.Visibility=Visibility.Collapsed;_body.ColumnDefinitions[0].Width=new GridLength(1,GridUnitType.Star);_body.ColumnDefinitions[1].Width=_body.ColumnDefinitions[2].Width=new GridLength(0);return;}
+        if(narrow&&ActualHeight>=620&&_page is "boat" or "furniture" or "hide" or "living")
+        {
+            _sceneToggle.Visibility=Visibility.Collapsed;_left.Visibility=_panel.Visibility=Visibility.Visible;
+            _body.ColumnDefinitions[0].Width=new GridLength(1,GridUnitType.Star);_body.ColumnDefinitions[1].Width=_body.ColumnDefinitions[2].Width=new GridLength(0);
+            _body.RowDefinitions.Clear();_body.RowDefinitions.Add(new(){Height=GridLength.Auto});_body.RowDefinitions.Add(new());
+            _room.Height=Math.Clamp((ActualHeight-260)*.6,100,320);Grid.SetColumn(_panel,0);Grid.SetRow(_panel,1);return;
+        }
+        _body.RowDefinitions.Clear();Grid.SetRow(_panel,0);Grid.SetColumn(_panel,2);
         _sceneToggle.Visibility=narrow?Visibility.Visible:Visibility.Collapsed;_sceneToggle.Content=_compactScene?"返回活动":"查看3D小屋";
         _left.Visibility=showScene?Visibility.Visible:Visibility.Collapsed;_panel.Visibility=narrow&&_compactScene?Visibility.Collapsed:Visibility.Visible;
         _body.ColumnDefinitions[0].Width=showScene?new GridLength(narrow?1:.56,GridUnitType.Star):new GridLength(0);
@@ -81,10 +106,14 @@ internal sealed partial class MainWindow : Window
     }
     private void OnChanged()
     {
-        UpdateHeader();_room.Refresh();
+        UpdateHeader();ApplyColors();_room.Refresh();
         UpdateMotion();
-        if(_page is "home" or "chat" or "focus" or "plant")RenderPage(_page,true);
+        if(_page is "home" or "chat" or "focus" or "plant" or "play" or "living")RenderPage(_page,true);
         _settingsChanged();
+    }
+    private void ApplyColors()
+    {
+        var color=Ui.Brush(_c.Preferences.AppBackground);Background=color;_root.Background=color;
     }
     private void UpdateMotion()
     {
@@ -206,8 +235,7 @@ internal sealed partial class MainWindow : Window
         }
         if(taskId=="ball")
         {
-            _room.SwitchScene(false);if(!_room.PlayBall()){_room.SwitchScene(true);if(!_room.PlayBall())return;}
-            _c.Store.RecordBallPlay(day);Toast("小球滚出去啦，伙伴正跑去捡。");
+            _room.SwitchScene(false);string report=_room.Interact("ball");if(report.Contains("无法")){_room.SwitchScene(true);report=_room.Interact("ball");}Toast(report);
         }
         else if(taskId=="discover")
         {
@@ -226,7 +254,7 @@ internal sealed partial class MainWindow : Window
         var ornament=Ui.Select(names.Where(x=>_c.Store.Unlocked(x.Key)).Select(x=>x.Value),names[_c.Preferences.Ornament],"桌面摆件");
         void Preview(){_room.Preview=_c.Preferences with{Theme=theme.SelectedIndex==0?"auto":theme.SelectedIndex==1?"day":"night",Rug=rug.SelectedIndex==0?"cream":rug.SelectedIndex==1?"sage":"rose",Ornament=names.FirstOrDefault(x=>x.Value==ornament.SelectedItem?.ToString()).Key??"none"};}
         theme.SelectionChanged+=(_,_)=>Preview();rug.SelectionChanged+=(_,_)=>Preview();ornament.SelectionChanged+=(_,_)=>Preview();
-        var page=Ui.Stack(Ui.Text("把这里布置成你喜欢的样子",24,null,true),Ui.Text("基础功能一直开放，装饰只是相处留下的小纪念。",13,Ui.Muted),Ui.Card(Ui.Stack(Ui.Text("窗外"),theme,Ui.Text("地毯"),rug,Ui.Text("桌面摆件"),ornament,Ui.Row(Ui.Button("保存布置",()=>{Preview();var v=_room.Preview!;_c.SavePreferences(_c.Preferences with{Theme=v.Theme,Rug=v.Rug,Ornament=v.Ornament});Toast("布置已保存。");Navigate("home");},true),Ui.Button("取消",()=>Navigate("home"))))),Ui.Text("当前预览未保存。切换页面时将恢复保存的布置。",12,Ui.Muted));
+        var page=Ui.Stack(Ui.Button("进入家具编辑",()=>Navigate("furniture"),true),Ui.Text("把这里布置成你喜欢的样子",24,null,true),Ui.Text("基础功能一直开放，装饰只是相处留下的小纪念。",13,Ui.Muted),Ui.Card(Ui.Stack(Ui.Text("窗外"),theme,Ui.Text("地毯"),rug,Ui.Text("桌面摆件"),ornament,Ui.Row(Ui.Button("保存布置",()=>{Preview();var v=_room.Preview!;_c.SavePreferences(_c.Preferences with{Theme=v.Theme,Rug=v.Rug,Ornament=v.Ornament});Toast("布置已保存。");Navigate("home");},true),Ui.Button("取消",()=>Navigate("home"))))),Ui.Text("当前预览未保存。切换页面时将恢复保存的布置。",12,Ui.Muted));
         var inventory=_c.Store.GameInventory().Where(x=>x.Quantity>0).Select(x=>x.ItemId).ToHashSet(StringComparer.Ordinal);
         var place=Ui.Stack(Ui.Text("家具摆放",17,null,true),Ui.Text("从成长页兑换物品，再选一个位置摆放。",12,Ui.Muted));
         foreach(var (slot,label) in new[]{("desk","书桌"),("shelf","墙边"),("garden","花园")})
@@ -236,7 +264,7 @@ internal sealed partial class MainWindow : Window
             var select=Ui.Select(choices.Select(x=>x.Name),choices[0].Name,label+"摆放物品");
             place.Children.Add(Ui.Row(Ui.Text(label,13),select,Ui.Button("摆放",()=>{var item=choices.First(x=>x.Name==select.SelectedItem?.ToString());if(_c.Store.PlaceGameItem(slot,item.Id)){_c.Refresh();Toast(item.Name+"已摆放。");Navigate("room");}})));
         }
-        page.Children.Add(Ui.Card(place));return page;
+        page.Children.Add(Ui.Card(place));page.Children.Add(WorldControls());return page;
     }
     private void StopRelax(){_relaxTimer?.Stop();_relaxTimer=null;_relaxPet?.Release();_relaxPet=null;}
     private UIElement Relax()
@@ -250,7 +278,7 @@ internal sealed partial class MainWindow : Window
             void Completed(){if(_relaxFinished)return;_relaxFinished=true;_c.Store.CompleteRelaxation();Toast("这段放松留下了一朵小云装饰。想继续或返回小屋都可以。");}
             if(type=="pet")
             {
-                var pet=new Pet3DView{State="idle"};_relaxPet=pet;UpdateMotion();var count=0;var info=Ui.Text("按住或轻划，揉揉这个立体的小伙伴。",13,Ui.Muted);
+                var pet=new Pet3DView(PetModels.For(_c.Preferences.PetModel)){State="idle"};pet.Economy(_c.Preferences.PerformanceMode=="economy");_relaxPet=pet;UpdateMotion();var count=0;var info=Ui.Text("按住或轻划，揉揉这个立体的小伙伴。",13,Ui.Muted);
                 void Rub(){pet.Rub(_c.Preferences.ReducedMotion);info.Text=++count%2==0?"它眯起眼睛，像一团软软的云。":"收到啦，慢慢来就好。";if(_c.Preferences.Sounds&&!_c.Preferences.Quiet)System.Media.SystemSounds.Asterisk.Play();Completed();}
                 DateTimeOffset lastRub=DateTimeOffset.MinValue;
                 pet.MouseLeftButtonDown+=(_,_)=>{pet.CaptureMouse();Rub();};pet.MouseMove+=(_,e)=>{if(pet.IsMouseCaptured&&e.LeftButton==MouseButtonState.Pressed&&DateTimeOffset.UtcNow-lastRub>TimeSpan.FromMilliseconds(350)){lastRub=DateTimeOffset.UtcNow;pet.Turn(4);Rub();}};pet.MouseLeftButtonUp+=(_,_)=>pet.ReleaseMouseCapture();
@@ -275,21 +303,33 @@ internal sealed partial class MainWindow : Window
     }
     private UIElement Chat()
     {
-        var p=Ui.Stack(Ui.Text("我在这里，听你说",25,null,true),Ui.Text("发送至 "+_c.Preferences.Endpoint+" · "+_c.Preferences.Model,11,Ui.Muted));
+        var p=Ui.Stack(Ui.Text("我在这里，听你说",25,null,true),Ui.Text((_c.Preferences.LocalActionRules?"本地规则优先 · 未匹配才发送至 ":"发送至 ")+_c.Preferences.Endpoint+" · "+_c.Preferences.Model,11,Ui.Muted));
         var sessions=_c.Store.Sessions(_sessionOffset,10);var select=new ComboBox{Margin=new Thickness(0,0,0,10),MinHeight=34};
         foreach(var s in sessions)select.Items.Add(new ComboBoxItem{Content=$"{s.Created:MM-dd HH:mm}  {s.Title}",Tag=s,IsSelected=s.Id==_c.Session?.Id});
         select.SelectionChanged+=(_,_)=>Ui.Guard(()=>{if(select.SelectedItem is ComboBoxItem{Tag:ChatSession s}){_chatOffset=0;_c.SelectSession(s);}});
         p.Children.Add(select);p.Children.Add(Ui.Row(Ui.Button("新对话",()=>{_chatOffset=0;_c.NewSession();}),Ui.Button("删除本次",()=>{if(Ui.Confirm("删除此会话和相关应用备份？已发送给服务商及外部导出副本不在删除范围内。"))_c.DeleteSession();})));
+        p.Children.Add(Ui.Row(Ui.Button("管理记忆",()=>Navigate("memory")),Ui.Button("角色与动作权限",()=>Navigate("settings")),Ui.Button("查看本次发送内容",()=>ChatRequests.Preview(_c,this))));
+        string provider=AiClient.ProviderIdentity(_c.Preferences.Endpoint);int memories=_c.Store.Memories().Count(x=>x.Enabled&&x.Provider==provider);
+        p.Children.Add(Ui.Text(_c.Preferences.MemoryEnabled?$"记忆分享已开启 · 当前服务可用 {memories} 条 · 只发送预算内的已确认内容":"记忆分享已关闭 · 历史仍保存在本机",11,Ui.Muted));
+        if(_c.PendingChatSave is {} unsaved)p.Children.Add(Ui.Card(Ui.Stack(Ui.Text("这条回复尚未写入磁盘，退出前请复制或重试保存",13,Ui.Sage),Ui.Text(unsaved.Content,13),Ui.Row(Ui.Button("复制暂存回复",()=>Clipboard.SetText(unsaved.Content)),Ui.Button("重试保存",_c.RetryChatSave),Ui.Button("放弃保存",()=>{if(Ui.Confirm("放弃这条暂存回复的保存？"))_c.DiscardPendingSave();})))));
+        if(_c.Session is {} current)
+        {
+            var savedNote=_c.Store.Note(current.Id);var summary=Ui.Input(savedNote?.Content??"",true,800,"会话摘要");
+            var title=Ui.Input(_c.Store.Sessions(0,1000).FirstOrDefault(x=>x.Id==current.Id)?.Title??current.Title,max:24,automationName:"会话标题");
+            p.Children.Add(new Expander{Header="会话标题与摘要（本地编辑，不调用 AI）",Content=Ui.Stack(title,Ui.Button("重命名会话",()=>{if(string.IsNullOrWhiteSpace(title.Text))throw new InvalidDataException("标题不能为空。");_c.Store.RenameSession(current.Id,title.Text.Trim());_c.Refresh();}),Ui.Text("摘要作为你确认的记忆，开启分享后随本次会话发送。绑定保存时的服务商。",11,Ui.Muted),summary,Ui.Button("保存会话摘要",()=>{_c.Store.SaveNote(new(current.Id,summary.Text.Trim(),provider));Toast("摘要已保存在本机。");}))});
+        }
+        var search=Ui.Input(_chatSearch,max:80,automationName:"搜索当前会话");
+        p.Children.Add(Ui.Row(search,Ui.Button("搜索记录",()=>{_chatSearch=search.Text.Trim();_chatOffset=0;Navigate("chat");}),Ui.Button("清除搜索",()=>{_chatSearch="";_chatOffset=0;Navigate("chat");})));
         if(sessions.Count==10 || _sessionOffset>0)p.Children.Add(Pager(_sessionOffset,sessions.Count,10,offset=>{_sessionOffset=offset;Navigate("chat");}));
         if(!_c.Secrets.Exists)p.Children.Add(Ui.Card(Ui.Stack(Ui.Text("还没有连接 AI",16,null,true),Ui.Text("本地互动可以直接使用。自由对话需要你提供密钥，调用可能收费。",13,Ui.Muted),Ui.Button("连接 AI",()=>Navigate("settings")),Ui.Button("给我一点鼓励（本地）",()=>Toast("今天不用做得完美。先照顾自己，再开始一件小事。")))));
-        var messages=_c.Session is null?new List<ChatMessage>():_c.Store.Messages(_c.Session.Id,_chatOffset,20);
+        var messages=_c.Session is null?new List<ChatMessage>():_chatSearch.Length>0?_c.Store.SearchMessages(_c.Session.Id,_chatSearch,_chatOffset,20):_c.Store.Messages(_c.Session.Id,_chatOffset,20);
         var transcript=new StackPanel();var transcriptScroll=new ScrollViewer{Content=transcript,MaxHeight=230,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Margin=new Thickness(0,0,0,10)};
         foreach(var m in messages)
         {
             if(m.Status=="streaming"&&_c.Busy)continue;
             var content=Ui.Stack(Ui.Text(m.Role=="user"?"你":_c.Preferences.PetName,11,Ui.Muted,true),Ui.Text(m.Content.Length==0?"未收到内容":m.Content,14));
             if(m.Status is "stopped" or "error")content.Children.Add(Ui.Text(m.Status=="stopped"?"已停止":"未完成",11,Ui.Muted));
-            content.Children.Add(Ui.Button("复制",()=>Clipboard.SetText(m.Content)));transcript.Children.Add(Ui.Card(content,new Thickness(16)));
+            content.Children.Add(Ui.Row(Ui.Button("复制",()=>Clipboard.SetText(m.Content)),Ui.Button("存为记忆…",()=>{string memory=CompanionCommands.ContextText(m.Content);_c.MemoryDraft=memory.Length>400?memory[..400]:memory;Navigate("memory");Toast("已放入记忆编辑框，确认内容和标题后再保存。");})));transcript.Children.Add(Ui.Card(content,new Thickness(16)));
         }
         if(_c.Session is not null)p.Children.Add(Pager(_chatOffset,messages.Count,20,offset=>{_chatOffset=offset;Navigate("chat");}));
         if(_c.Busy){_liveText=Ui.Text(_c.LiveReply.Length==0?"…":_c.LiveReply,14);transcript.Children.Add(Ui.Card(Ui.Stack(Ui.Text(_c.Preferences.PetName,11,Ui.Muted,true),_liveText)));}
@@ -298,7 +338,7 @@ internal sealed partial class MainWindow : Window
         var input=Ui.Input(_c.Draft,true,automationName:"聊天消息");input.TextChanged+=(_,_)=>_c.Draft=input.Text;
         async Task Send()
         {
-            _chatOffset=0;await ChatRequests.Send(_c);
+            _chatOffset=0;_chatSearch="";await ChatRequests.Send(_c);
         }
         input.PreviewKeyDown+=async(_,e)=>
         {
@@ -309,9 +349,9 @@ internal sealed partial class MainWindow : Window
         TextCompositionManager.AddPreviewTextInputStartHandler(input,(_,_)=>composing=true);
         TextCompositionManager.AddPreviewTextInputHandler(input,(_,_)=>composing=false);
         input.PreviewKeyDown+=async(_,e)=>{if(e.Handled)return;if(e.Key==Key.Enter&&!Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)&&!composing&&InputMethod.GetIsInputMethodEnabled(input)){e.Handled=true;try{await Send();}catch(Exception ex) when(OperationErrors.Expected(ex)){Ui.Error(OperationErrors.Message(ex));}}};
-        p.Children.Add(input);var send=Ui.AsyncButton("发送",Send,true);send.IsEnabled=!_c.Busy&&_c.Secrets.Exists;
+        p.Children.Add(input);var send=Ui.AsyncButton("发送",Send,true);send.IsEnabled=!_c.Busy;
         var stop=Ui.Button("停止",_c.StopReply);stop.IsEnabled=_c.Busy;
         var lastUser=messages.LastOrDefault(x=>x.Role=="user");var retry=Ui.AsyncButton("重试最后消息",async()=>{if(lastUser is not null)await _c.Send(lastUser.Id);});retry.IsEnabled=!_c.Busy&&lastUser is not null&&_c.Secrets.Exists&&messages.LastOrDefault()?.Status is "error" or "stopped";
-        p.Children.Add(Ui.Row(send,stop,retry));p.Children.Add(Ui.Text("Enter 发送 · Shift+Enter 换行。这里只分享你发送的内容，不自动读取心情或任务。",11,Ui.Muted));return p;
+        p.Children.Add(Ui.Row(send,stop,retry));p.Children.Add(Ui.Text("Enter 发送 · Shift+Enter 换行。分享本次消息、有限历史、角色设定，以及你明确启用的记忆；不会自动读取心情或任务。",11,Ui.Muted));return p;
     }
 }

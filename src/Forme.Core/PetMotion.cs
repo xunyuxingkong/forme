@@ -1,12 +1,12 @@
 namespace Forme.Core;
 
 // Normalized pose: no mesh coordinates, renderer types, or model names.
-public readonly record struct PetPose(double ScaleX,double ScaleY,double Lift,double Yaw,double Lean,bool Blink,string Expression,double Stride=0)
+public readonly record struct PetPose(double ScaleX,double ScaleY,double Lift,double Yaw,double Lean,bool Blink,string Expression,double Stride=0,double Reach=0)
 {
     public static PetPose Neutral(string expression="idle")=>new(1,1,0,0,0,false,expression);
 }
 
-public enum PetAction { Pat, Rub, Land, DanceSway, DanceHop, DanceSpin }
+public enum PetAction { Pat, Rub, Land, DanceSway, DanceHop, DanceSpin, Eat, Read, Rest, Look, Launch, Cheer }
 
 public sealed class PetMotion
 {
@@ -15,6 +15,7 @@ public sealed class PetMotion
     private bool _dragging;
     public string State { get; set; }="idle";
     public bool Reacting=>_dragging||_action is not null;
+    public PetAction? ActiveAction=>_action;
     public void Play(PetAction action,double seconds)
     {
         if(!Enum.IsDefined(action))throw new ArgumentOutOfRangeException(nameof(action));
@@ -36,7 +37,7 @@ public sealed class PetMotion
         if(_dragging)return new(1.04,.94,.035,0,-7,false,"thinking");
         if(_action is {} action)
         {
-            double duration=action==PetAction.Pat?1.05:action==PetAction.Rub?.65:action==PetAction.Land?.45:6;
+            double duration=action==PetAction.Pat?1.05:action==PetAction.Rub?.65:action==PetAction.Land?.45:action==PetAction.Rest?10:action==PetAction.Eat?4:action==PetAction.Launch?2:action==PetAction.Cheer?3:6;
             double t=Math.Clamp((seconds-_started)/duration,0,1);
             if(t<1)
             {
@@ -48,6 +49,12 @@ public sealed class PetMotion
                     PetAction.DanceSway=>new(1,1,0,8*Math.Sin(t*Math.PI*12)*envelope,7*Math.Sin(t*Math.PI*12)*envelope,false,"happy",Math.Sin(t*Math.PI*12)*envelope),
                     PetAction.DanceHop=>new(1+.04*wave,1-.06*wave,.075*Math.Abs(Math.Sin(t*Math.PI*16))*envelope,6*wave,3*wave,false,"happy",wave),
                     PetAction.DanceSpin=>new(1,1,.025*envelope,360*(3*t-Math.Sin(6*Math.PI*t)/(6*Math.PI)),4*wave,false,"happy",wave),
+                    PetAction.Eat=>new(1+.018*Math.Sin(t*Math.PI*20)*envelope,1-.014*Math.Sin(t*Math.PI*20)*envelope,0,0,3*envelope,t%.2<.06,"happy"),
+                    PetAction.Read=>new(1,1-.02*envelope,0,3*wave,-2*envelope,true,"focus"),
+                    PetAction.Rest=>new(1+.05*envelope,1-.10*envelope+.004*Math.Sin(t*Math.PI*8),0,0,4*envelope,true,"rest"),
+                    PetAction.Look=>new(1,1,0,7*Math.Sin(t*Math.PI*4)*envelope,0,false,"thinking"),
+                    PetAction.Launch=>new(1,1-.04*envelope,0,0,-5*envelope,false,"happy",0,envelope),
+                    PetAction.Cheer=>new(1,1,.045*Math.Abs(Math.Sin(t*Math.PI*8))*envelope,6*wave,5*wave,false,"happy",0,.65*envelope),
                     _=>new(1+.065*envelope,1-.08*envelope,0,0,3*wave,false,State)
                 };
             }

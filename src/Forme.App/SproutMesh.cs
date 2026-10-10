@@ -10,9 +10,9 @@ internal static class SproutMesh
     {
         var g=new Model3DGroup();
         // Face points towards +Z. Different states remain the same sculpted character.
-        Ellipse(g,"#C9DCBB",0,.74,0,.65,.62,.53);
-        Ellipse(g,"#A7C49C",-.42,1.32,-.06,.16,.37,.13,-26);Ellipse(g,"#A7C49C",.42,1.32,-.06,.16,.37,.13,26);
-        Ellipse(g,"#B9CFAB",-.58,.56,.06,.14,.24,.15,-20);Ellipse(g,"#B9CFAB",.58,.56,.06,.14,.24,.15,20);
+        Ellipse(g,"#C4DBAB",0,.74,0,.62,.64,.51);
+        Ellipse(g,"#DEE8C7",0,.48,.34,.35,.28,.16);
+        for(int i=0;i<3;i++)Ellipse(g,"#A5BD8F",-.09+i*.09,.46,.49,.013,.026,.008);
         Ellipse(g,"#E5B9A1",-.34,.66,.451,.11,.048,.028);Ellipse(g,"#E5B9A1",.34,.66,.451,.11,.048,.028);
         Box(g,"#6D935F",0,1.47,-.015,.034,.3,.034,-8);
         Ellipse(g,"#83A96E",-.12,1.57,-.014,.17,.065,.085,-30);Ellipse(g,"#A0BE7F",.12,1.63,-.014,.17,.065,.085,27);
