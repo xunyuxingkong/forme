@@ -80,6 +80,15 @@ internal static class CompanionChecks
         c.Draft="睡觉吧";await c.TrySendLocal();if(c.Preferences.PetIdleMode!="sleep")throw new Exception("Desktop sleep rule failed");
         c.Draft="随机走动";await c.TrySendLocal();var roamStart=new Point(host.Pet.Left,host.Pet.Top);await Task.Delay(2800);if(new Point(host.Pet.Left,host.Pet.Top)==roamStart)throw new Exception("AI mode did not roam with chat open");
         c.Draft="别动";await c.TrySendLocal();if(c.Preferences.PetIdleMode!="idle")throw new Exception("Stop did not end random mode");
+        host.Pet.Greet("绕屏回归检查");await Task.Delay(100);
+        // DragMove consumes mouse-up; the previous gesture marker must not count as an active drag.
+        typeof(PetWindow).GetField("_dragged",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.SetValue(host.Pet,true);
+        c.Draft="跑2圈在屏幕上";
+        if(!await c.TrySendLocal())throw new Exception("Desktop two laps did not resolve locally");
+        if(c.ActionResults.LastOrDefault()?.Code!=ActionResultCode.Completed)throw new Exception("Desktop two laps failed: "+c.ChatStatus);
+        c.Draft="绕屏幕跑两圈";var laps=c.TrySendLocal();await Task.Delay(150);host.Pet.StopCommands();await laps;
+        if(c.ActionResults.LastOrDefault()?.Code!=ActionResultCode.Interrupted)throw new Exception("Real desktop stop was not reported as interrupted");
+        c.Draft="跑几步";if(!await c.TrySendLocal()||c.ActionResults.Last().Code!=ActionResultCode.Completed)throw new Exception("Desktop command did not recover after stop");
         c.Draft="不要走两步";if(await c.TrySendLocal())throw new Exception("Negated instruction executed");
         c.SavePreferences(c.Preferences with{PetIdleMode="idle"});c.Draft="走两步，然后跳个舞";await c.TrySendLocal();
         var messages=c.Store.Messages(c.Session!.Id);if(messages.Last().Status!="local")throw new Exception("Local transcript not marked local");
@@ -92,7 +101,7 @@ internal static class CompanionChecks
         editor.Text=new ActionRules(1,[new(["来个舞蹈"],[new("dance","sway")])]).Serialize();Click(host.House,"保存动作规则");c.Draft="来个舞蹈";
         if(c.LocalRulePreview() is null)throw new Exception("Rule editor did not save and reload");
         c.SaveRules(rules);c.SavePreferences(before);c.Draft="";host.ShowHouse("home");
-        File.WriteAllText("artifacts/desktop-rules-smoke-result.txt","PASS: key-independent local send; actual desktop walk/run with floating chat, finite sequence, sleep, negative request rejection, local transcript exclusion, gameplay transfer to house. No external API requests.\n");
+        File.WriteAllText("artifacts/desktop-rules-smoke-result.txt","PASS: key-independent local send; actual desktop walk/run with floating chat, finite sequence, sleep, negative request rejection, local transcript exclusion, gameplay transfer to house; two screen laps after a completed drag gesture with bubble auto-collapse; explicit stop interrupts and subsequent movement recovers. No external API requests.\n");
     }
     public static async Task Creation(DesktopHost host,Controller c,Room3DView room)
     {

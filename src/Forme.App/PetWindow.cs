@@ -20,6 +20,7 @@ internal sealed class PetWindow : Window
     private readonly DispatcherTimer _bubbleTimeout=new(){Interval=TimeSpan.FromSeconds(8)};
     private Point _start;
     private bool _dragged;
+    private bool _dragging;
     private bool _edge;
     private bool _chatOpen;
     internal void ChatOpen(bool open){_chatOpen=open;Update();}
@@ -30,7 +31,7 @@ internal sealed class PetWindow : Window
     private bool _wanderReady;
     private bool _stepActive,_stepRun,_stepLap;
     private bool _allowChatWander;
-    private bool CanStep=>_stepActive&&IsVisible&&!_edge&&!_dragged&&!_c.AnimationSuspended;
+    private bool CanStep=>_stepActive&&IsVisible&&!_edge&&!_dragging&&!_c.AnimationSuspended;
     private Rect _wanderLimits;
     private string _lastIdle="";
     private string _modelId="";
@@ -63,9 +64,9 @@ internal sealed class PetWindow : Window
             var point=e.GetPosition(this);
             if(!_dragged && (Math.Abs(point.X-_start.X)>5 || Math.Abs(point.Y-_start.Y)>5))
             {
-                _dragged=true;_pet.ReleaseMouseCapture();_pet.Drag(true);
+                _dragged=true;_dragging=true;_pet.ReleaseMouseCapture();_pet.Drag(true);
                 try{DragMove();Clamp();if(ScreenCoordinateService.TryGetWindowRect(new WindowInteropHelper(this).Handle,out var rect))_c.SavePreferences(_c.Preferences with{PetX=rect.Left,PetY=rect.Top,PetPositionVersion=1});}catch(InvalidOperationException){}
-                finally{_pet.Drag(false);_wanderReady=false;}
+                finally{_dragging=false;_pet.Drag(false);_wanderReady=false;}
                 Update();
             }
         };
@@ -135,7 +136,8 @@ internal sealed class PetWindow : Window
         _pet.Economy(_c.Preferences.PerformanceMode=="economy");
         Topmost=_c.Preferences.Topmost;
         if(_c.Clock.Active){_bubble.Visibility=Visibility.Visible;UpdateTimer();}else if(_timerText.Text.StartsWith("专注")||_timerText.Text.StartsWith("休息")){_timerText.Text="";_bubble.Visibility=Visibility.Collapsed;}
-        if(!_edge){bool expanded=_bubble.Visibility==Visibility.Visible;Width=(expanded?240:190)*_c.Preferences.PetScale;Height=(expanded?435:260)*_c.Preferences.PetScale;_normalContent.RowDefinitions[0].Height=new GridLength(expanded?260:85);}
+        // A finite route uses the current native window bounds. Defer bubble resizing until it finishes.
+        if(!_edge&&!_stepActive){bool expanded=_bubble.Visibility==Visibility.Visible;Width=(expanded?240:190)*_c.Preferences.PetScale;Height=(expanded?435:260)*_c.Preferences.PetScale;_normalContent.RowDefinitions[0].Height=new GridLength(expanded?260:85);}
         var mode=_c.Preferences.PetIdleMode;if(_lastIdle!=mode){_lastIdle=mode;_wanderReady=false;_pet.StopAction();}_idleChoice.SelectedIndex=Array.IndexOf(IdleIds,mode);
         bool roaming=CanWander||CanStep;
         if(!roaming){_wanderReady=false;_wander.Pause();}
@@ -143,7 +145,7 @@ internal sealed class PetWindow : Window
         _pet.MotionSettings(_c.Preferences.ReducedMotion,_c.Preferences.Quiet,_c.AnimationSuspended||_edge);
         _pet.DesktopMotion(WanderFrame,roaming,()=>_wander.Moving);
     }
-    private bool CanWander=>IsVisible&&(!_chatOpen||_allowChatWander)&&!_edge&&!_dragged&&!_pet.IsMouseCaptured&&!_menu.IsOpen&&_bubble.Visibility!=Visibility.Visible&&!_c.Clock.Active&&!_c.Busy&&!_c.Preferences.Quiet&&!_c.Preferences.ReducedMotion&&!_c.AnimationSuspended&&_c.Preferences.PetIdleMode is "walk" or "run";
+    private bool CanWander=>IsVisible&&(!_chatOpen||_allowChatWander)&&!_edge&&!_dragging&&!_pet.IsMouseCaptured&&!_menu.IsOpen&&_bubble.Visibility!=Visibility.Visible&&!_c.Clock.Active&&!_c.Busy&&!_c.Preferences.Quiet&&!_c.Preferences.ReducedMotion&&!_c.AnimationSuspended&&_c.Preferences.PetIdleMode is "walk" or "run";
     internal void SetIdleMode(string mode){_wanderReady=false;_pet.StopAction();_c.SavePreferences(_c.Preferences with{PetIdleMode=mode});_bubbleTimeout.Stop();_bubbleTimeout.Start();Clamp();}
     internal void SetAiIdleMode(string mode){StopCommands();_allowChatWander=mode is "walk" or "run";_bubble.Visibility=Visibility.Collapsed;SetIdleMode(mode);}
     private int _commandGeneration;
@@ -180,7 +182,7 @@ internal sealed class PetWindow : Window
         while(true)
         {
             token.ThrowIfCancellationRequested();
-            if(!IsVisible||_edge||_dragged||_c.AnimationSuspended||!CompanionCommands.Allowed(command,_c.Preferences)||generation!=_commandGeneration){StopCommands();return false;}
+            if(!IsVisible||_edge||_dragging||_c.AnimationSuspended||!CompanionCommands.Allowed(command,_c.Preferences)||generation!=_commandGeneration){StopCommands();return false;}
             if(!_pet.Reacting&&!_stepActive)return true;
             await Task.Delay(100,token);
         }
