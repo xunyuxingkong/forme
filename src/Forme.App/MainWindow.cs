@@ -428,8 +428,8 @@ internal sealed partial class MainWindow : Window
         var send=Ui.AsyncButton("发送",Send,true);send.IsEnabled=!_c.Busy;
         var stop=Ui.Button("停止",_c.StopReply);stop.IsEnabled=_c.Busy;
         var lastUser=messages.LastOrDefault(x=>x.Role=="user");var retry=Ui.AsyncButton("重试最后消息",async()=>{if(lastUser is not null)await _c.Send(lastUser.Id);});retry.IsEnabled=!_c.Busy&&lastUser is not null&&_c.Secrets.Exists&&messages.LastOrDefault()?.Status is "error" or "stopped";
-        composer.Children.Add(input);composer.Children.Add(Ui.Row(send,stop,retry));
-        composer.Children.Add(Ui.Text("Enter 发送 · Shift+Enter 换行。动作识别只发本次输入；对话按预算分享历史和已启用记忆。发送内容可预览。",10,Ui.Muted));
+        composer.Children.Add(AttachmentControls.List(_c,this));composer.Children.Add(input);composer.Children.Add(Ui.Row(send,stop,AttachmentControls.PickButton(_c,this),retry));
+        composer.Children.Add(Ui.Text("Enter 发送 · Shift+Enter 换行。所选附件仅本次上传；可预览、移除。图片/PDF用量另计。带附件不执行动作。",10,Ui.Muted));
         Place(composer,4);return page;
     }
 }

@@ -55,7 +55,7 @@ public sealed record Preferences
         if (string.IsNullOrWhiteSpace(PetName)||UserName is null||ReplyStyle is null||RoleDescription is null||PetName.Length is < 1 or > 20 || UserName.Length > 30 || ReplyStyle.Length > 400 || RoleDescription.Length > 1200)
             throw new InvalidDataException("名字或回复偏好过长。");
         if(!new[]{"sprout","cat","fox","penguin"}.Contains(PetModel)||!new[]{"balanced","economy"}.Contains(PerformanceMode)||!new[]{"clear","rain","snow"}.Contains(Weather)||
-            !new[]{"companion","focus","story","custom"}.Contains(CharacterPreset)||ContextBudget is not (2048 or 4096 or 8192)||MaxReplyTokens is <128 or >1024||!double.IsFinite(Temperature)||Temperature is <0 or >1)
+            !new[]{"companion","focus","story","custom"}.Contains(CharacterPreset)||ContextBudget is not (2048 or 4096 or 8192 or 16384 or 32768 or 65536)||MaxReplyTokens is <128 or >1024||!double.IsFinite(Temperature)||Temperature is <0 or >1)
             throw new InvalidDataException("模型、场景或 AI 个性参数无效。");
         if (FocusMinutes is < 1 or > 180 || RestMinutes is < 1 or > 180 ||
             PetScale is < 0.7 or > 1.6 || !double.IsFinite(PetX) || !double.IsFinite(PetY) ||
@@ -100,7 +100,7 @@ public sealed record GameDiscovery(string ItemId,string Day);
 public sealed record GameAchievement(string Id,string Day);
 public sealed class ExportDocument
 {
-    public int SchemaVersion { get; set; } = 6;
+    public int SchemaVersion { get; set; } = Store.ExportVersion;
     public DateTimeOffset ExportedAt { get; set; } = DateTimeOffset.Now;
     public List<ChatSession>? Sessions { get; set; }
     public List<ChatMessage>? Messages { get; set; }

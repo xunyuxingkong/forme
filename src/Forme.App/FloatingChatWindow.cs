@@ -14,6 +14,8 @@ internal sealed class FloatingChatWindow : Window
     private readonly StackPanel _messages=new();
     private readonly ScrollViewer _scroll;
     private readonly TextBox _input;
+    private readonly StackPanel _attachments=new();
+    private readonly Button _pick;
     private readonly Button _send,_stop,_new;
     private TextBlock? _live;
     private bool _transfer,_composing,_probeStreaming;
@@ -29,9 +31,10 @@ internal sealed class FloatingChatWindow : Window
         Row(Ui.Row(_new,Ui.Button("完整聊天",()=>openHouse("chat")),Ui.Button("角色设置",()=>openHouse("settings")),Ui.Button("记忆",()=>openHouse("memory"))),1);
         _scroll=new(){Content=_messages,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Margin=new Thickness(0,0,0,8)};Row(_scroll,2);
         Row(_status,3);
-        _input=Ui.Input(c.Draft,true);_input.MinHeight=70;_input.MaxHeight=110;_input.TextChanged+=(_,_)=>c.Draft=_input.Text;Row(_input,4);
+        _input=Ui.Input(c.Draft,true);_input.MinHeight=70;_input.MaxHeight=110;_input.TextChanged+=(_,_)=>c.Draft=_input.Text;Row(Ui.Stack(_attachments,_input),4);
         _send=Ui.AsyncButton("发送",()=>ChatRequests.Send(c),true);_stop=Ui.Button("停止",c.StopReply);
-        Row(Ui.Row(_send,_stop,Ui.Button("发送预览",()=>ChatRequests.Preview(c,this)),Ui.Text("Enter发送 · Shift+Enter换行",10,Ui.Muted)),5);
+        _pick=AttachmentControls.PickButton(c,this);
+        Row(Ui.Stack(Ui.Row(_send,_stop,_pick,Ui.Button("发送预览",()=>ChatRequests.Preview(c,this))),Ui.Text("附件仅本次上传 · 图片/PDF用量另计 · 不执行动作",10,Ui.Muted)),5);
         Content=new Border{Background=Ui.Cream,Child=grid};
         TextCompositionManager.AddPreviewTextInputStartHandler(_input,(_,_)=>_composing=true);
         TextCompositionManager.AddPreviewTextInputHandler(_input,(_,_)=>_composing=false);
@@ -85,6 +88,7 @@ internal sealed class FloatingChatWindow : Window
         if(_c.PendingChatSave is {} unsaved)_messages.Children.Add(Ui.Card(Ui.Stack(Ui.Text("回复还未保存到磁盘",12,Ui.Sage),Ui.Text(ChatDisplay.Message(unsaved.Content),13),Ui.Row(Ui.Button("复制",()=>Clipboard.SetText(ChatDisplay.Message(unsaved.Content))),Ui.Button("重试保存",_c.RetryChatSave),Ui.Button("放弃保存",()=>{if(Ui.Confirm("放弃这条暂存回复的保存？"))_c.DiscardPendingSave();})))));
         if(_c.Busy){_live=Ui.Text("…",13);_messages.Children.Add(Ui.Card(Ui.Stack(Ui.Text(_c.Preferences.PetName,10,Ui.Muted),_live),new Thickness(10)));}
         if(_input.Text!=_c.Draft)_input.Text=_c.Draft;
+        _attachments.Children.Clear();_attachments.Children.Add(AttachmentControls.List(_c,this));_pick.IsEnabled=!_c.Busy;
         _send.IsEnabled=!_c.Busy;_stop.IsEnabled=_c.Busy;_new.IsEnabled=!_c.Busy;
         UpdateLive();_scroll.ScrollToEnd();
     }

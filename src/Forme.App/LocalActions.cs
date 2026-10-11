@@ -26,7 +26,7 @@ internal sealed partial class Controller
     private IntentResolution LocalIntent(string input)=>IntentResolver.Resolve(input,_actionRules,Preferences.PetName);
     public string? LocalRulePreview()
     {
-        if(!Preferences.LocalActionRules||_rulesError is not null)return null;
+        if(Attachments.Count>0||!Preferences.LocalActionRules||_rulesError is not null)return null;
         var resolved=LocalIntent(Draft.Trim());if(resolved.Intents.Count==0)return null;
         try
         {
@@ -42,7 +42,7 @@ internal sealed partial class Controller
     }
     public async Task<bool> TrySendLocal()
     {
-        if(!Preferences.LocalActionRules)return false;
+        if(Attachments.Count>0||!Preferences.LocalActionRules)return false;
         if(_rulesError is not null)throw new OperationFailureException(_rulesError+"，请在动作规则设置中修复或恢复默认。");
         var resolved=LocalIntent(Draft.Trim());if(resolved.Intents.Count==0)return false;
         if(Busy)return true;if(PendingChatSave is not null)throw new OperationFailureException("请先处理暂存回复。");

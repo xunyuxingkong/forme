@@ -6,7 +6,7 @@ namespace Forme.Core;
 public sealed partial class Store : IDisposable
 {
     public const int Version = DatabaseMigrator.CurrentVersion;
-    public const int ExportVersion = 6; // JSON compatibility evolves independently of SQLite indexes.
+    public const int ExportVersion = 7; // Attachment message markers; SQLite schema is unchanged.
     private readonly SqliteConnection _db;
     public string DirectoryPath { get; }
     public string BackupPath => Path.Combine(DirectoryPath, "recovery.json");
@@ -116,7 +116,7 @@ public sealed partial class Store : IDisposable
     private static void ValidateMood(MoodEntry m) { if (string.IsNullOrWhiteSpace(m.Id) || m.Mood.Length > 30 || m.Note.Length > 1000) throw new InvalidDataException("心情记录格式错误。"); }
     public static void ValidateExport(ExportDocument d)
     {
-        if (d.SchemaVersion is not (1 or 2 or 3 or 4 or 5 or ExportVersion)) throw new InvalidDataException("不支持的导出版本，原数据未修改。");
+        if (d.SchemaVersion is not (1 or 2 or 3 or 4 or 5 or 6 or ExportVersion)) throw new InvalidDataException("不支持的导出版本，原数据未修改。");
         if ((d.Sessions is null) != (d.Messages is null)) throw new InvalidDataException("聊天数据不完整。");
         if(d.Sessions is null&&(d.Memories is not null||d.Notes is not null))throw new InvalidDataException("记忆和摘要需要随聊天类别一起导入。");
         if (d.Sessions is null && d.Moods is null && d.Focus is null && d.Room is null) throw new InvalidDataException("文件没有可导入的数据。");
@@ -129,7 +129,7 @@ public sealed partial class Store : IDisposable
             Unique(d.Sessions.Select(x=>x.Id)); Unique(d.Messages!.Select(x=>x.Id));
             foreach (var s in d.Sessions) { AiClient.ValidateEndpoint(s.Endpoint); if (s.Title.Length > 120) throw new InvalidDataException("会话标题过长。"); }
             var ids = d.Sessions.Select(x=>x.Id).ToHashSet();
-            if (d.Messages!.Any(x=>!ids.Contains(x.SessionId) || x.Role is not ("user" or "assistant") || x.Status is not ("complete" or "stopped" or "error" or "streaming" or "local") || x.Content.Length>32000)) throw new InvalidDataException("消息记录无效。");
+            if (d.Messages!.Any(x=>!ids.Contains(x.SessionId) || x.Role is not ("user" or "assistant") || x.Status is not ("complete" or "stopped" or "error" or "streaming" or "local" or "attachment") || x.Content.Length>32000)) throw new InvalidDataException("消息记录无效。");
         }
         if (d.Focus is not null)
         {

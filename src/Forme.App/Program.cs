@@ -224,6 +224,7 @@ internal static class Smoke
         {
             Directory.CreateDirectory("artifacts/screenshots");
             if(Environment.GetCommandLineArgs().Contains("--rules-only")){c.SavePreferences(new Preferences{Onboarded=true});await CompanionChecks.DesktopRules(host,c);Environment.ExitCode=0;await host.Exit();return;}
+            if(Environment.GetCommandLineArgs().Contains("--attachments-only")){c.SavePreferences(new Preferences{Onboarded=true});await CompanionChecks.Attachments(host,c);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--creation-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);var creationRoom=Descendants(host.House!).OfType<Room3DView>().Single();await CompanionChecks.Creation(host,c,creationRoom);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--living-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);var living=Descendants(host.House!).OfType<Room3DView>().Single();await LivingChecks.Run(host,c,living);Environment.ExitCode=0;await host.Exit();return;}
             await PetAnimationChecks.Run();
@@ -373,6 +374,7 @@ internal static class Smoke
             host.Pet.CollapseToEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="edge"||host.Pet.Width>50||animatedPet.AnimationRunning)throw new Exception("Edge collapse not persisted or animation active");host.Pet.ExpandFromEdge();await Task.Delay(100);if(c.Preferences.DisplayMode!="pet"||host.Pet.Width<100||!animatedPet.AnimationRunning)throw new Exception("Edge restore failed");
             host.HidePet();
             await CompanionChecks.IntentPipeline(host,c);
+            await CompanionChecks.Attachments(host,c);
             File.WriteAllText("artifacts/smoke-result.txt",$"PASS: interchangeable pet adapter, idle/pat/rub/drag/landing, reduced/quiet/hidden/edge/minimized/suspended animation cleanup, room model replacement picking, 8 pages rendered, 3D geometry picking for all 6 activities, four camera-fit layouts, compact scene retained on settings change, focus drafts retained on refresh and navigation, responsive layout, day/night and rug previews, unchanged room geometry reuse, mood UI save, room preview rollback, bubble UI reward, focus persistence, watering deduplication, DPAPI roundtrip, native pet HWND no-activate and transparent-area hit test; structured intent pipeline.\nHouse private memory snapshot: {memory} MB\nTimestamp: {DateTimeOffset.Now:O}\n");
             Environment.ExitCode=0;
             if(File.Exists("artifacts/smoke-error.txt"))File.Delete("artifacts/smoke-error.txt");

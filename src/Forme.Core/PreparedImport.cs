@@ -144,7 +144,7 @@ public sealed class PreparedImport : IDisposable
                 json.Read(JsonTokenType.EndArray);
             }
             json.Read(JsonTokenType.EndObject);
-            if(json.Peek()!=JsonTokenType.None||version is not (1 or 2 or 3 or 4 or 5 or Store.ExportVersion)||plan._categories.Count==0||plan.HasChat!=plan._categories.Contains("Messages")||(!plan.HasChat&&(plan._categories.Contains("Memories")||plan._categories.Contains("Notes"))))throw new InvalidDataException("导入文件结构或版本无效。");
+            if(json.Peek()!=JsonTokenType.None||version is not (1 or 2 or 3 or 4 or 5 or 6 or Store.ExportVersion)||plan._categories.Count==0||plan.HasChat!=plan._categories.Contains("Messages")||(!plan.HasChat&&(plan._categories.Contains("Memories")||plan._categories.Contains("Notes"))))throw new InvalidDataException("导入文件结构或版本无效。");
             using var orphan=db.CreateCommand();orphan.Transaction=tx;orphan.CommandText="SELECT count(*) FROM messages WHERE session NOT IN (SELECT id FROM sessions)";
             if(Convert.ToInt64(orphan.ExecuteScalar())!=0)throw new InvalidDataException("消息所属会话缺失。");
             orphan.CommandText="SELECT count(*) FROM chat_notes WHERE session NOT IN (SELECT id FROM sessions)";if(Convert.ToInt64(orphan.ExecuteScalar())!=0)throw new InvalidDataException("摘要所属会话缺失。");

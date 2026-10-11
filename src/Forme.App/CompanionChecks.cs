@@ -14,6 +14,47 @@ namespace Forme.App;
 
 internal static class CompanionChecks
 {
+    public static async Task Attachments(DesktopHost host,Controller c)
+    {
+        var before=c.Preferences;
+        byte[] image=Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=");
+        var picture=AiAttachment.FromBytes("sample.png",image);
+        var pdf=AiAttachment.FromBytes("sample.pdf",Encoding.ASCII.GetBytes("%PDF-1.7\nmock"));
+        var text=AiAttachment.FromBytes("note.txt",Encoding.UTF8.GetBytes("ATTACHMENT_PRIVATE_BODY"));
+        try
+        {
+            host.HidePet();host.ShowPet();await Task.Delay(80);host.ShowFloatingChat();c.AddAttachments([picture]);host.FloatingChat!.UpdateLayout();
+            if(!Descendants(host.FloatingChat!).OfType<Button>().Any(b=>Equals(b.Content,"sample.png")))throw new Exception("Floating attachment list missing");
+            Click(host.FloatingChat!,"移除");if(c.Attachments.Count!=0)throw new Exception("Attachment remove failed");
+            c.AddAttachments([picture,pdf,text]);Click(host.FloatingChat!,"完整聊天");await Task.Delay(80);c.SavePreferences(c.Preferences with{ShowHome3D=false});host.House!.Width=1080;host.House.Height=685;host.House.UpdateLayout();
+            if(c.Attachments.Count!=3||!Descendants(host.House).OfType<Button>().Any(b=>Equals(b.Content,"note.txt")))throw new Exception("Attachment draft lost on chat transfer");
+            var input=Descendants(host.House).OfType<TextBox>().Single(x=>AutomationProperties.GetName(x)=="聊天消息");var history=Descendants(host.House).OfType<ScrollViewer>().Single(x=>x.Name=="聊天记录滚动区");
+            if(history.ActualHeight<60||!input.IsVisible)throw new Exception("Attachments hid chat composer or history");Image(host.House,"chat-attachments");
+            c.NewSession();if(c.Attachments.Count!=0)throw new Exception("New session retained attachments");
+
+            var handler=new OfflineReplyHandler{Reply="收到附件"};string directory=Path.Combine(c.Store.DirectoryPath,"attachments");
+            using var protocol=new Controller(directory,new AiClient(handler));protocol.Secrets.Save("offline-test-key");protocol.SavePreferences(protocol.Preferences with{AllowPetControl=true,AllowSceneControl=true});int actions=0;
+            protocol.ActionHandler=cmd=>{actions++;return new(ActionResultCode.Completed,cmd.Action,cmd.Value,"动作",TimeSpan.Zero);};protocol.AddAttachments([picture,pdf,text]);protocol.Draft="去池塘边";
+            if(await protocol.TrySendLocal())throw new Exception("Attachment entered local action route");await protocol.Send();
+            using(var request=JsonDocument.Parse(handler.LastRequest))if(request.RootElement.GetProperty("messages").EnumerateArray().Last().GetProperty("content").GetArrayLength()!=3)throw new Exception("Controller did not send multimodal body");
+            var saved=protocol.Store.Messages(protocol.Session!.Id);
+            if(actions!=0||protocol.Attachments.Count!=0||saved.Any(x=>x.Content.Contains("ATTACHMENT_PRIVATE_BODY")||x.Content.Contains("base64,")))throw new Exception("Attachment executed actions or leaked contents into database");
+            handler.Status=HttpStatusCode.BadRequest;protocol.AddAttachments([picture]);protocol.Draft="看图片";await protocol.Send();
+            string userId=protocol.Store.Messages(protocol.Session.Id).Last(x=>x.Role=="user").Id;
+            handler.Status=HttpStatusCode.OK;await protocol.Send(userId);
+            if(!handler.LastRequest.Contains("image_url")||handler.Calls!=3)throw new Exception("Manual retry omitted attachment or repeated automatically");
+            protocol.Draft="下一条普通消息";await protocol.Send();if(handler.LastRequest.Contains("image_url")||handler.LastRequest.Contains("ATTACHMENT_PRIVATE_BODY"))throw new Exception("Attachments silently entered later context");
+            protocol.AddAttachments([picture]);protocol.NewSession();if(protocol.Attachments.Count!=0)throw new Exception("New session retained file bytes");
+            string uploadDir=Path.Combine(directory,"selected");Directory.CreateDirectory(uploadDir);string imagePath=Path.Combine(uploadDir,"selected.png"),badPath=Path.Combine(uploadDir,"bad.exe");File.WriteAllBytes(imagePath,image);File.WriteAllBytes(badPath,[1]);
+            try{await protocol.AddAttachmentFiles([imagePath,badPath]);throw new Exception("Invalid batch accepted");}catch(InvalidDataException){}if(protocol.Attachments.Count!=0)throw new Exception("Invalid file batch partially changed draft");
+            var reading=protocol.AddAttachmentFiles([imagePath]);protocol.Cancel();await reading;if(protocol.Busy||protocol.Attachments.Count!=0)throw new Exception("Attachment loading cancellation failed");
+            handler.Status=HttpStatusCode.BadRequest;protocol.AddAttachments([picture]);protocol.Draft="再次看图片";await protocol.Send();userId=protocol.Store.Messages(protocol.Session!.Id).Last(x=>x.Role=="user").Id;
+            using var restart=new Controller(directory,new AiClient(new OfflineReplyHandler()));
+            try{await restart.Send(userId);throw new Exception("Restart silently retried without original file");}catch(OperationFailureException ex){if(!ex.Message.Contains("重新添加"))throw;}
+            File.WriteAllText("artifacts/attachments-smoke-result.txt","PASS: both composers attach/remove/share draft; compact layout; multipart image/PDF plus extracted text; attachment input cannot trigger local/AI actions; no file body in database or later history; manual retry preserves in-memory attachment, restart requires reselection; invalid batch atomicity and cancellation. Mock only, no external calls.\n");
+        }
+        finally{if(!c.Busy)c.NewSession();c.SavePreferences(before);host.ShowHouse("home");}
+    }
     public static async Task IntentPipeline(DesktopHost host,Controller c)
     {
         var before=c.Preferences;var world=c.Store.World();
@@ -50,12 +91,15 @@ internal static class CompanionChecks
         public bool Complete=true;
         public int Calls;
         public string Reply="[{\"type\":\"Dance\",\"mode\":\"sway\"}]";
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken cancellationToken)
+        public HttpStatusCode Status=HttpStatusCode.OK;
+        public string LastRequest="";
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken cancellationToken)
         {
             Calls++;
+            LastRequest=await request.Content!.ReadAsStringAsync(cancellationToken);
             string reply=Reply;
             string body="data: "+JsonSerializer.Serialize(new{choices=new[]{new{delta=new{content=reply}}}})+"\n\n"+(Complete?"data: [DONE]\n\n":"");
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(body,Encoding.UTF8,"text/event-stream")});
+            return new HttpResponseMessage(Status){Content=new StringContent(body,Encoding.UTF8,"text/event-stream")};
         }
     }
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
