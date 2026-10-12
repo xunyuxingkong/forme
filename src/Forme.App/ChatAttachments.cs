@@ -13,13 +13,14 @@ internal sealed partial class Controller
     {
         if(Busy)throw new OperationFailureException("请等待当前操作结束。");
         if(_attachments.Count+paths.Count>AiAttachment.MaxCount)throw new InvalidDataException("每次最多4个附件。");
-        var existing=_attachments.ToArray();using var cancel=new CancellationTokenSource();_attachmentRead=cancel;ChatStatus="正在本地读取附件，可点击停止；尚未上传。";Changed?.Invoke();
+        bool renderPdf=AiClient.RequiresPdfImages(Preferences.Endpoint);
+        var existing=_attachments.ToArray();using var cancel=new CancellationTokenSource();_attachmentRead=cancel;ChatStatus=renderPdf?"正在本地读取附件；PDF将转为页面图片（最多4页），可停止，尚未上传。":"正在本地读取附件，可点击停止；尚未上传。";Changed?.Invoke();
         try
         {
             var items=await Task.Run(async()=>
             {
                 var loaded=new List<AiAttachment>();
-                foreach(string path in paths){cancel.Token.ThrowIfCancellationRequested();loaded.Add(await AiAttachment.Read(path,cancel.Token));AiAttachment.Validate(existing.Concat(loaded).ToArray());}
+                foreach(string path in paths){cancel.Token.ThrowIfCancellationRequested();var item=await AiAttachment.Read(path,cancel.Token);AiAttachment.Validate(existing.Concat(loaded).Append(item).ToArray());if(renderPdf&&item.MediaType=="application/pdf")item=await PdfAttachments.Render(item,cancel.Token);loaded.Add(item);AiAttachment.Validate(existing.Concat(loaded).ToArray());}
                 return loaded;
             },cancel.Token);
             cancel.Token.ThrowIfCancellationRequested();_attachments.AddRange(items);ChatStatus="附件已添加，点击发送才会上传；可在发送预览查看。";

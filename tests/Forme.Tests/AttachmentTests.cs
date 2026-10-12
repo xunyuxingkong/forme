@@ -61,9 +61,10 @@ public sealed class AttachmentTests
             Assert.IsFalse(doc.RootElement.GetRawText().Contains("test-only-key"));
             return new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent("data: {\"choices\":[{\"delta\":{\"content\":\"看到了\"},\"finish_reason\":\"stop\"}]}\n\n",Encoding.UTF8,"text/event-stream")};
         }));
-        var turns=AiClient.BuildContext(new(),[],"看看附件",out _,attachments:[image,pdf,text]);
+        var settings=new Preferences{Endpoint="https://example.com/v1"};
+        var turns=AiClient.BuildContext(settings,[],"看看附件",out _,attachments:[image,pdf,text]);
         Assert.IsFalse(turns[^1].Preview.Contains("base64,"));Assert.IsTrue(turns[^1].Preview.Contains("document.pdf"));
-        await client.SendAsync(new(),"test-only-key",turns,_=>{},CancellationToken.None);Assert.AreEqual(1,calls);
+        await client.SendAsync(settings,"test-only-key",turns,_=>{},CancellationToken.None);Assert.AreEqual(1,calls);
         Assert.IsInstanceOfType<string>(new AiTurn("user","ordinary").WireContent());
         Assert.IsInstanceOfType<string>(new AiTurn("user","text",[text]).WireContent());
     }
@@ -92,5 +93,25 @@ public sealed class AttachmentTests
         store.SaveMessage(new("attachment-user",session.Id,"user","看看图片\n[本次附件：image.png；原内容未保存]","attachment",DateTimeOffset.Now));
         var export=store.Export(true,false,false,false);Store.ValidateExport(export);store.Import(export);Assert.AreEqual("attachment",store.Messages(session.Id).Single().Status);Assert.AreEqual(7,export.SchemaVersion);
         export.SchemaVersion=6;export.Messages=[export.Messages!.Single() with{Status="complete"}];Store.ValidateExport(export);store.Import(export);
+    }
+    [TestMethod]
+    public async Task DeepSeekPdfUsesOrderedPageImagesAndRejectsRawFileBeforeNetwork()
+    {
+        var raw=AiAttachment.FromBytes("scan.pdf",Encoding.ASCII.GetBytes("%PDF-1.7 mock"));var image=Image();
+        var settings=new Preferences{Endpoint="https://api.deepseek.com",Model="deepseek-v4-flash"};
+        Assert.ThrowsExactly<InvalidDataException>(()=>AiClient.BuildContext(settings,[],"读文件",out _,attachments:[raw]));
+        Assert.ThrowsExactly<InvalidDataException>(()=>AiAttachment.FromPdfPages("scan.pdf",100,Enumerable.Repeat(image,5).ToArray()));
+        var rendered=AiAttachment.FromPdfPages("scan.pdf",100,[image,image]);Assert.IsNull(rendered.DataUrl);Assert.AreEqual(2,rendered.Pages.Count);
+        int calls=0;using var client=new AiClient(new FakeHandler(async(request,token)=>
+        {
+            calls++;using var doc=JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));var root=doc.RootElement;
+            Assert.AreEqual("deepseek-v4-flash",root.GetProperty("model").GetString());Assert.AreEqual("disabled",root.GetProperty("thinking").GetProperty("type").GetString());
+            var parts=root.GetProperty("messages").EnumerateArray().Last().GetProperty("content");Assert.AreEqual(3,parts.GetArrayLength());Assert.IsTrue(parts[0].GetProperty("text").GetString()!.Contains("scan.pdf"));
+            foreach(var part in parts.EnumerateArray().Skip(1)){Assert.AreEqual("image_url",part.GetProperty("type").GetString());Assert.AreEqual(image.DataUrl,part.GetProperty("image_url").GetProperty("url").GetString());}
+            Assert.IsFalse(root.GetRawText().Contains("application/pdf;base64"));
+            return new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n")};
+        }));
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(async()=>await client.SendAsync(settings,"test-key",[new("user","read",[raw])],_=>{},CancellationToken.None));Assert.AreEqual(0,calls);
+        var turns=AiClient.BuildContext(settings,[],"read",out _,attachments:[rendered]);await client.SendAsync(settings,"test-key",turns,_=>{},CancellationToken.None);Assert.AreEqual(1,calls);
     }
 }

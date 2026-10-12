@@ -10,7 +10,7 @@ Windows 上的 3D 桌面伙伴与陪伴小屋。可以和伙伴互动、在小�
 
 当前目标为 Windows 11 x64。安装包未做商业代码签名；其他系统和架构未列为已验证支持。
 
-聊天支持主动添加图片、PDF、文本及DOCX，选择后可预览／移除，点击发送才上传。原附件仅本次发送，不存聊天数据库。图片需要视觉模型，PDF另外需要服务商支持文件消息。详见[附件聊天实现与验收记录](docs/附件聊天实现与验收记录.md)。
+聊天支持主动添加图片、PDF、文本及DOCX，选择后可预览／移除，点击发送才上传。原附件仅本次发送，不存聊天数据库。图片需要视觉模型；DeepSeek官方PDF在本地转为页面图片（最多4页），其他服务需支持文件消息。详见[附件聊天实现与验收记录](docs/附件聊天实现与验收记录.md)。
 
 ## 如何使用
 
@@ -69,12 +69,12 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Package
 
 # 资源采样：默认预热2分钟、采样10分钟；比较时每个状态单独启动进程
 .tools/dotnet/dotnet.exe build src/Forme.App/Forme.App.csproj -c Release --no-restore '-p:FormeDevelopmentTools=true'
-.tools/dotnet/dotnet.exe src/Forme.App/bin/Release/net10.0-windows/Forme.dll --probe
+.tools/dotnet/dotnet.exe src/Forme.App/bin/Release/net10.0-windows10.0.19041.0/Forme.dll --probe
 
 # 可选状态：pet-idle/pet-sleep/pet-walk/pet-run、house-indoor-idle/house-indoor-moving、
 # house-outdoor-idle/house-outdoor-moving、floating-chat-idle/floating-chat-streaming-mock、
 # tray-cold/tray-after-100-switches。流式模拟不会调用AI服务。
-.tools/dotnet/dotnet.exe src/Forme.App/bin/Release/net10.0-windows/Forme.dll --probe --probe-state house-outdoor-moving --probe-warmup 120 --probe-seconds 600
+.tools/dotnet/dotnet.exe src/Forme.App/bin/Release/net10.0-windows10.0.19041.0/Forme.dll --probe --probe-state house-outdoor-moving --probe-warmup 120 --probe-seconds 600
 ```
 
 检查数据与截图在 `artifacts`，与正式个人数据隔离。自动化检查不向真实 AI 服务发送请求。不要将私人的数据库、密钥或导出文件放入仓库。

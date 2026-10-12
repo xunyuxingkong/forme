@@ -6,6 +6,7 @@ $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
 $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
 $formeRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location -LiteralPath $formeRoot
+$formeAppFramework = ([xml](Get-Content -LiteralPath 'src/Forme.App/Forme.App.csproj' -Raw)).SelectSingleNode('/Project/PropertyGroup/TargetFramework').InnerText
 $formeVersion = ([xml](Get-Content -LiteralPath 'Directory.Build.props' -Raw)).Project.PropertyGroup.FormeVersion
 if ($formeVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Directory.Build.props must define a numeric FormeVersion' }
 $formeSdk = Join-Path $formeRoot '.tools/dotnet/dotnet.exe'
@@ -22,7 +23,7 @@ if ($Test) {
 }
 if ($Smoke) {
     Invoke-FormeDotnet build src/Forme.App/Forme.App.csproj -c Release --no-restore --nologo '-p:FormeDevelopmentTools=true'
-    Invoke-FormeDotnet src/Forme.App/bin/Release/net10.0-windows/Forme.dll --smoke
+    Invoke-FormeDotnet "src/Forme.App/bin/Release/$formeAppFramework/Forme.dll" --smoke
 }
 if ($Package) {
     $formePublish = [IO.Path]::GetFullPath((Join-Path $formeRoot $PublishDirectory))

@@ -1,13 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>Forme</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <StartupObject>Forme.App.Program</StartupObject>
     <ApplicationIcon>Assets/forme.ico</ApplicationIcon>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
-    <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <!-- Avoid decompressing framework assemblies into private memory on every launch. -->
@@ -20,7 +19,9 @@
   <ItemGroup Condition="'$(FormeDevelopmentTools)' != 'true'">
     <Compile Remove="Probe.cs;PetAnimationChecks.cs;CompanionChecks.cs;BoatChecks.cs;LivingChecks.cs" />
   </ItemGroup>
-  <ItemGroup><ProjectReference Include="../Forme.Core/Forme.Core.csproj" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Forme.Core/Forme.Core.csproj" />
+  </ItemGroup>
   <ItemGroup><EmbeddedResource Include="Assets/forme.ico" LogicalName="Forme.Icon" /></ItemGroup>
   <ItemGroup><Using Include="System"/><Using Include="System.IO"/><Using Include="System.Linq"/><Using Include="System.Collections.Generic"/><Using Include="System.Threading"/><Using Include="System.Threading.Tasks"/></ItemGroup>
 </Project>

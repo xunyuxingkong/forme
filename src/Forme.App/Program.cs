@@ -16,6 +16,14 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if(args.FirstOrDefault()=="--render-pdf")
+        {
+#if FORME_DEVELOPMENT_TOOLS
+            if(args.Contains("--pdf-worker-stall"))Thread.Sleep(Timeout.Infinite);
+#endif
+            // The conversion worker never creates windows, opens the user store, or reads credentials.
+            return Task.Run(PdfAttachments.Worker).GetAwaiter().GetResult();
+        }
         var app=new Application {ShutdownMode=ShutdownMode.OnExplicitShutdown};Ui.InstallStyles(app);
         string data=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Forme");
 #if FORME_DEVELOPMENT_TOOLS

@@ -33,19 +33,28 @@ internal static class AttachmentControls
     public static void Preview(AiAttachment item,Window owner)
     {
         UIElement body;
-        if(item.Text is {} content){var text=Ui.Input(content,true,100000,"附件提取文字");text.IsReadOnly=true;body=text;}
+        if(item.IsRenderedPdf)
+        {
+            var pages=Ui.Stack();int index=0;
+            foreach(var page in item.Pages){pages.Children.Add(Ui.Text($"第{++index}页",12,Ui.Muted));pages.Children.Add(ImageView(page));}body=pages;
+        }
+        else if(item.Text is {} content){var text=Ui.Input(content,true,100000,"附件提取文字");text.IsReadOnly=true;body=text;}
         else if(item.IsImage && item.MediaType!="image/webp")
         {
-            try
-            {
-                string data=item.DataUrl!;using var stream=new MemoryStream(Convert.FromBase64String(data[(data.IndexOf(',')+1)..]));
-                var bitmap=new BitmapImage();bitmap.BeginInit();bitmap.CacheOption=BitmapCacheOption.OnLoad;bitmap.DecodePixelWidth=640;bitmap.StreamSource=stream;bitmap.EndInit();bitmap.Freeze();
-                body=new Image{Source=bitmap,MaxHeight=360,Stretch=System.Windows.Media.Stretch.Uniform};
-            }
-            catch(Exception ex) when(ex is NotSupportedException or FileFormatException or ArgumentException){body=Ui.Text("无法显示图片预览，请检查图片是否有效。",13);}
+            body=ImageView(item);
         }
         else body=Ui.Text(item.IsImage?"WebP将按原文件发送，当前预览不解码。":"PDF将按原文件发送，需服务商支持PDF文件输入。",13);
         var window=new Window{Title="附件预览 · 尚未上传",Owner=owner,Width=640,Height=520,WindowStartupLocation=WindowStartupLocation.CenterOwner};
-        window.Content=Ui.Card(new ScrollViewer{VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Content=Ui.Stack(Ui.Text(item.Label,13),Ui.Text(item.Text is null?"原文件随本次消息发送；原内容不保存到聊天记录。":"仅发送提取文字。DOCX中的图片、批注和页眉页脚不发送；原内容不保存到聊天记录。",12,Ui.Muted),body)});window.ShowDialog();
+        window.Content=Ui.Card(new ScrollViewer{VerticalScrollBarVisibility=ScrollBarVisibility.Auto,Content=Ui.Stack(Ui.Text(item.Label,13),Ui.Text(item.IsRenderedPdf?"将发送本地转换的全部页面图片，不发送原PDF；仅本次发送，不保存到聊天记录。":item.Text is null?"原文件随本次消息发送；原内容不保存到聊天记录。":"仅发送提取文字。DOCX中的图片、批注和页眉页脚不发送；原内容不保存到聊天记录。",12,Ui.Muted),body)});window.ShowDialog();
+    }
+    private static UIElement ImageView(AiAttachment item)
+    {
+        try
+        {
+            string data=item.DataUrl!;using var stream=new MemoryStream(Convert.FromBase64String(data[(data.IndexOf(',')+1)..]));
+            var bitmap=new BitmapImage();bitmap.BeginInit();bitmap.CacheOption=BitmapCacheOption.OnLoad;bitmap.DecodePixelWidth=640;bitmap.StreamSource=stream;bitmap.EndInit();bitmap.Freeze();
+            return new Image{Source=bitmap,MaxHeight=360,Stretch=System.Windows.Media.Stretch.Uniform};
+        }
+        catch(Exception ex) when(ex is NotSupportedException or FileFormatException or ArgumentException){return Ui.Text("无法显示图片预览，请检查图片是否有效。",13);}
     }
 }

@@ -33,7 +33,7 @@ internal static class CompanionChecks
             c.NewSession();if(c.Attachments.Count!=0)throw new Exception("New session retained attachments");
 
             var handler=new OfflineReplyHandler{Reply="收到附件"};string directory=Path.Combine(c.Store.DirectoryPath,"attachments");
-            using var protocol=new Controller(directory,new AiClient(handler));protocol.Secrets.Save("offline-test-key");protocol.SavePreferences(protocol.Preferences with{AllowPetControl=true,AllowSceneControl=true});int actions=0;
+            using var protocol=new Controller(directory,new AiClient(handler));protocol.Secrets.Save("offline-test-key");protocol.SavePreferences(protocol.Preferences with{Endpoint="https://example.com/v1",AllowPetControl=true,AllowSceneControl=true});int actions=0;
             protocol.ActionHandler=cmd=>{actions++;return new(ActionResultCode.Completed,cmd.Action,cmd.Value,"动作",TimeSpan.Zero);};protocol.AddAttachments([picture,pdf,text]);protocol.Draft="去池塘边";
             if(await protocol.TrySendLocal())throw new Exception("Attachment entered local action route");await protocol.Send();
             using(var request=JsonDocument.Parse(handler.LastRequest))if(request.RootElement.GetProperty("messages").EnumerateArray().Last().GetProperty("content").GetArrayLength()!=3)throw new Exception("Controller did not send multimodal body");
@@ -51,9 +51,55 @@ internal static class CompanionChecks
             handler.Status=HttpStatusCode.BadRequest;protocol.AddAttachments([picture]);protocol.Draft="再次看图片";await protocol.Send();userId=protocol.Store.Messages(protocol.Session!.Id).Last(x=>x.Role=="user").Id;
             using var restart=new Controller(directory,new AiClient(new OfflineReplyHandler()));
             try{await restart.Send(userId);throw new Exception("Restart silently retried without original file");}catch(OperationFailureException ex){if(!ex.Message.Contains("重新添加"))throw;}
-            File.WriteAllText("artifacts/attachments-smoke-result.txt","PASS: both composers attach/remove/share draft; compact layout; multipart image/PDF plus extracted text; attachment input cannot trigger local/AI actions; no file body in database or later history; manual retry preserves in-memory attachment, restart requires reselection; invalid batch atomicity and cancellation. Mock only, no external calls.\n");
+            var deepseekHandler=new OfflineReplyHandler{Reply="收到PDF页面"};using var deepseek=new Controller(Path.Combine(directory,"deepseek"),new AiClient(deepseekHandler));deepseek.Secrets.Save("offline-test-key");deepseek.SavePreferences(deepseek.Preferences with{Model="deepseek-v4-flash"});
+            string pdfPath=Path.Combine(uploadDir,"two-pages.pdf");File.WriteAllBytes(pdfPath,PdfFixture(2));File.WriteAllBytes("artifacts/pdf-worker-fixture.pdf",PdfFixture(2));
+            var timer=System.Diagnostics.Stopwatch.StartNew();await deepseek.AddAttachmentFiles([pdfPath]);timer.Stop();
+            var converted=deepseek.Attachments.Single();if(!converted.IsRenderedPdf||converted.Pages.Count!=2||converted.DataUrl is not null)throw new Exception("Native PDF conversion did not produce all pages");
+            string pageData=converted.Pages[0].DataUrl!;File.WriteAllBytes("artifacts/screenshots/pdf-local-page.png",Convert.FromBase64String(pageData[(pageData.IndexOf(',')+1)..]));
+            deepseek.Draft="读这个PDF";await deepseek.Send();
+            using(var request=JsonDocument.Parse(deepseekHandler.LastRequest))
+            {
+                var root=request.RootElement;var parts=root.GetProperty("messages").EnumerateArray().Last().GetProperty("content");
+                if(root.GetProperty("model").GetString()!="deepseek-v4-flash"||parts.GetArrayLength()!=3||parts.EnumerateArray().Skip(1).Any(x=>x.GetProperty("type").GetString()!="image_url")||deepseekHandler.LastRequest.Contains("application/pdf;base64"))throw new Exception("DeepSeek PDF wire format or model changed");
+                for(int page=0;page<2;page++)if(parts[page+1].GetProperty("image_url").GetProperty("url").GetString()!=converted.Pages[page].DataUrl)throw new Exception("PDF page order changed");
+            }
+            File.WriteAllBytes(pdfPath,PdfFixture(5));try{await deepseek.AddAttachmentFiles([pdfPath]);throw new Exception("Long PDF silently truncated");}catch(InvalidDataException ex){if(!ex.Message.Contains("拆分"))throw;}if(deepseek.Attachments.Count!=0)throw new Exception("Rejected PDF added partial pages");
+            File.WriteAllBytes(pdfPath,PdfFixture(1,8000,6000));await deepseek.AddAttachmentFiles([pdfPath]);
+            var giant=deepseek.Attachments.Single();string giantData=giant.Pages.Single().DataUrl!;
+            using(var pixels=new MemoryStream(Convert.FromBase64String(giantData[(giantData.IndexOf(',')+1)..])))
+            {var frame=new PngBitmapDecoder(pixels,BitmapCreateOptions.None,BitmapCacheOption.OnLoad).Frames[0];if(frame.PixelWidth>1536||frame.PixelHeight>1536)throw new Exception("PDF raster dimensions exceeded bound");}
+            deepseek.RemoveAttachment(giant);
+            File.WriteAllBytes(pdfPath,Encoding.ASCII.GetBytes("%PDF-1.7 malformed"));try{await deepseek.AddAttachmentFiles([pdfPath]);throw new Exception("Malformed PDF accepted");}catch(Exception ex) when(ex is InvalidDataException or TimeoutException){}if(deepseek.Attachments.Count!=0)throw new Exception("Malformed PDF added pages");
+            var stallSource=AiAttachment.FromBytes("stall.pdf",PdfFixture(1));PdfAttachments.StallWorkerForSmoke=true;
+            try
+            {
+                try{await PdfAttachments.Render(stallSource,CancellationToken.None,TimeSpan.FromMilliseconds(300));throw new Exception("Stalled PDF worker did not time out");}catch(TimeoutException){}
+                if(!PdfAttachments.LastWorkerExitedForSmoke)throw new Exception("Timed-out PDF worker survived");
+                using var stopped=new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+                try{await PdfAttachments.Render(stallSource,stopped.Token);throw new Exception("Stalled PDF worker ignored cancellation");}catch(OperationCanceledException){}
+                if(!PdfAttachments.LastWorkerExitedForSmoke)throw new Exception("Cancelled PDF worker survived");
+            }
+            finally{PdfAttachments.StallWorkerForSmoke=false;}
+            File.WriteAllBytes(pdfPath,PdfFixture(1));var converting=deepseek.AddAttachmentFiles([pdfPath]);deepseek.Cancel();await converting;if(deepseek.Attachments.Count!=0||deepseek.Busy)throw new Exception("PDF cancellation failed");
+            File.WriteAllText("artifacts/pdf-attachments-smoke-result.txt",$"PASS: isolated Windows PDF rendering; all 2 pages sent as ordered image_url parts to deepseek-v4-flash; raw PDF absent; 5-page PDF rejected without partial draft; large page raster <=1536 px; malformed PDF rejected; stalled worker timeout/cancellation terminates worker; atomicity. Two-page conversion {timer.Elapsed.TotalMilliseconds:0} ms on this machine; source {PdfFixture(2).Length} bytes, bounded payload {converted.ByteCount} bytes. Mock network only.\n");
+            File.WriteAllText("artifacts/attachments-smoke-result.txt","PASS: both composers attach/remove/share draft; compact layout; multipart image/PDF plus extracted text; attachment input cannot trigger local/AI actions; no file body in database or later history; manual retry preserves in-memory attachment, restart requires reselection; invalid batch atomicity and cancellation; real local PDF rendering for DeepSeek with page-limit/atomicity/cancellation checks. Mock only, no external calls.\n");
         }
         finally{if(!c.Busy)c.NewSession();c.SavePreferences(before);host.ShowHouse("home");}
+    }
+    private static byte[] PdfFixture(int pages,int width=300,int height=200)
+    {
+        var objects=new List<string>{"<< /Type /Catalog /Pages 2 0 R >>","<< /Type /Pages /Count "+pages+" /Kids ["+string.Join(' ',Enumerable.Range(0,pages).Select(i=>$"{4+i*2} 0 R"))+"] >>","<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"};
+        for(int i=0;i<pages;i++)
+        {
+            string content=$"BT /F1 24 Tf 40 150 Td (FORME PDF PAGE {i+1}) Tj ET";
+            objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Resources << /Font << /F1 3 0 R >> >> /Contents {5+i*2} 0 R >>");
+            objects.Add($"<< /Length {Encoding.ASCII.GetByteCount(content)} >>\nstream\n{content}\nendstream");
+        }
+        var pdf=new StringBuilder("%PDF-1.4\n");var offsets=new List<int>{0};
+        for(int i=0;i<objects.Count;i++){offsets.Add(Encoding.ASCII.GetByteCount(pdf.ToString()));pdf.Append($"{i+1} 0 obj\n{objects[i]}\nendobj\n");}
+        int xref=Encoding.ASCII.GetByteCount(pdf.ToString());pdf.Append($"xref\n0 {objects.Count+1}\n0000000000 65535 f \n");
+        foreach(int offset in offsets.Skip(1))pdf.Append($"{offset:0000000000} 00000 n \n");
+        pdf.Append($"trailer\n<< /Size {objects.Count+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");return Encoding.ASCII.GetBytes(pdf.ToString());
     }
     public static async Task IntentPipeline(DesktopHost host,Controller c)
     {

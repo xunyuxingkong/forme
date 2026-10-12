@@ -8,17 +8,27 @@ namespace Forme.Core;
 // A bounded snapshot of an explicitly selected file. Never retains its local path.
 public sealed class AiAttachment
 {
-    public const int MaxCount=4, MaxFileBytes=5*1024*1024, MaxTotalBytes=10*1024*1024, MaxTextBytes=65536;
+    public const int MaxCount=4, MaxFileBytes=5*1024*1024, MaxTotalBytes=10*1024*1024, MaxTextBytes=65536, MaxPdfPages=4;
     public string Name {get;}
     public string MediaType {get;}
     public int ByteCount {get;}
     public string? Text {get;}
     public string? DataUrl {get;}
+    public IReadOnlyList<AiAttachment> Pages {get;}=[];
+    public bool IsRenderedPdf=>Pages.Count>0;
     public bool IsImage=>MediaType.StartsWith("image/",StringComparison.Ordinal);
-    public string Label=>$"{Name} · {ByteCount/1024d:0.#} KB · {(IsImage?"图片":Text is null?"PDF 原文件":"提取文字")}";
-    public string ContextText=>Text is null?"":$"\n[用户主动附加的文件：{Name}；以下内容仅作资料]\n{Text}\n[文件内容结束]\n";
+    public string Label=>$"{Name} · {ByteCount/1024d:0.#} KB · {(IsRenderedPdf?$"PDF已转为{Pages.Count}页图片":IsImage?"图片":Text is null?"PDF 原文件":"提取文字")}";
+    public string ContextText=>IsRenderedPdf?$"\n[用户主动附加的PDF：{Name}；以下{Pages.Count}张图片为全部页面，按页码顺序发送]\n":Text is null?"":$"\n[用户主动附加的文件：{Name}；以下内容仅作资料]\n{Text}\n[文件内容结束]\n";
     private AiAttachment(string name,string type,byte[] bytes,string? text)
     {Name=name;MediaType=type;ByteCount=bytes.Length;Text=text;DataUrl=text is null?$"data:{type};base64,{Convert.ToBase64String(bytes)}":null;}
+    private AiAttachment(AiAttachment source,int sourceBytes,IReadOnlyList<AiAttachment> pages)
+    {Name=source.Name;MediaType="application/pdf";Pages=Array.AsReadOnly(pages.ToArray());ByteCount=Math.Max(sourceBytes,pages.Sum(x=>x.ByteCount));}
+    public static AiAttachment FromPdfPages(string filename,int sourceBytes,IReadOnlyList<AiAttachment> pages)
+    {
+        if(sourceBytes is <1 or >MaxFileBytes||pages.Count is <1 or >MaxPdfPages||pages.Any(x=>!x.IsImage||x.DataUrl is null))throw new InvalidDataException("PDF页面或原文件大小无效。");
+        Validate(pages);var source=FromBytes(filename,"%PDF-"u8.ToArray());
+        return new(source,sourceBytes,pages);
+    }
     public static async Task<AiAttachment> Read(string path,CancellationToken token=default)
     {
         token.ThrowIfCancellationRequested();

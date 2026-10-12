@@ -14,7 +14,8 @@ public sealed record AiTurn(string Role, string Content, IReadOnlyList<AiAttachm
         if(Attachments is not {Count:>0})return Content;
         var parts=new List<object>{new {type="text",text=TextContent}};
         foreach(var item in Attachments.Where(x=>x.Text is null))
-            parts.Add(item.IsImage?(object)new {type="image_url",image_url=new {url=item.DataUrl,detail="auto"}}:new {type="file",file=new {filename=item.Name,file_data=item.DataUrl}});
+            if(item.IsRenderedPdf)foreach(var page in item.Pages)parts.Add(new {type="image_url",image_url=new {url=page.DataUrl,detail="auto"}});
+            else parts.Add(item.IsImage?(object)new {type="image_url",image_url=new {url=item.DataUrl,detail="auto"}}:new {type="file",file=new {filename=item.Name,file_data=item.DataUrl}});
         return parts.Count==1?TextContent:parts;
     }
 }
@@ -54,12 +55,18 @@ public sealed class AiClient : IDisposable
         return $"custom:{uri.Scheme}://{uri.Authority}";
     }
     public static bool SameEndpoint(string left,string right)=>NormalizeEndpoint(left).Equals(NormalizeEndpoint(right),StringComparison.OrdinalIgnoreCase);
+    public static bool RequiresPdfImages(string endpoint)=>ValidateEndpoint(endpoint).Host.Equals("api.deepseek.com",StringComparison.OrdinalIgnoreCase);
+    private static void ValidateProviderAttachments(string endpoint,IReadOnlyList<AiAttachment> attachments)
+    {
+        if(RequiresPdfImages(endpoint)&&attachments.Any(x=>x.MediaType=="application/pdf"&&!x.IsRenderedPdf))throw new InvalidDataException("DeepSeek需将PDF转为页面图片。请移除并重新添加PDF，本地转换后再发送；未联网。");
+    }
     // UTF-8 byte count is deliberately conservative for byte-based text tokenizers.
     // Includes a framing allowance per turn; not an exact provider billing token count.
     public static int Estimate(AiTurn turn) => Encoding.UTF8.GetByteCount(turn.TextContent)+32;
     public static List<AiTurn> BuildContext(Preferences p, IReadOnlyList<ChatMessage> history, string input, out bool trimmed,IReadOnlyList<ChatMemory>? memories=null,ChatNote? note=null,string? scene=null,IReadOnlyList<AiAttachment>? attachments=null)
     {
         AiAttachment.Validate(attachments??[]);
+        ValidateProviderAttachments(p.Endpoint,attachments??[]);
         if(string.IsNullOrWhiteSpace(input)&&attachments is {Count:>0})input="请阅读我本次上传的附件。";
         if(input.EnumerateRunes().Count()>2000 || string.IsNullOrWhiteSpace(input)) throw new InvalidDataException("请输入内容，最多 2,000 个字符。");
         p.Validate();
@@ -122,6 +129,7 @@ public sealed class AiClient : IDisposable
             var uri=new Uri(baseUri.AbsoluteUri.TrimEnd('/')+"/chat/completions");
             foreach(var turn in turns){AiAttachment.Validate(turn.Attachments??[]);if(turn.Attachments is {Count:>0}&&turn.Role!="user")throw new InvalidDataException("附件只能随用户消息发送。");}
             AiAttachment.Validate(turns.SelectMany(x=>x.Attachments??[]).ToArray());
+            ValidateProviderAttachments(settings.Endpoint,turns.SelectMany(x=>x.Attachments??[]).ToArray());
             var payload=new Dictionary<string,object> { ["model"]=settings.Model,["messages"]=turns.Select(t=>new {role=t.Role,content=t.WireContent()}),["stream"]=true,["max_tokens"]=settings.MaxReplyTokens,["temperature"]=settings.Temperature };
             if(baseUri.Host.Equals("api.deepseek.com",StringComparison.OrdinalIgnoreCase)) payload["thinking"]=new {type="disabled"};
             if(baseUri.Host.Equals("api.siliconflow.cn",StringComparison.OrdinalIgnoreCase)&&
@@ -140,7 +148,7 @@ public sealed class AiClient : IDisposable
                     HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden=>"认证失败，请检查密钥或服务权限。",
                     HttpStatusCode.PaymentRequired=>"服务余额不足，请到服务商处检查。",
                     HttpStatusCode.TooManyRequests=>"额度或频率受限，请检查服务商账户，稍后手动重试。",
-                    HttpStatusCode.BadRequest or HttpStatusCode.UnsupportedMediaType or HttpStatusCode.UnprocessableEntity when turns.Any(x=>x.Attachments is {Count:>0})=>"服务拒绝了附件请求。请确认模型支持图片，PDF还需服务支持file消息格式；也请检查文字预算及输出参数。未自动转换或重试。",
+                    HttpStatusCode.BadRequest or HttpStatusCode.UnsupportedMediaType or HttpStatusCode.UnprocessableEntity when turns.Any(x=>x.Attachments is {Count:>0})=>RequiresPdfImages(settings.Endpoint)?"服务拒绝了附件请求（DeepSeek）。请检查模型名称、所选附件对应的输入能力、文字预算及输出参数。未自动重试。":"服务拒绝了附件请求。请确认模型支持图片，PDF还需服务支持file消息格式；也请检查文字预算及输出参数。未自动转换或重试。",
                     _ when (int)response.StatusCode>=300 && (int)response.StatusCode<400=>"服务返回重定向，为保护凭据未跟随，请核对地址。",
                     _=>$"服务返回 HTTP {(int)response.StatusCode}，请检查连接或模型设置。"
                 });
