@@ -6,7 +6,7 @@ internal sealed partial class MainWindow
 {
     private UIElement ActionRuleSettings()
     {
-        var enabled=Ui.Check("明确动作先由本地规则和意图解析处理（不调用AI）",_c.Preferences.LocalActionRules);
+        var enabled=Ui.Check("AI未连接时启用本地动作快捷规则",_c.Preferences.LocalActionRules);
         enabled.Click+=(_,_)=>_c.SavePreferences(_c.Preferences with{LocalActionRules=enabled.IsChecked==true});
         var input=Ui.Input(_c.RulesText(),true,32768,"动作规则JSON");input.Height=240;input.VerticalScrollBarVisibility=ScrollBarVisibility.Auto;
         var status=Ui.Text(_c.ActionRulesStatus,12,Ui.Muted);

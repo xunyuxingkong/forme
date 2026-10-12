@@ -360,7 +360,7 @@ internal sealed partial class MainWindow : Window
         foreach(var height in new[]{GridLength.Auto,GridLength.Auto,GridLength.Auto,new GridLength(1,GridUnitType.Star),GridLength.Auto})page.RowDefinitions.Add(new(){Height=height});
         void Place(UIElement child,int row){Grid.SetRow(child,row);page.Children.Add(child);}
         var provider=AiClient.ProviderIdentity(_c.Preferences.Endpoint);
-        string endpoint=_c.Secrets.Exists?(_c.Preferences.LocalActionRules?"本地理解优先 · AI服务：":"发送至 ")+_c.Preferences.Endpoint+" · "+_c.Preferences.Model:"尚未连接 AI · 本地互动仍可使用";
+        string endpoint=_c.Secrets.Exists?"AI理解与聊天 · "+_c.Preferences.Endpoint+" · "+_c.Preferences.Model:"尚未连接 AI · 本地动作规则可继续使用";
         Place(Ui.Stack(Ui.Text("我在这里，听你说",24,null,true),Ui.Text(endpoint,11,Ui.Muted)),0);
 
         var sessions=_c.Store.Sessions(_sessionOffset,10);

@@ -26,7 +26,7 @@ internal sealed partial class Controller
     private IntentResolution LocalIntent(string input)=>IntentResolver.Resolve(input,_actionRules,Preferences.PetName);
     public string? LocalRulePreview()
     {
-        if(Attachments.Count>0||!Preferences.LocalActionRules||_rulesError is not null)return null;
+        if(Attachments.Count>0||Secrets.Exists||!Preferences.LocalActionRules||_rulesError is not null)return null;
         var resolved=LocalIntent(Draft.Trim());if(resolved.Intents.Count==0)return null;
         try
         {

@@ -21,7 +21,7 @@ internal static class CompanionChecks
         var quoted=upload with{Status="complete"};var legacy=upload with{Content="这是什么？\n[本次附件：sample.jpg；原内容未保存]"};
         var error=new ChatMessage("presentation-error",c.Session.Id,"assistant","网络或 TLS 连接失败，请检查网络和服务地址。","error",now.AddTicks(1));
         if(ChatDisplay.RecordMessage(upload)!="这是什么？"||ChatDisplay.RecordMessage(legacy)!="这是什么？"||ChatDisplay.RecordMessage(quoted)!=quoted.Content||ChatDisplay.RecordMessage(error).Length!=0||ChatDisplay.RecordMessage(error with{Status="complete"})!=error.Content)throw new Exception("Chat cleanup removed real text or retained technical records");
-        if(ChatDisplay.Status("回复完成；上下文已按预算裁剪。").Length!=0||ChatDisplay.Status(error.Content)!=error.Content||ChatDisplay.Message("正在理解动作请求…")!="正在陪你互动…")throw new Exception("Chat cleanup hid an actionable failure or exposed internal progress");
+        if(ChatDisplay.Status("回复完成；上下文已按预算裁剪。").Length!=0||ChatDisplay.Status(error.Content)!=error.Content||ChatDisplay.Message("正在理解动作请求…")!="正在识别宠物动作…")throw new Exception("Chat cleanup hid an actionable failure or exposed internal progress");
         if(ChatDisplay.RecordMessage(error with{Content="服务返回 HTTP 503，请检查连接或模型设置。"}).Length!=0||ChatDisplay.RecordMessage(error with{Status="complete",Content="服务返回 HTTP 503，请检查连接或模型设置。"})!="服务返回 HTTP 503，请检查连接或模型设置。"||ChatDisplay.RecordMessage(error with{Status="local",Content="本地规则匹配 · 未联网\n已走到书柜旁。"})!="已走到书柜旁。")throw new Exception("Legacy technical cleanup swallowed an actual reply or retained operation headers");
         c.Store.SaveMessage(upload);c.Store.SaveMessage(error);c.Store.SaveMessage(new("presentation-reply",c.Session.Id,"assistant","我在这里，听你说。","complete",now.AddTicks(2)));c.Refresh();
         if(ChatTranscript.Text(c.Store.Messages(c.Session.Id),c.Preferences.PetName,null).Contains("原内容未保存")||c.Store.Messages(c.Session.Id).First().Content!=upload.Content)throw new Exception("Transcript copy leaked metadata or mutated stored record");
@@ -32,7 +32,7 @@ internal static class CompanionChecks
         }
         Check(host.House!);Image(host.House!,"chat-cleanup");host.House!.Close();host.ShowFloatingChat();await Task.Delay(80);Check(host.FloatingChat!);Image(host.FloatingChat!,"floating-chat-cleanup");Click(host.FloatingChat!,"完整聊天");
         var handler=new OfflineReplyHandler{Status=HttpStatusCode.ServiceUnavailable};using var protocol=new Controller(Path.Combine(c.Store.DirectoryPath,"presentation-protocol"),new AiClient(handler));protocol.Secrets.Save("offline-test-key");protocol.SavePreferences(protocol.Preferences with{AllowPetControl=true});protocol.Draft="你去有水的地方走走";await protocol.Send();
-        if(protocol.Store.Messages(protocol.Session!.Id).Last().Content.Length!=0||!protocol.ChatStatus.Contains("HTTP 503")||protocol.ActionResults.Count!=1)throw new Exception("Service diagnostic became a pet reply or was silently lost");
+        if(protocol.Store.Messages(protocol.Session!.Id).Last().Content.Length!=0||!protocol.ChatStatus.Contains("HTTP 503")||protocol.ActionResults.Count!=0)throw new Exception("Service diagnostic became a pet reply or was silently lost");
         File.WriteAllText("artifacts/chat-cleanup-smoke-result.txt","PASS: exact generated attachment suffix hidden in both chats and transcript copy; quoted user text and actual replies retained; stored metadata unchanged; empty/error/protocol progress rows cleaned; failures remain in operation status. Offline mock only.\n");
     }
 
@@ -174,9 +174,18 @@ internal static class CompanionChecks
             using var protocol=new Controller(Path.Combine(c.Store.DirectoryPath,"intent-protocol"),new AiClient(handler));
             protocol.Secrets.Save("offline-test-key");protocol.SavePreferences(protocol.Preferences with{AllowPetControl=true,AllowSceneControl=true});int executed=0;
             protocol.ActionHandler=cmd=>{executed++;return new(ActionResultCode.Completed,cmd.Action,cmd.Value,"完成",TimeSpan.Zero);};protocol.Draft="去有水的地方待会吧";
-            await protocol.Send();if(executed!=0||protocol.ActionResults.Single().Code!=ActionResultCode.NotRecognized||protocol.Store.Messages(protocol.Session!.Id).Last().Content.Contains("我已经到了"))throw new Exception("Unbacked model promise reached the transcript");
-            handler.Reply="[{\"type\":\"GoTo\",\"target\":\"pond\"}]";protocol.Draft="去有水的地方待会吧";await protocol.Send();if(executed!=2||handler.Calls!=2)throw new Exception("AI intent fallback was not one request and one bounded plan");
-            File.WriteAllText("artifacts/intent-smoke-result.txt","PASS: local pond/book variants; whole-plan permission/target preflight before scene change; actual arrival; negative/discussion suppression; floating chat and tray; malformed AI promise rejected; structured fallback with one request per action. Offline mock only.\n");
+            await protocol.Send();if(executed!=0||protocol.ActionResults.Count!=0||protocol.Store.Messages(protocol.Session!.Id).Last().Content.Contains("我已经到了"))throw new Exception("Unbacked model promise reached the transcript");
+            handler.Reply="```forme-actions\n[{\"type\":\"GoTo\",\"target\":\"pond\"}]\n```";protocol.Draft="去有水的地方待会吧";await protocol.Send();if(executed!=2||handler.Calls!=2)throw new Exception("AI intent fallback was not one request and one bounded plan");
+            protocol.SavePreferences(protocol.Preferences with{LocalActionRules=false});handler.Reply="```forme-actions\n[{\"type\":\"ChangeScene\",\"target\":\"indoor\"},{\"type\":\"Stroll\",\"mode\":\"walk\"},{\"type\":\"GoTo\",\"target\":\"book\"}]\n```";protocol.Draft="在小屋走一圈，然后去书架旁边";await protocol.Send();
+            using var routedRequest=JsonDocument.Parse(handler.LastRequest);string routedText=string.Join("\n",routedRequest.RootElement.GetProperty("messages").EnumerateArray().Select(x=>x.GetProperty("content").GetString()));
+            if(handler.Calls!=3||executed!=5||protocol.ActionResults.Count!=3||protocol.ActionResults.Any(x=>!x.Success)||!routedText.Contains("在小屋走一圈，然后去书架旁边",StringComparison.Ordinal)||!routedText.Contains("意图路由：依据本轮消息和有限会话上下文判断",StringComparison.Ordinal))
+            {
+                string actionResults=string.Join(" | ",protocol.ActionResults.Select(x=>$"{x.Code}: {x.UserMessage}"));
+                throw new Exception($"AI routing did not infer and execute the house walk plus book target: calls={handler.Calls}, executed={executed}, results={protocol.ActionResults.Count} [{actionResults}], requestInput={routedText.Contains("在小屋走一圈，然后去书架旁边",StringComparison.Ordinal)}, requestPrompt={routedText.Contains("意图路由：依据本轮消息和有限会话上下文判断",StringComparison.Ordinal)}");
+            }
+            handler.Reply="我们可以聊聊你今天的感受。";protocol.Draft="谢谢你";await protocol.Send();
+            if(handler.Calls!=4||executed!=5||!protocol.Store.Messages(protocol.Session!.Id).Last().Content.Contains("我们可以聊聊",StringComparison.Ordinal))throw new Exception("Ordinary chat was not preserved by the AI intent router");
+            File.WriteAllText("artifacts/intent-smoke-result.txt","PASS: AI routes every text-only message as ordinary chat or a bounded marked action plan; compound house walk and book target execute from AI output without phrase-specific local matching; whole-plan permission/target preflight; actual arrival; negative/discussion local suppression; floating chat and tray; malformed AI promise rejected; ordinary chat preserved; one offline mock request per message.\n");
         }
         finally{c.Store.SaveWorld(world);c.SavePreferences(before);c.Draft="";host.ShowHouse("home");host.House!.SwitchWorld(false);}
     }
@@ -184,7 +193,7 @@ internal static class CompanionChecks
     {
         public bool Complete=true;
         public int Calls;
-        public string Reply="[{\"type\":\"Dance\",\"mode\":\"sway\"}]";
+        public string Reply="```forme-actions\n[{\"type\":\"Dance\",\"mode\":\"sway\"}]\n```";
         public HttpStatusCode Status=HttpStatusCode.OK;
         public string LastRequest="";
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken cancellationToken)
@@ -271,7 +280,7 @@ internal static class CompanionChecks
         if(house.SceneDescription.Contains("furniture")||house.SceneDescription.Contains("events"))throw new Exception("Disabled creation grants leaked world data");
         c.SavePreferences(c.Preferences with{AllowLayoutPreview=true,AllowPlayControl=true});
         // Exercise the real reply controller without connecting to an external service.
-        var handler=new OfflineReplyHandler{Reply="[{\"type\":\"Dance\",\"mode\":\"sway\"},{\"type\":\"Dance\",\"mode\":\"hop\"}]"};
+        var handler=new OfflineReplyHandler{Reply="```forme-actions\n[{\"type\":\"Dance\",\"mode\":\"sway\"},{\"type\":\"Dance\",\"mode\":\"hop\"}]\n```"};
         using(var protocol=new Controller(Path.Combine(c.Store.DirectoryPath,"creation-protocol"),new AiClient(handler)))
         {
             protocol.Secrets.Save("offline-test-key");protocol.SavePreferences(protocol.Preferences with{AllowPetControl=true});int steps=0;bool waitingStep=false;
@@ -280,7 +289,7 @@ internal static class CompanionChecks
             protocol.CommandWaiter=async(_,token)=>{await Task.Delay(10000,token);return true;};protocol.Draft="再跳两支舞";var sending=protocol.Send();await Task.Delay(150);protocol.StopReply();await sending;if(steps!=3||protocol.Busy)throw new Exception("Cancelled sequence continued");
             protocol.CommandWaiter=(_,_)=>Task.FromResult(false);protocol.Draft="再跳一次";await protocol.Send();if(steps!=4)throw new Exception("Interrupted sequence continued");
             protocol.CommandHandler=_=>throw new OperationFailureException("被家具遮挡");protocol.Draft="请跳舞试试被挡的动作";await protocol.Send();if(!protocol.ChatStatus.Contains("被家具遮挡"))throw new Exception("Local failure missing");
-            handler.Reply="[{\"type\":\"Stroll\",\"mode\":\"walk\"},{\"type\":\"Dance\",\"mode\":\"sway\"}]";
+            handler.Reply="```forme-actions\n[{\"type\":\"Stroll\",\"mode\":\"walk\"},{\"type\":\"Dance\",\"mode\":\"sway\"}]\n```";
             var beforeWalk=room.PetPosition;
             protocol.CommandHandler=cmd=>{if(cmd.Action=="dance"&&(room.PetMoving||room.PetPosition==beforeWalk))throw new Exception("Pat began before arrival");return host.ExecuteCompanionCommand(cmd);};
             protocol.CommandWaiter=house.WaitCreation;protocol.Draft="走两步再跳舞";await protocol.Send();if(!protocol.ChatStatus.Contains("伙伴动作"))throw new Exception("Actual sequential action failed: "+protocol.ChatStatus);

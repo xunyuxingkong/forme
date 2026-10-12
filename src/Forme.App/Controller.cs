@@ -126,16 +126,16 @@ internal sealed partial class Controller : IDisposable
             }
         }
         if(input.Length==0&&attachments.Count>0)input="请阅读我本次上传的附件。";
-        bool intentRequest=attachments.Count==0&&IntentResolver.LooksLikeRequest(input,Preferences.PetName);
+        bool aiRouting=attachments.Count==0;
         bool trimmed=false;
-        var turns=intentRequest?AiIntentProtocol.BuildContext(Preferences,input):AiClient.BuildContext(Preferences,history,input,out trimmed,Preferences.MemoryEnabled?Store.Memories():null,Preferences.MemoryEnabled?Store.Note(Session.Id):null,attachments:attachments);
+        var turns=AiClient.BuildContext(Preferences,history,input,out trimmed,Preferences.MemoryEnabled?Store.Memories():null,Preferences.MemoryEnabled?Store.Note(Session.Id):null,attachments:attachments,additionalSystemInstruction:aiRouting?AiIntentProtocol.RoutingInstructions():null);
         ActionResults=[];
         string storedInput=attachments.Count==0?input:input+"\n\n[本次附件："+string.Join("、",attachments.Select(x=>x.Name))+"；原内容未保存，后续消息不自动重传]";
         var userMessage=new ChatMessage(retryId??Guid.NewGuid().ToString("N"),Session.Id,"user",storedInput,attachments.Count==0?"complete":"attachment",DateTimeOffset.Now);
         var response=new ChatMessage(Guid.NewGuid().ToString("N"),Session.Id,"assistant","","streaming",DateTimeOffset.Now.AddTicks(1));
         Store.BeginChatTurn(retryId is null?userMessage:null,response);
         if(retryId is null){Draft="";_attachments.Clear();_attachmentRetry=attachments.Count>0?new(userMessage.Id,input,Preferences.Endpoint,attachments):null;}
-        LiveReply="";ChatStatus=intentRequest?"正在识别宠物动作；尚未执行。":trimmed?"上下文已按预算裁剪。正在回应…":"正在回应…";
+        LiveReply="";ChatStatus=trimmed?"上下文已按预算裁剪。正在回应…":"正在回应…";
         var request=new CancellationTokenSource();_request=request;int epoch=++_epoch;_requestedAt=DateTimeOffset.UtcNow;
         var p=Preferences with {};SyncTimer();Changed?.Invoke();
         DateTimeOffset lastSave=DateTimeOffset.UtcNow;int savedLength=0;bool limited=false;
@@ -146,7 +146,7 @@ internal sealed partial class Controller : IDisposable
         {
             if(epoch!=_epoch)return;
             if(pending.ReadChanges() is not {} partial)return;
-            text=partial;LiveReply=intentRequest?"正在识别宠物动作…":ConversationText.Visible(partial);
+            text=partial;LiveReply=ConversationText.Visible(partial);
             try{if(DateTimeOffset.UtcNow-lastSave>TimeSpan.FromSeconds(3)&&partial.Length-savedLength>=64){Store.SaveMessage(response with{Content=LiveReply});lastSave=DateTimeOffset.UtcNow;savedLength=partial.Length;}}
             catch(Exception ex) when(OperationErrors.Expected(ex)){request.Cancel();ChatStatus="本地保存失败，已停止请求："+OperationErrors.Message(ex);}
             Tick?.Invoke();
@@ -158,22 +158,24 @@ internal sealed partial class Controller : IDisposable
             limited=result.LengthLimited;if(epoch==_epoch){text=result.Content;status="complete";}else status="stopped";
             if(epoch==_epoch)ChatStatus=result.LengthLimited?"已达到单次回复上限，未自动续写，未执行动作。":trimmed?"回复完成；上下文已按预算裁剪。":"回复完成。";
         }
-        catch(OperationCanceledException){status="stopped";if(epoch==_epoch)ChatStatus=intentRequest?"已停止；本轮没有执行宠物动作。":"已停止。";}
-        catch(Exception ex) when(OperationErrors.Expected(ex)){if(epoch==_epoch)ChatStatus=(intentRequest?"宠物动作未执行：":"")+OperationErrors.Message(ex);}
+        catch(OperationCanceledException){status="stopped";if(epoch==_epoch)ChatStatus="已停止。";}
+        catch(Exception ex) when(OperationErrors.Expected(ex)){if(epoch==_epoch)ChatStatus=OperationErrors.Message(ex);}
         finally
         {
-            paint.Stop();text=intentRequest?"":ConversationText.Visible(pending.Snapshot());
-            if(intentRequest&&status=="complete"&&epoch==_epoch&&!limited&&!request.IsCancellationRequested)
+            paint.Stop();text=ConversationText.Visible(pending.Snapshot());
+            if(aiRouting&&status=="complete"&&epoch==_epoch&&!limited&&!request.IsCancellationRequested)
             {
                 try
                 {
-                    var intents=AiIntentProtocol.Parse(pending.Snapshot(),input);
-                    ActionResults=intents.Count==0?[ActionResult.Failure(ActionResultCode.NotRecognized,"没有识别到明确动作，没有执行；请换一种说法。")]:await ExecuteIntents(intents,request.Token);
+                    if(AiIntentProtocol.TryExtractActions(pending.Snapshot(),out string actionJson))
+                    {
+                        var intents=AiIntentProtocol.Parse(actionJson,input);
+                        ActionResults=intents.Count==0?[ActionResult.Failure(ActionResultCode.NotRecognized,"没有识别到明确动作，没有执行；请换一种说法。")]:await ExecuteIntents(intents,request.Token);
+                        text=ResultText(ActionResults);ChatStatus=ActionResults.LastOrDefault()?.UserMessage??text;
+                    }
                 }
-                catch(ActionFailureException ex){ActionResults=[ActionResult.Failure(ex.Code,ex.Message)];}
-                text=ResultText(ActionResults);ChatStatus=ActionResults.LastOrDefault()?.UserMessage??text;
+                catch(ActionFailureException ex){ActionResults=[ActionResult.Failure(ex.Code,ex.Message)];text=ResultText(ActionResults);ChatStatus=ActionResults[0].UserMessage;}
             }
-            else if(intentRequest){ActionResults=[ActionResult.Failure(request.IsCancellationRequested?ActionResultCode.Cancelled:ActionResultCode.Failed,ChatStatus)];text="";}
             try
             {
                 if(Store.HasSession(response.SessionId) && (epoch==_epoch || request.IsCancellationRequested))

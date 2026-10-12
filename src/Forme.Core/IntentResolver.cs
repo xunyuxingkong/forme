@@ -22,8 +22,6 @@ public static class IntentResolver
             int count=Matches(text,"(?:两|二|2)圈")?2:1;
             return new([new(CompanionIntentType.Stroll,Mode: text.Contains('跑')||text.Contains("奔跑",StringComparison.Ordinal)?"run":"walk",Count:count)],true);
         }
-        if(Matches(text,"^(?:(?:去|在|绕|环绕|围着|沿着))?(?:小屋|屋子|房间)(?:里面|里|内)?(?:(?:走|跑|奔跑)?(?:一|1)圈(?:走|跑|奔跑)?|走走|逛逛|散步|溜达|走两步|走几步|活动活动)$"))
-            return new([new(CompanionIntentType.ChangeScene,"indoor"),new(CompanionIntentType.Stroll,Mode:text.Contains('跑')||text.Contains("奔跑",StringComparison.Ordinal)?"run":"walk")],true);
         var parts = Regex.Split(text,"(?:[，,；;]?(?:然后|接着|再)|[，,；;])",Options,TimeSpan.FromMilliseconds(50));
         if(parts.Length > 3) return new([],true);
         var intents = new List<CompanionIntent>();
@@ -34,12 +32,14 @@ public static class IntentResolver
             if(intent is null) return new([],LooksLikeRequest(text));
             intents.Add(intent);
         }
+        if(intents.Count>3)return new([],true);
         return new(intents,true);
     }
     public static bool LooksLikeRequest(string text,string? petName=null)
     {
         if(petName is {Length:>0}&&text.StartsWith(petName,StringComparison.Ordinal))text=text[petName.Length..].TrimStart('，',',',' ');
-        return !Suppressed(text)&&Matches(text,"^(?:(?:你能不能|能不能|你可以|你能|你|能否|可以|麻烦你|请你|请|帮我|先|依次|让伙伴|让宠物|让它|自己|再|试试|出去|到附近|在附近|在周围))*?(?:去|到|走|跑|溜达|转悠|逛|活动|跳|舞|睡|回来|过来|换成|打开|关闭|关灯|玩|散步|拍拍|揉揉|停|别动|不要动|布置|看|吃|读|浇水)");
+        if(Suppressed(text))return false;
+        return Matches(text,"^(?:(?:你能不能|能不能|你可以|你能|你|能否|可以|麻烦你|请你|请|帮我|先|依次|让伙伴|让宠物|让它|自己|再|试试|出去|到附近|在附近|在周围))*?(?:去|到|走|跑|溜达|转悠|逛|活动|跳|舞|睡|回来|过来|换成|打开|关闭|关灯|玩|散步|拍拍|揉揉|停|别动|不要动|布置|看|吃|读|浇水)");
     }
     private static string Clean(string text)
     {
