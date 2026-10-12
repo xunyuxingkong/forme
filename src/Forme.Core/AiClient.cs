@@ -23,7 +23,8 @@ public sealed record AiTurn(string Role, string Content, IReadOnlyList<AiAttachm
 public sealed record AiResult(string Content, bool LengthLimited, bool HistoryTrimmed);
 public sealed record AiLimits(TimeSpan First, TimeSpan Idle, TimeSpan Total)
 {
-    public static AiLimits Default { get; } = new(TimeSpan.FromSeconds(30),TimeSpan.FromSeconds(20),TimeSpan.FromSeconds(90));
+    public static AiLimits Default { get; } = new(TimeSpan.FromSeconds(60),TimeSpan.FromSeconds(30),TimeSpan.FromSeconds(180));
+    public static AiLimits ForAttachments { get; } = new(TimeSpan.FromSeconds(90),TimeSpan.FromSeconds(30),TimeSpan.FromSeconds(240));
 }
 public sealed class AiClient : IDisposable
 {
@@ -143,6 +144,7 @@ public sealed class AiClient : IDisposable
             foreach(var turn in turns){AiAttachment.Validate(turn.Attachments??[]);if(turn.Attachments is {Count:>0}&&turn.Role!="user")throw new InvalidDataException("附件只能随用户消息发送。");}
             AiAttachment.Validate(turns.SelectMany(x=>x.Attachments??[]).ToArray());
             ValidateProviderAttachments(settings.Endpoint,turns.SelectMany(x=>x.Attachments??[]).ToArray());
+            var requestLimits=_limits==AiLimits.Default&&turns.Any(x=>x.Attachments is {Count:>0})?AiLimits.ForAttachments:_limits;
             var payload=new Dictionary<string,object> { ["model"]=settings.Model,["messages"]=turns.Select(t=>new {role=t.Role,content=t.WireContent(includeImageDetail:!zhipu)}),["stream"]=true,["max_tokens"]=settings.MaxReplyTokens,["temperature"]=settings.Temperature };
             if(zhipu&&settings.Model is "glm-5.3" or "glm-5.3-flash" or "glm-5.3-flashx")
             {payload["thinking"]=new {type="enabled",clear_thinking=true};payload["reasoning_effort"]=settings.ZhipuReasoningEffort;}
@@ -158,8 +160,8 @@ public sealed class AiClient : IDisposable
             using var request=new HttpRequestMessage(HttpMethod.Post,uri);
             request.Headers.Authorization=new AuthenticationHeaderValue("Bearer",key);
             request.Content=new StringContent(JsonSerializer.Serialize(payload),Encoding.UTF8,"application/json");
-            using var total=CancellationTokenSource.CreateLinkedTokenSource(cancellation); total.CancelAfter(_limits.Total);
-            using var inactivity=CancellationTokenSource.CreateLinkedTokenSource(total.Token); inactivity.CancelAfter(_limits.First);
+            using var total=CancellationTokenSource.CreateLinkedTokenSource(cancellation); total.CancelAfter(requestLimits.Total);
+            using var inactivity=CancellationTokenSource.CreateLinkedTokenSource(total.Token); inactivity.CancelAfter(requestLimits.First);
             bool gotContent=false, gotReasoning=false, length=false, done=false;long reasoningBytes=0;var content=new StringBuilder();
             try
             {
@@ -187,11 +189,11 @@ public sealed class AiClient : IDisposable
                     // Real reasoning output is progress, but is never displayed, stored, or resent.
                     // The fixed total timeout still bounds requests that only produce reasoning.
                     if(choice.TryGetProperty("delta",out var reasoningDelta)&&reasoningDelta.TryGetProperty("reasoning_content",out var reasoning)&&reasoning.ValueKind==JsonValueKind.String&&!string.IsNullOrEmpty(reasoning.GetString()))
-                    {var fragment=reasoning.GetString()!;reasoningBytes+=Encoding.UTF8.GetByteCount(fragment);if(reasoningBytes>ReasoningByteLimit)throw new InvalidDataException("模型思考内容超过本地64KB上限，已停止接收；请降低思考强度后手动重试。动作未执行。");gotReasoning=true;if(zhipu||siliconGlm)inactivity.CancelAfter(_limits.Idle);}
+                    {var fragment=reasoning.GetString()!;reasoningBytes+=Encoding.UTF8.GetByteCount(fragment);if(reasoningBytes>ReasoningByteLimit)throw new InvalidDataException("模型思考内容超过本地64KB上限，已停止接收；请降低思考强度后手动重试。动作未执行。");gotReasoning=true;if(zhipu||siliconGlm)inactivity.CancelAfter(requestLimits.Idle);}
                     if(choice.TryGetProperty("delta",out var delta) && delta.TryGetProperty("content",out var c) && c.ValueKind==JsonValueKind.String)
                     {
                         var fragment=c.GetString();
-                        if(!string.IsNullOrEmpty(fragment)) {gotContent=true;content.Append(fragment); if(content.Length>ContentCharLimit) throw new InvalidDataException("模型正文超过本地32,000字符上限，已停止接收；动作未执行。"); progress(fragment); inactivity.CancelAfter(_limits.Idle);}
+                        if(!string.IsNullOrEmpty(fragment)) {gotContent=true;content.Append(fragment); if(content.Length>ContentCharLimit) throw new InvalidDataException("模型正文超过本地32,000字符上限，已停止接收；动作未执行。"); progress(fragment); inactivity.CancelAfter(requestLimits.Idle);}
                     }
                     if(choice.TryGetProperty("finish_reason",out var reason) && reason.ValueKind==JsonValueKind.String)
                     {length=reason.GetString()=="length";done=true;break;}

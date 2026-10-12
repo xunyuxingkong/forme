@@ -66,6 +66,7 @@ public sealed class IntentTests
         StringAssert.Contains(instructions,"消解本轮承接请求的省略表达");
         StringAssert.Contains(instructions,"小屋/屋内散步用ChangeScene(indoor)+Stroll(mode=walk/run)");
         StringAssert.Contains(instructions,"绕屏幕一/两圈才用Stroll(count=1/2)");
+        StringAssert.Contains(instructions,"Dance可用count=1..3");
         StringAssert.Contains(instructions,"GoTo,Interact,Stroll");
         var routedContext=AiClient.BuildContext(new(),Array.Empty<ChatMessage>(),phrase,out _,additionalSystemInstruction:instructions);
         Assert.IsTrue(routedContext.Sum(AiClient.Estimate)<=new Preferences().ContextBudget);
@@ -116,8 +117,11 @@ public sealed class IntentTests
     public void AiProtocolRejectsCoordinatesPartialAndMixedInvalidPlans()
     {
         Assert.AreEqual("pond",AiIntentProtocol.Parse("[{\"type\":\"GoTo\",\"target\":\"pond\"}]").Single().Target);
+        var repeatedHop=AiIntentProtocol.Parse("[{\"type\":\"Dance\",\"mode\":\"hop\",\"count\":2}]","跳2下看看呢");
+        CollectionAssert.AreEqual(new[]{"hop","hop"},ActionPlanner.Build(repeatedHop,SceneKind.Indoor).Steps.Select(x=>x.Value).ToArray());
         foreach(string text in new[]{"我已经到池塘了","[{\"type\":\"GoTo\",\"target\":\"pond\",\"x\":1}]","[{\"type\":\"GoTo\",\"target\":\"unknown\"}]","[{\"type\":\"GoTo\",\"type\":\"Stop\"}]","[{\"type\":\"GoTo\",\"target\":\"pond\"},{\"type\":\"shell\"}]","[{\"type\":\"Stroll\",\"count\":3}]","[{\"type\":\"Shortcut\"}]","[{\"type\":\"999\"}]"})
             Assert.ThrowsExactly<ActionFailureException>(()=>AiIntentProtocol.Parse(text),text);
+        Assert.ThrowsExactly<ActionFailureException>(()=>AiIntentProtocol.Parse("[{\"type\":\"Dance\",\"mode\":\"hop\",\"count\":4}]"));
         var turns=AiIntentProtocol.BuildContext(new(),"去有水的地方待会吧");Assert.AreEqual(2,turns.Count);Assert.AreEqual("去有水的地方待会吧",turns[1].Content);
         Assert.IsFalse(turns[0].Content.Contains("坐标X="));
         Assert.IsFalse(ConversationText.Visible("我已经到了池塘边。").Contains("我已经"));

@@ -8,7 +8,7 @@ public static class AiIntentProtocol
     public static string RoutingInstructions()
     {
         string targets=string.Join(",",TargetCatalog.All.Select(x=>x.Id));
-        return $"意图路由：依据本轮消息和有限会话上下文判断是普通聊天还是动作。普通聊天自然回答，不输出动作标记。若用户本轮清楚提出或承接具体伙伴动作，且不是引用、讨论、假设、否定，只输出一个 ```forme-actions 代码块，内含最多3项JSON数组，不要附加说明或声称已完成。可用type: GoTo,Interact,Stroll,Dance,Idle,Recall,Stop,ChangeScene,ChangeWeather,ChangeModel,ToggleDevice,StartPlay,Touch,UseToy,Life,LayoutPreview,BoatConfiguration,NameBoat；字段type,target,mode,count,x,z,rotation；地点target仅限 {targets}。小屋/屋内散步用ChangeScene(indoor)+Stroll(mode=walk/run)；绕屏幕一/两圈才用Stroll(count=1/2)；其它散步不带count。Dance mode=sway/hop/spin；Idle mode=sleep/idle/walk/run；ChangeScene target=indoor/outdoor。用上下文消解本轮承接请求的省略表达，但不得根据记忆、助手承诺或旧对话自行发起动作。坐标只抄本轮用户明确给出的值，不得猜测。应用会校验权限、能力与目标可达性后执行。";
+        return $"意图路由：依据本轮消息和有限会话上下文判断是普通聊天还是动作。普通聊天自然回答，不输出动作标记。若用户本轮清楚提出或承接具体伙伴动作，且不是引用、讨论、假设、否定，只输出一个 ```forme-actions 代码块，内含最多3项JSON数组，不要附加说明或声称已完成。可用type: GoTo,Interact,Stroll,Dance,Idle,Recall,Stop,ChangeScene,ChangeWeather,ChangeModel,ToggleDevice,StartPlay,Touch,UseToy,Life,LayoutPreview,BoatConfiguration,NameBoat；字段type,target,mode,count,x,z,rotation；地点target仅限 {targets}。小屋/屋内散步用ChangeScene(indoor)+Stroll(mode=walk/run)；绕屏幕一/两圈才用Stroll(count=1/2)；其它散步不带count。Dance mode=sway/hop/spin；用户明确提出跳跃或舞步次数时，Dance可用count=1..3，否则省略count。Idle mode=sleep/idle/walk/run；ChangeScene target=indoor/outdoor。用上下文消解本轮承接请求的省略表达，但不得根据记忆、助手承诺或旧对话自行发起动作。坐标只抄本轮用户明确给出的值，不得猜测。应用会校验权限、能力与目标可达性后执行。";
     }
     public static bool TryExtractActions(string response,out string json)
     {
@@ -25,7 +25,7 @@ public static class AiIntentProtocol
         if(string.IsNullOrWhiteSpace(input) || input.EnumerateRunes().Count()>2000) throw new InvalidDataException("请输入内容，最多2,000个字符。");
         string targets = string.Join(",",TargetCatalog.All.Select(x=>x.Id));
         var turns = new List<AiTurn> {
-            new("system",$"{ActionInstruction}每项仅有type,target,mode,count。type: GoTo,Interact,Stroll,Dance,Idle,Recall,Stop,ChangeScene,ChangeWeather,ChangeModel,ToggleDevice,StartPlay。GoTo/Interact的target只能为{targets}。小屋/屋子/房间里的散步先输出ChangeScene target=indoor，再输出Stroll mode=walk或run且不带count。绕屏幕/屏幕上走一圈或两圈才用Stroll count=1或2。其他散步使用Stroll mode=walk/run且不带count。Dance mode为sway/hop/spin。Idle mode为idle/sleep/walk/run。ChangeScene target为indoor/outdoor。ChangeWeather mode为clear/rain/snow。ChangeModel target为sprout/cat/fox/penguin。ToggleDevice target为light/fireplace且mode为on/off。StartPlay target为boat且mode为open/start/pause/resume/retrieve，或target为hide且mode为pet-hides/pet-seeks。禁止移动坐标、路径、脚本、数据库、奖励、购买、记忆修改。去有水的地方对应GoTo pond。"),
+            new("system",$"{ActionInstruction}每项仅有type,target,mode,count。type: GoTo,Interact,Stroll,Dance,Idle,Recall,Stop,ChangeScene,ChangeWeather,ChangeModel,ToggleDevice,StartPlay。GoTo/Interact的target只能为{targets}。小屋/屋子/房间里的散步先输出ChangeScene target=indoor，再输出Stroll mode=walk或run且不带count。绕屏幕/屏幕上走一圈或两圈才用Stroll count=1或2。其他散步使用Stroll mode=walk/run且不带count。Dance mode为sway/hop/spin；仅在用户明确提出跳跃或舞步次数时才用count=1..3，否则省略。Idle mode为idle/sleep/walk/run。ChangeScene target为indoor/outdoor。ChangeWeather mode为clear/rain/snow。ChangeModel target为sprout/cat/fox/penguin。ToggleDevice target为light/fireplace且mode为on/off。StartPlay target为boat且mode为open/start/pause/resume/retrieve，或target为hide且mode为pet-hides/pet-seeks。禁止移动坐标、路径、脚本、数据库、奖励、购买、记忆修改。去有水的地方对应GoTo pond。"),
             new("user",input)
         };
         turns[0]=turns[0] with{Content=turns[0].Content+" Also support: Touch(mode:pat/rub); UseToy(target:ball-yellow/feather-mint/yarn-rose/frisbee-sky/paper-plane/bell-brass); Life(target:"+string.Join('/',LifeRules.Ids)+"); LayoutPreview(mode:reading/undo, or mode:furniture,target:explicit furniture ID,x,z,rotation); BoatConfiguration(target:shape,mode:swift/wide; target:color,mode:sun/rose/mint; target:wind,mode:left/forward/right; target:1/2/3 leaf,x,z,rotation); NameBoat(target:user's explicit title). x,z,rotation ONLY copy explicit numeric values in this input, ONLY for furniture or leaf previews; never invent them. No save/purchase/collect. Added fields x,z,rotation allowed only for those previews."};
@@ -61,7 +61,7 @@ public static class AiIntentProtocol
                     foreach(var numeric in new double?[]{x,z,rotation})
                         if(numeric is {} numberValue&&(!double.IsFinite(numberValue)||!System.Text.RegularExpressions.Regex.IsMatch(input,@"(?<![\d.eE+\-])"+System.Text.RegularExpressions.Regex.Escape(numberValue.ToString(System.Globalization.CultureInfo.InvariantCulture))+@"(?![\d.eE])",System.Text.RegularExpressions.RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(50))))throw new JsonException();
                 }
-                if(count is not null && (parsed!=CompanionIntentType.Stroll || count is <1 or >2)) throw new JsonException();
+                if(count is not null && (!(parsed==CompanionIntentType.Stroll&&count is >=1 and <=2)&&!(parsed==CompanionIntentType.Dance&&count is >=1 and <=3))) throw new JsonException();
                 if(parsed==CompanionIntentType.GoTo && intent.Mode is not (null or "walk" or "run")) throw new JsonException();
                 var plan = ActionPlanner.Build([intent],SceneKind.Indoor);
                 var grants = new Preferences {AllowPetControl=true,AllowSceneControl=true,AllowPlayControl=true,AllowLayoutPreview=true};

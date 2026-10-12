@@ -64,6 +64,15 @@ public sealed class ZhipuTests
     }
 
     [TestMethod]
+    public void ChatAndAttachmentTimeoutBudgetsRemainBounded()
+    {
+        Assert.AreEqual(TimeSpan.FromSeconds(60),AiLimits.Default.First);
+        Assert.AreEqual(TimeSpan.FromSeconds(180),AiLimits.Default.Total);
+        Assert.AreEqual(TimeSpan.FromSeconds(90),AiLimits.ForAttachments.First);
+        Assert.AreEqual(TimeSpan.FromSeconds(240),AiLimits.ForAttachments.Total);
+    }
+
+    [TestMethod]
     public async Task ErrorsDoNotRetryOrExposeProviderBody()
     {
         foreach(var status in new[]{HttpStatusCode.Unauthorized,HttpStatusCode.BadRequest,HttpStatusCode.TooManyRequests})

@@ -16,6 +16,8 @@ public static class ActionPlanner
         {
             if(!double.IsFinite(intent.Confidence) || intent.Confidence < .85 || intent.Confidence > 1)
                 throw new ActionFailureException(ActionResultCode.NotRecognized,"动作含义不够明确，请换一种说法。");
+            if(intent.Count is {} requestedCount && !((intent.Type==CompanionIntentType.Stroll&&requestedCount is 1 or 2)||(intent.Type==CompanionIntentType.Dance&&requestedCount is >=1 and <=3)))
+                throw new ActionFailureException(ActionResultCode.NotRecognized,"动作次数无效，没有执行。");
             CompanionCommand command = intent.Type switch
             {
                 CompanionIntentType.GoTo => new("go",intent.Target,Motion:intent.Mode),
@@ -51,9 +53,13 @@ public static class ActionPlanner
                     steps.Add(new("scene",required == SceneKind.Outdoor ? "outdoor" : "indoor")); scene = required;
                 }
             }
-            steps.Add(command);
-            if(command.Action == "scene") scene = command.Value == "outdoor" ? SceneKind.Outdoor : SceneKind.Indoor;
-            if(steps.Count > 3) throw new ActionFailureException(ActionResultCode.NotRecognized,"包含切换场景后超过三步，请分开请求。");
+            int repetitions = intent.Type == CompanionIntentType.Dance ? intent.Count ?? 1 : 1;
+            for(int repetition=0;repetition<repetitions;repetition++)
+            {
+                steps.Add(command);
+                if(command.Action == "scene") scene = command.Value == "outdoor" ? SceneKind.Outdoor : SceneKind.Indoor;
+                if(steps.Count > 3) throw new ActionFailureException(ActionResultCode.NotRecognized,"包含重复动作后超过三步，请分开请求。");
+            }
         }
         return new(steps);
     }
