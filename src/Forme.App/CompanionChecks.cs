@@ -33,6 +33,12 @@ internal static class CompanionChecks
             c.NewSession();if(c.Attachments.Count!=0)throw new Exception("New session retained attachments");
 
             var handler=new OfflineReplyHandler{Reply="收到附件"};string directory=Path.Combine(c.Store.DirectoryPath,"attachments");
+            var siliconHandler=new OfflineReplyHandler{Reply="连接成功"};using(var silicon=new Controller(Path.Combine(directory,"silicon-glm"),new AiClient(siliconHandler)))
+            {
+                var initial=silicon.Preferences;await silicon.TestConnection("https://api.siliconflow.cn/v1","zai-org/GLM-5.3-Flash","offline-test-key","high");
+                using var request=JsonDocument.Parse(siliconHandler.LastRequest);var root=request.RootElement;
+                if(root.GetProperty("max_tokens").GetInt32()!=initial.MaxReplyTokens||root.GetProperty("thinking_budget").GetInt32()!=1024||!root.GetProperty("enable_thinking").GetBoolean()||root.TryGetProperty("reasoning_effort",out _)||silicon.Preferences!=initial||silicon.Secrets.Exists)throw new Exception("SiliconFlow GLM connection test lost draft effort, used fixed 128 tokens, saved implicitly, or sent unsupported effort");
+            }
             using var protocol=new Controller(directory,new AiClient(handler));protocol.Secrets.Save("offline-test-key");protocol.SavePreferences(protocol.Preferences with{Endpoint="https://example.com/v1",AllowPetControl=true,AllowSceneControl=true});int actions=0;
             protocol.ActionHandler=cmd=>{actions++;return new(ActionResultCode.Completed,cmd.Action,cmd.Value,"动作",TimeSpan.Zero);};protocol.AddAttachments([picture,pdf,text]);protocol.Draft="去池塘边";
             if(await protocol.TrySendLocal())throw new Exception("Attachment entered local action route");await protocol.Send();

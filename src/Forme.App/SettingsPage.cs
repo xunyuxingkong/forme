@@ -63,7 +63,7 @@ internal sealed partial class MainWindow
             model.Text=provider.SelectedIndex==3?AiClient.ZhipuModel:provider.SelectedIndex==1?siliconModel:defaults.Model;
             key.Clear();connectionStatus.Text="预设已填入，尚未保存。请填写该服务的 API Key；切换预设不会联网。";
         };
-        var advanced=new Expander{Header="高级：服务地址与模型",Content=Ui.Stack(Ui.Text("基础地址（不要包含 /chat/completions 或密钥）",12),endpoint,Ui.Text("模型名称",12),model,Ui.Text("智谱思考强度 · GLM-5.3、5.3-Flash/FlashX"),effort,Ui.Text("保存AI配置后生效。较高强度可能增加等待时间与费用；输出与90秒总时限仍保持原有上限。其他服务不发送此参数。",11,Ui.Muted)),Margin=new Thickness(0,0,0,14)};
+        var advanced=new Expander{Header="高级：服务地址与模型",Content=Ui.Stack(Ui.Text("基础地址（不要包含 /chat/completions 或密钥）",12),endpoint,Ui.Text("模型名称",12),model,Ui.Text("GLM思考档位 · 智谱官方 / 硅基流动"),effort,Ui.Text("智谱GLM-5.3系列使用低/较高/最高强度；硅基GLM-5.3-Flash、5.3和Pro/GLM-5.2对应思考预算256/1024/2048 tokens。平台可能超出思考预算，并非账单硬上限。较高档位可能增加等待与费用；保存后用于聊天，测试使用当前选择，90秒时限保持不变。",11,Ui.Muted)),Margin=new Thickness(0,0,0,14)};
         var aiPanel=Ui.Stack(Ui.Text("AI 连接",17,null,true),Ui.Text("自由对话会联网，可能产生费用。房间、专注和放松一直在本地运行。",12,Ui.Muted),Ui.Text("服务预设"),provider,Ui.Text("硅基流动：DeepSeek-V3.2，关闭深度思考。智谱官方：glm-5.3-flash，支持PNG/JPEG与PDF；思考强度可在高级设置选择，默认低强度。输出额度包含思考，可在费用与输出控制中设为1024；智谱连接测试也遵循该输出上限。使用所选平台的API Key，可在高级设置修改模型；智谱预设使用普通API计费入口，Coding Plan不适用于本预设。价格与可用性以平台为准。",11,Ui.Muted),Ui.Text("API Key"),key,connectionStatus,advanced);
         aiPanel.Children.Add(Ui.Row(Ui.AsyncButton("测试连接",async()=>
         {

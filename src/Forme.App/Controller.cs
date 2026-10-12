@@ -190,7 +190,7 @@ internal sealed partial class Controller : IDisposable
     {
         if(Busy) throw new OperationFailureException("已有请求正在处理。");
         var request=new CancellationTokenSource();_request=request;SyncTimer();Changed?.Invoke();
-        try{await Ai.SendAsync(Preferences with {Endpoint=endpoint,Model=model,MaxReplyTokens=AiClient.IsZhipuEndpoint(endpoint)?Preferences.MaxReplyTokens:128,ZhipuReasoningEffort=reasoningEffort??Preferences.ZhipuReasoningEffort},key,[new("user","请只回复：连接成功")],_=>{},request.Token);}
+        try{await Ai.SendAsync(Preferences with {Endpoint=endpoint,Model=model,MaxReplyTokens=AiClient.IsZhipuEndpoint(endpoint)||AiClient.IsSiliconFlowGlm(endpoint,model)?Preferences.MaxReplyTokens:128,ZhipuReasoningEffort=reasoningEffort??Preferences.ZhipuReasoningEffort},key,[new("user","请只回复：连接成功")],_=>{},request.Token);}
         finally{_request=null;request.Dispose();SyncTimer();Changed?.Invoke();}
     }
     public void AfterImport(){ClearAttachments();Preferences=Store.LoadPreferences();Session=Store.Sessions().FirstOrDefault();PendingChatSave=null;MemoryDraft="";Draft="";LiveReply="";Changed?.Invoke();}

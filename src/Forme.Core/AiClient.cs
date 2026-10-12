@@ -58,6 +58,8 @@ public sealed class AiClient : IDisposable
     public static bool SameEndpoint(string left,string right)=>NormalizeEndpoint(left).Equals(NormalizeEndpoint(right),StringComparison.OrdinalIgnoreCase);
     public const string ZhipuEndpoint="https://open.bigmodel.cn/api/paas/v4",ZhipuModel="glm-5.3-flash";
     public static bool IsZhipuEndpoint(string endpoint)=>SameEndpoint(endpoint,ZhipuEndpoint);
+    public static bool IsSiliconFlowGlm(string endpoint,string model)=>SameEndpoint(endpoint,"https://api.siliconflow.cn/v1")&&model is "zai-org/GLM-5.3-Flash" or "zai-org/GLM-5.3" or "Pro/zai-org/GLM-5.2";
+    public static int SiliconFlowThinkingBudget(string effort)=>effort switch{"low"=>256,"high"=>1024,"max"=>2048,_=>throw new InvalidDataException("GLM思考档位无效。")};
     public static bool RequiresPdfImages(string endpoint)=>ValidateEndpoint(endpoint).Host.Equals("api.deepseek.com",StringComparison.OrdinalIgnoreCase);
     private static void ValidateProviderAttachments(string endpoint,IReadOnlyList<AiAttachment> attachments)
     {
@@ -129,6 +131,7 @@ public sealed class AiClient : IDisposable
         {
             var baseUri=ValidateEndpoint(settings.Endpoint);
             bool zhipu=IsZhipuEndpoint(settings.Endpoint);
+            bool siliconGlm=IsSiliconFlowGlm(settings.Endpoint,settings.Model);
             if(string.IsNullOrWhiteSpace(key) || key.Contains('\r') || key.Contains('\n')) throw new InvalidDataException("请先填写有效密钥。");
             settings.Validate();if(turns.Sum(Estimate)>settings.ContextBudget) throw new InvalidDataException("上下文超过预算，未发送。");
             var uri=new Uri(baseUri.AbsoluteUri.TrimEnd('/')+"/chat/completions");
@@ -138,6 +141,12 @@ public sealed class AiClient : IDisposable
             var payload=new Dictionary<string,object> { ["model"]=settings.Model,["messages"]=turns.Select(t=>new {role=t.Role,content=t.WireContent(includeImageDetail:!zhipu)}),["stream"]=true,["max_tokens"]=settings.MaxReplyTokens,["temperature"]=settings.Temperature };
             if(zhipu&&settings.Model is "glm-5.3" or "glm-5.3-flash" or "glm-5.3-flashx")
             {payload["thinking"]=new {type="enabled",clear_thinking=true};payload["reasoning_effort"]=settings.ZhipuReasoningEffort;}
+            if(siliconGlm)
+            {
+                payload["enable_thinking"]=true;payload["thinking_budget"]=SiliconFlowThinkingBudget(settings.ZhipuReasoningEffort);
+                // SiliconFlow only documents reasoning_effort for this GLM model.
+                if(settings.Model=="Pro/zai-org/GLM-5.2")payload["reasoning_effort"]=settings.ZhipuReasoningEffort=="max"?"max":"high";
+            }
             if(baseUri.Host.Equals("api.deepseek.com",StringComparison.OrdinalIgnoreCase)) payload["thinking"]=new {type="disabled"};
             if(baseUri.Host.Equals("api.siliconflow.cn",StringComparison.OrdinalIgnoreCase)&&
                 settings.Model is "deepseek-ai/DeepSeek-V3.2" or "Pro/deepseek-ai/DeepSeek-V3.2")payload["enable_thinking"]=false;
@@ -146,7 +155,7 @@ public sealed class AiClient : IDisposable
             request.Content=new StringContent(JsonSerializer.Serialize(payload),Encoding.UTF8,"application/json");
             using var total=CancellationTokenSource.CreateLinkedTokenSource(cancellation); total.CancelAfter(_limits.Total);
             using var inactivity=CancellationTokenSource.CreateLinkedTokenSource(total.Token); inactivity.CancelAfter(_limits.First);
-            bool gotContent=false, length=false, done=false; var content=new StringBuilder();
+            bool gotContent=false, gotReasoning=false, length=false, done=false; var content=new StringBuilder();
             try
             {
                 using var response=await _http.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,inactivity.Token).ConfigureAwait(false);
@@ -171,7 +180,8 @@ public sealed class AiClient : IDisposable
                     var choice=choices[0];
                     // Real reasoning output is progress, but is never displayed, stored, or resent.
                     // The fixed total timeout still bounds requests that only produce reasoning.
-                    if(zhipu&&choice.TryGetProperty("delta",out var reasoningDelta)&&reasoningDelta.TryGetProperty("reasoning_content",out var reasoning)&&reasoning.ValueKind==JsonValueKind.String&&!string.IsNullOrEmpty(reasoning.GetString()))inactivity.CancelAfter(_limits.Idle);
+                    if(choice.TryGetProperty("delta",out var reasoningDelta)&&reasoningDelta.TryGetProperty("reasoning_content",out var reasoning)&&reasoning.ValueKind==JsonValueKind.String&&!string.IsNullOrEmpty(reasoning.GetString()))
+                    {gotReasoning=true;if(zhipu||siliconGlm)inactivity.CancelAfter(_limits.Idle);}
                     if(choice.TryGetProperty("delta",out var delta) && delta.TryGetProperty("content",out var c) && c.ValueKind==JsonValueKind.String)
                     {
                         var fragment=c.GetString();
@@ -181,7 +191,7 @@ public sealed class AiClient : IDisposable
                     {length=reason.GetString()=="length";done=true;break;}
                 }
                 if(!done) throw new OperationFailureException("回复连接中断，已有内容已保留。");
-                if(!gotContent) throw new OperationFailureException(zhipu?"智谱未返回正文；模型思考可能已占满输出上限。请在费用与输出控制中检查输出上限（可设1024），再手动重试；未自动增加额度。":"服务未返回文本，请检查模型是否支持非思考文本对话。");
+                if(!gotContent) throw new OperationFailureException(siliconGlm?(gotReasoning?"硅基流动已返回思考内容，但没有正文。请降低GLM思考档位，或检查费用与输出控制中的正文上限，再手动测试；未自动重试。":"硅基流动没有返回正文，请核对模型ID、账户权限和输出参数，再手动测试；未自动重试。"):zhipu?"智谱未返回正文；模型思考可能已占满输出上限。请在费用与输出控制中检查输出上限（可设1024），再手动重试；未自动增加额度。":"服务未返回文本，请检查模型是否支持非思考文本对话。");
                 return new(content.ToString(),length,trimmed);
             }
             catch(OperationCanceledException) when(!cancellation.IsCancellationRequested)
