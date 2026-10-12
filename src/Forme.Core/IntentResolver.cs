@@ -17,6 +17,13 @@ public static class IntentResolver
         if(Suppressed(text)) return new([],false,true);
         if(rules?.Match(text) is {} fast) return new(fast.Select(ActionPlanner.FromCommand).ToArray(),true);
         if(petName is {Length:>0} && text.StartsWith(petName,StringComparison.Ordinal)) text = text[petName.Length..].TrimStart('，',',',' ');
+        if(Matches(text,"^(?:绕|环绕|围着|沿着)?(?:电脑)?屏幕(?:上)?(?:走|跑|奔跑)?(?:一|1|两|二|2)圈(?:走|跑|奔跑)?$"))
+        {
+            int count=Matches(text,"(?:两|二|2)圈")?2:1;
+            return new([new(CompanionIntentType.Stroll,Mode: text.Contains('跑')||text.Contains("奔跑",StringComparison.Ordinal)?"run":"walk",Count:count)],true);
+        }
+        if(Matches(text,"^(?:(?:去|在|绕|环绕|围着|沿着))?(?:小屋|屋子|房间)(?:里面|里|内)?(?:(?:走|跑|奔跑)?(?:一|1)圈(?:走|跑|奔跑)?|走走|逛逛|散步|溜达|走两步|走几步|活动活动)$"))
+            return new([new(CompanionIntentType.ChangeScene,"indoor"),new(CompanionIntentType.Stroll,Mode:text.Contains('跑')||text.Contains("奔跑",StringComparison.Ordinal)?"run":"walk")],true);
         var parts = Regex.Split(text,"(?:[，,；;]?(?:然后|接着|再)|[，,；;])",Options,TimeSpan.FromMilliseconds(50));
         if(parts.Length > 3) return new([],true);
         var intents = new List<CompanionIntent>();

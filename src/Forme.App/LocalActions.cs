@@ -50,7 +50,7 @@ internal sealed partial class Controller
         var user=new ChatMessage(Guid.NewGuid().ToString("N"),Session.Id,"user",input,"local",DateTimeOffset.Now);
         var reply=new ChatMessage(Guid.NewGuid().ToString("N"),Session.Id,"assistant","","streaming",DateTimeOffset.Now.AddTicks(1));
         Store.BeginChatTurn(user,reply);Draft="";var request=new CancellationTokenSource();_request=request;++_epoch;ActionResults=[];
-        _localExecuting=true;LiveReply="正在执行本地规则，不发送AI请求。";ChatStatus=LiveReply;SyncTimer();Changed?.Invoke();
+        _localExecuting=true;LiveReply="正在执行宠物动作（本地处理，未调用AI）…";ChatStatus=LiveReply;SyncTimer();Changed?.Invoke();
         try
         {
             ActionResults=await ExecuteIntents(resolved.Intents,request.Token);
@@ -70,7 +70,9 @@ internal sealed partial class Controller
     {
         try
         {
-            var plan=ActionPlanner.Build(intents,CurrentScene?.Invoke()??SceneKind.Desktop);
+            var scene=CurrentScene?.Invoke()??SceneKind.Desktop;
+            if(intents.Count>1&&((intents[0] is {Type:CompanionIntentType.ChangeScene,Target:"indoor"}&&scene==SceneKind.Indoor)||(intents[0] is {Type:CompanionIntentType.ChangeScene,Target:"outdoor"}&&scene==SceneKind.Outdoor)))intents=intents.Skip(1).ToArray();
+            var plan=ActionPlanner.Build(intents,scene);
             return await ActionExecutor.Execute(plan,()=>Preferences,ActionPreflight,
                 command=>ActionHandler?.Invoke(command)??(CommandHandler is {} handler
                     ?new ActionResult(ActionResultCode.Started,command.Action,command.Value,handler(command),TimeSpan.Zero)

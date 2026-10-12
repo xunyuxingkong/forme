@@ -30,6 +30,7 @@ internal static class ChatDisplay
             return content;
         }
         string stored=message.Content.Trim();
+        if(message.Status=="error"&&stored is "未收到内容" or "未收到正文")return "服务没有返回可用正文；动作类请求不会执行。";
         if(message.Status=="error"&&(ServiceErrors.Contains(stored,StringComparer.Ordinal)||IsHttpError(stored)))return "";
         string visible=Message(message.Content);
         if(message.Status=="local")visible=string.Join("\n",visible.Split('\n').Where(line=>line.Trim() is not "本地动作"&&line.Trim()!=LocalRuleResult)).Trim();
@@ -44,7 +45,8 @@ internal static class ChatDisplay
 
     public static string Message(string content)
     {
-        if(content==LocalRuleProgress||content=="正在理解动作请求…")return "正在陪你互动…";
+        if(content==LocalRuleProgress)return "正在陪你互动…";
+        if(content is "正在理解动作请求…" or "正在识别宠物动作…")return "正在识别宠物动作…";
         int report=content.IndexOf(CompanionCommands.ReportMarker,StringComparison.Ordinal);
         string visible=CompanionCommands.VisibleText(report>=0?content[..report]:content).Trim();
         if(report<0)return visible;

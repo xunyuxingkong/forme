@@ -95,7 +95,7 @@ internal sealed partial class DesktopHost : IDisposable
         _app=app;_c=c;_smoke=smoke;
         c.CommandHandler=ExecuteCompanionCommand;c.SceneContext=()=>House?.SceneDescription??"桌面悬浮伙伴；房间坐标移动暂不可用";
         c.ActionHandler=ExecuteAction;c.ActionPreflight=PreflightActions;c.CurrentScene=()=>House?.CompanionScene??(_pet is {IsVisible:true}?SceneKind.Desktop:SceneKind.Tray);
-        c.CommandWaiter=(command,token)=>House?.WaitCreation(command,token)??_pet?.WaitCommand(command,token)??Task.FromResult(true);
+        c.CommandWaiter=(command,token)=>command.Action=="stroll"&&command.Value is "lap1" or "lap2"?_pet?.WaitCommand(command,token)??Task.FromResult(true):House?.WaitCreation(command,token)??_pet?.WaitCommand(command,token)??Task.FromResult(true);
         c.StopCommands=()=>{House?.StopCompanion();_pet?.StopCommands();};
         _petWanted=c.Preferences.DisplayMode!="tray";
         using(var iconStream=System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("Forme.Icon"))if(iconStream is not null)_icon=new System.Drawing.Icon(iconStream);

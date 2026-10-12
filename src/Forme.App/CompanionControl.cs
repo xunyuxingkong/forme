@@ -9,13 +9,18 @@ internal sealed partial class DesktopHost
     {
         if(_exit||_c.AnimationSuspended)return ActionResult.Failure(ActionResultCode.SceneUnavailable,"应用正在暂停，整组未执行。");
         if(House is {WindowState:WindowState.Minimized})return ActionResult.Failure(ActionResultCode.SceneUnavailable,"小屋已最小化，整组未执行。");
+        if(plan.Steps.Any(x=>x.Action=="stroll"&&x.Value is "lap1" or "lap2"))
+        {
+            if(plan.Steps.Count!=1)return ActionResult.Failure(ActionResultCode.SceneUnavailable,"屏幕环绕请单独发送，整组未执行。");
+            if(_pet is not {IsVisible:true}||_c.Preferences.DisplayMode=="edge")return ActionResult.Failure(ActionResultCode.SceneUnavailable,"屏幕环绕需要显示中的桌面伙伴；本轮没有执行。请先显示桌面伙伴。");
+            return null;
+        }
         if(!_c.Preferences.ShowHome3D&&plan.Steps.Any(x=>x.Action is "go" or "interact" or "life" or "hide" or "throw" or "toy" or "furniture" or "layout"))return ActionResult.Failure(ActionResultCode.SceneUnavailable,"动画场景已隐藏，请先显示动画；整组未执行。");
         bool willOpenHouse=House is not null;
         foreach(var step in plan.Steps)
         {
             if(step.Action is "scene" or "go" or "interact" or "life" or "hide" or "throw" or "toy" or "layout" or "furniture" || step.Action.StartsWith("boat",StringComparison.Ordinal))willOpenHouse=true;
             if(willOpenHouse&&!_c.Preferences.ShowHome3D&&step.Action is "stroll" or "dance" or "pat" or "rub" or "recall")return ActionResult.Failure(ActionResultCode.SceneUnavailable,"动画场景已隐藏，请先显示动画；整组未执行。",step);
-            if(step.Action=="stroll"&&step.Value is "lap1" or "lap2"&&willOpenHouse)return ActionResult.Failure(ActionResultCode.SceneUnavailable,"屏幕环绕只支持桌面伙伴，整组未执行。",step);
             if(step.Action is "stroll" or "dance" or "pat" or "rub" or "recall" && !willOpenHouse && (_pet is not {IsVisible:true} || _c.Preferences.DisplayMode=="edge"))return ActionResult.Failure(ActionResultCode.SceneUnavailable,"伙伴已隐藏或收起，整组未执行。",step);
         }
         return House?.PreflightActions(plan)??TargetNavigation.Preflight(plan,_c.Store.World(),SceneKind.Desktop,TargetNavigation.Start);
@@ -38,7 +43,7 @@ internal sealed partial class DesktopHost
             case "light":_c.SavePreferences(_c.Preferences with{RoomLamp=command.Value=="on"});return command.Value=="on"?"灯已打开":"灯已关闭";
             case "fireplace":_c.SavePreferences(_c.Preferences with{Fireplace=command.Value=="on"});return command.Value=="on"?"壁炉已点亮":"壁炉已熄灭";
             case "interact":if(House is null)ShowHouse("chat");return House!.InteractWorld(command.Value!);
-            case "stroll":if(House is not null){if(command.Value is "lap1" or "lap2")throw new OperationFailureException("屏幕环绕只支持桌面悬浮伙伴；请先返回桌面伙伴窗口");return House.MoveNaturally(command);}if(_pet is not {IsVisible:true})throw new OperationFailureException("伙伴已隐藏");return command.Value is "lap1" or "lap2"?_pet.StartScreenLaps(command.Value=="lap1"?1:2):_pet.StartStep(command.Value=="run");
+            case "stroll":if(command.Value is "lap1" or "lap2"){if(_pet is not {IsVisible:true})throw new ActionFailureException(ActionResultCode.SceneUnavailable,"桌面伙伴未显示，屏幕环绕没有执行。");return _pet.StartScreenLaps(command.Value=="lap1"?1:2);}if(House is not null)return House.MoveNaturally(command);if(_pet is not {IsVisible:true})throw new OperationFailureException("伙伴已隐藏");return _pet.StartStep(command.Value=="run");
             case "go":if(House is null)ShowHouse("chat");return House!.MoveNaturally(command);
             case "model":_c.SavePreferences(_c.Preferences with{PetModel=command.Value!});return "已切换伙伴模型";
             case "stop":House?.StopCompanion();_pet?.StopCommands();if(House is null)_pet?.SetAiIdleMode("idle");return "已停止当前活动和剩余动作";

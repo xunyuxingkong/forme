@@ -36,7 +36,15 @@ public static class ActionExecutor
                         else
                         {
                             linked.Token.ThrowIfCancellationRequested();
-                            string message = command.Action == "go" ? $"已经到{TargetCatalog.Find(command.Value)?.Name}啦。" : "伙伴动作已完成。";
+                            string message = command.Action switch
+                            {
+                                "go" => $"已经到{TargetCatalog.Find(command.Value)?.Name}啦。",
+                                "stroll" when command.Value=="lap1" => "桌面伙伴已绕屏幕完成一圈。",
+                                "stroll" when command.Value=="lap2" => "桌面伙伴已绕屏幕完成两圈。",
+                                "stroll" when command.Value=="run" => "伙伴已完成当前场景的奔跑动作。",
+                                "stroll" => "伙伴已完成当前场景的散步动作。",
+                                _ => "伙伴动作已完成。"
+                            };
                             result = new(ActionResultCode.Completed,command.Action,command.Value,message,watch.Elapsed);
                         }
                     }
