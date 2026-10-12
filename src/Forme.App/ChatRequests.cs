@@ -14,7 +14,8 @@ internal static class ChatRequests
     }
     public static async Task Send(Controller c)
     {
-        if(c.Busy)return;
+        if(c.Busy){c.TryCancelPendingFromDraft();return;}
+        if(await c.TrySendFastPathLocal())return;
         if(!c.Secrets.Exists&&await c.TrySendLocal())return;
         if(!c.Secrets.Exists)throw new Forme.Core.OperationFailureException("此表达未能在本地完整理解，AI识别或自由对话需要先配置AI密钥。");
         if(c.Session is { } session&&!Forme.Core.AiClient.SameEndpoint(session.Endpoint,c.Preferences.Endpoint))

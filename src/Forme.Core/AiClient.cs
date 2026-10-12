@@ -27,6 +27,9 @@ public sealed record AiLimits(TimeSpan First, TimeSpan Idle, TimeSpan Total)
 }
 public sealed class AiClient : IDisposable
 {
+    private const long RawStreamByteLimit=4L*1024*1024;
+    private const long ReasoningByteLimit=64L*1024;
+    private const int ContentCharLimit=32000;
     private static readonly JsonSerializerOptions MemoryJson=new(){Encoder=System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping};
     private readonly HttpClient _http;
     private readonly SemaphoreSlim _gate = new(1,1);
@@ -157,7 +160,7 @@ public sealed class AiClient : IDisposable
             request.Content=new StringContent(JsonSerializer.Serialize(payload),Encoding.UTF8,"application/json");
             using var total=CancellationTokenSource.CreateLinkedTokenSource(cancellation); total.CancelAfter(_limits.Total);
             using var inactivity=CancellationTokenSource.CreateLinkedTokenSource(total.Token); inactivity.CancelAfter(_limits.First);
-            bool gotContent=false, gotReasoning=false, length=false, done=false; var content=new StringBuilder();
+            bool gotContent=false, gotReasoning=false, length=false, done=false;long reasoningBytes=0;var content=new StringBuilder();
             try
             {
                 using var response=await _http.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,inactivity.Token).ConfigureAwait(false);
@@ -171,7 +174,8 @@ public sealed class AiClient : IDisposable
                     _=>$"服务返回 HTTP {(int)response.StatusCode}，请检查连接或模型设置。"
                 });
                 using var stream=await response.Content.ReadAsStreamAsync(inactivity.Token).ConfigureAwait(false);
-                using var reader=new StreamReader(stream,Encoding.UTF8);
+                using var boundedStream=new BoundedReadStream(stream,RawStreamByteLimit);
+                using var reader=new StreamReader(boundedStream,Encoding.UTF8);
                 var events=new BufferedSseReader(reader);
                 while(await events.Event(inactivity.Token).ConfigureAwait(false) is { } data)
                 {
@@ -183,11 +187,11 @@ public sealed class AiClient : IDisposable
                     // Real reasoning output is progress, but is never displayed, stored, or resent.
                     // The fixed total timeout still bounds requests that only produce reasoning.
                     if(choice.TryGetProperty("delta",out var reasoningDelta)&&reasoningDelta.TryGetProperty("reasoning_content",out var reasoning)&&reasoning.ValueKind==JsonValueKind.String&&!string.IsNullOrEmpty(reasoning.GetString()))
-                    {gotReasoning=true;if(zhipu||siliconGlm)inactivity.CancelAfter(_limits.Idle);}
+                    {var fragment=reasoning.GetString()!;reasoningBytes+=Encoding.UTF8.GetByteCount(fragment);if(reasoningBytes>ReasoningByteLimit)throw new InvalidDataException("模型思考内容超过本地64KB上限，已停止接收；请降低思考强度后手动重试。动作未执行。");gotReasoning=true;if(zhipu||siliconGlm)inactivity.CancelAfter(_limits.Idle);}
                     if(choice.TryGetProperty("delta",out var delta) && delta.TryGetProperty("content",out var c) && c.ValueKind==JsonValueKind.String)
                     {
                         var fragment=c.GetString();
-                        if(!string.IsNullOrEmpty(fragment)) {gotContent=true;content.Append(fragment); if(content.Length>32000) throw new InvalidDataException("回复超出本地长度限制。"); progress(fragment); inactivity.CancelAfter(_limits.Idle);}
+                        if(!string.IsNullOrEmpty(fragment)) {gotContent=true;content.Append(fragment); if(content.Length>ContentCharLimit) throw new InvalidDataException("模型正文超过本地32,000字符上限，已停止接收；动作未执行。"); progress(fragment); inactivity.CancelAfter(_limits.Idle);}
                     }
                     if(choice.TryGetProperty("finish_reason",out var reason) && reason.ValueKind==JsonValueKind.String)
                     {length=reason.GetString()=="length";done=true;break;}

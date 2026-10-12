@@ -361,7 +361,11 @@ internal static class Smoke
             var chatHistory=Descendants(chat).OfType<System.Windows.Controls.ScrollViewer>().Single(x=>x.Name=="聊天记录滚动区");
             var chatNav=Descendants(chat).OfType<System.Windows.Controls.Button>().Single(x=>x.Content?.ToString()=="聊一会儿");
             var inputBounds=chatInput.TransformToAncestor(chat).TransformBounds(new Rect(chatInput.RenderSize));var historyBounds=chatHistory.TransformToAncestor(chat).TransformBounds(new Rect(chatHistory.RenderSize));var navBounds=chatNav.TransformToAncestor(chat).TransformBounds(new Rect(chatNav.RenderSize));
-            if(!chatInput.IsVisible||chatInput.ActualWidth<300||chatHistory.ActualHeight<120||historyBounds.Bottom>inputBounds.Top||inputBounds.Bottom>navBounds.Top){Save(chat,"artifacts/screenshots/chat-layout-failure.png");throw new Exception($"Chat history and bottom composer overlap or leave the viewport: input={inputBounds}, history={historyBounds}, nav={navBounds}, visible={chatInput.IsVisible}");}
+            if(!chatInput.IsVisible){Save(chat,"artifacts/screenshots/chat-layout-failure.png");throw new Exception("ChatInputVisible failed");}
+            if(chatInput.ActualWidth<300){Save(chat,"artifacts/screenshots/chat-layout-failure.png");throw new Exception($"ChatInputMinimumWidth failed: {chatInput.ActualWidth}");}
+            if(chatHistory.ActualHeight<100){Save(chat,"artifacts/screenshots/chat-layout-failure.png");throw new Exception($"ChatHistoryMinimumHeight failed: {chatHistory.ActualHeight}");}
+            if(historyBounds.Bottom>inputBounds.Top){Save(chat,"artifacts/screenshots/chat-layout-failure.png");throw new Exception($"HistoryComposerNoOverlap failed: history={historyBounds}, input={inputBounds}");}
+            if(inputBounds.Bottom>navBounds.Top){Save(chat,"artifacts/screenshots/chat-layout-failure.png");throw new Exception($"ComposerNavigationNoOverlap failed: input={inputBounds}, navigation={navBounds}");}
             Save(chat,"artifacts/screenshots/chat-layout.png");
             var chatOptions=Descendants(chat).OfType<System.Windows.Controls.Expander>().Single(x=>System.Windows.Automation.AutomationProperties.GetName(x)=="聊天记录管理");chatOptions.IsExpanded=true;chat.UpdateLayout();
             var searchInput=Descendants(chat).OfType<System.Windows.Controls.TextBox>().Single(x=>System.Windows.Automation.AutomationProperties.GetName(x)=="搜索当前会话");
@@ -410,7 +414,8 @@ internal static class Smoke
         if(!room.Outdoors||!room.DefaultSceneFits())throw new Exception("Outdoor switch or camera fit failed");
         Save(host.House,"artifacts/screenshots/outdoors.png");
         host.House.WindowState=WindowState.Normal;host.House.Show();
-        await host.House.Dispatcher.InvokeAsync(()=>host.House.UpdateLayout(),System.Windows.Threading.DispatcherPriority.ContextIdle);
+        for(int attempt=0;attempt<10&&!room.IsVisible;attempt++){await Task.Delay(50);await host.House.Dispatcher.InvokeAsync(()=>host.House.UpdateLayout(),System.Windows.Threading.DispatcherPriority.ContextIdle);}
+        if(!room.IsVisible){Save(host.House,"artifacts/screenshots/outdoor-scene-visibility-failure.png");throw new Exception($"OutdoorSceneVisible failed: windowVisible={host.House.IsVisible}, visibility={host.House.Visibility}, window={host.House.WindowState}");}
         point=room.ProjectGround(new(1.2,6))??throw new Exception("Outdoor projection failed");
         if(!room.ClickGround(point)||!room.PetMoving)throw new Exception($"Outdoor click did not start run: window={host.House.WindowState}, motionVisible={room.MotionVisible}, visible={room.IsVisible}, hit={room.ObjectAt(point)}, ground={room.GroundAt(point)}");
         await Task.Delay(120);var position=room.PetPosition;

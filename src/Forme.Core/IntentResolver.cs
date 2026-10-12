@@ -35,6 +35,13 @@ public static class IntentResolver
         if(intents.Count>3)return new([],true);
         return new(intents,true);
     }
+    public static IntentResolution ResolveFastPath(string input,ActionRules? rules=null,string? petName=null)
+    {
+        var resolved=Resolve(input,null,petName);
+        if(resolved.Intents.Count==1&&resolved.Intents[0].Type is CompanionIntentType.Stop or CompanionIntentType.Recall)return resolved;
+        if(rules?.MatchCustom(input) is {} shortcuts)return new(shortcuts.Select(ActionPlanner.FromCommand).ToArray(),true);
+        return new([],resolved.IsActionRequest,resolved.Suppressed);
+    }
     public static bool LooksLikeRequest(string text,string? petName=null)
     {
         if(petName is {Length:>0}&&text.StartsWith(petName,StringComparison.Ordinal))text=text[petName.Length..].TrimStart('，',',',' ');
@@ -49,7 +56,7 @@ public static class IntentResolver
     }
     private static CompanionIntent? Parse(string text)
     {
-        if(Matches(text,"^(?:停|停下|停止|别动|不要动)$")) return new(CompanionIntentType.Stop);
+        if(Matches(text,"^(?:停|停下|停止|取消|取消当前动作|停止当前动作|别动|不要动)$")) return new(CompanionIntentType.Stop);
         if(Matches(text,"^(?:过来|回来|回到我身边)$")) return new(CompanionIntentType.Recall);
         if(Matches(text,"^(?:去户外|到户外|去花园|回小屋|回屋里)$")) return new(CompanionIntentType.ChangeScene,text.StartsWith("回",StringComparison.Ordinal)?"indoor":"outdoor");
         var targets = TargetCatalog.All.Where(t => t.Aliases.Any(alias => text.Contains(alias,StringComparison.Ordinal))).ToArray();

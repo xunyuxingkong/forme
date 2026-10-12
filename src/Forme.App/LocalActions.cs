@@ -45,15 +45,34 @@ internal sealed partial class Controller
         if(Attachments.Count>0||!Preferences.LocalActionRules)return false;
         if(_rulesError is not null)throw new OperationFailureException(_rulesError+"，请在动作规则设置中修复或恢复默认。");
         var resolved=LocalIntent(Draft.Trim());if(resolved.Intents.Count==0)return false;
+        return await SendLocalIntents(Draft.Trim(),resolved.Intents);
+    }
+    public async Task<bool> TrySendFastPathLocal()
+    {
+        if(Attachments.Count>0)return false;
+        ActionRules? shortcuts=Preferences.LocalActionRules&&_rulesError is null?_actionRules:null;
+        string input=Draft.Trim();var resolved=IntentResolver.ResolveFastPath(input,shortcuts,Preferences.PetName);
+        if(resolved.Intents.Count==0)return false;
+        return await SendLocalIntents(input,resolved.Intents);
+    }
+    public bool TryCancelPendingFromDraft()
+    {
+        if(!Busy||Attachments.Count>0)return false;
+        var resolved=IntentResolver.ResolveFastPath(Draft.Trim(),Preferences.LocalActionRules&&_rulesError is null?_actionRules:null,Preferences.PetName);
+        if(resolved.Intents.Count!=1||resolved.Intents[0].Type!=CompanionIntentType.Stop)return false;
+        Draft="";StopReply();return true;
+    }
+    private async Task<bool> SendLocalIntents(string input,IReadOnlyList<CompanionIntent> intents)
+    {
         if(Busy)return true;if(PendingChatSave is not null)throw new OperationFailureException("请先处理暂存回复。");
-        string input=Draft.Trim();Session??=Store.NewSession(Preferences.Endpoint);
+        Session??=Store.NewSession(Preferences.Endpoint);
         var user=new ChatMessage(Guid.NewGuid().ToString("N"),Session.Id,"user",input,"local",DateTimeOffset.Now);
         var reply=new ChatMessage(Guid.NewGuid().ToString("N"),Session.Id,"assistant","","streaming",DateTimeOffset.Now.AddTicks(1));
         Store.BeginChatTurn(user,reply);Draft="";var request=new CancellationTokenSource();_request=request;++_epoch;ActionResults=[];
         _localExecuting=true;LiveReply="正在执行宠物动作（本地处理，未调用AI）…";ChatStatus=LiveReply;SyncTimer();Changed?.Invoke();
         try
         {
-            ActionResults=await ExecuteIntents(resolved.Intents,request.Token);
+            ActionResults=await ExecuteIntents(intents,request.Token);
             string text=ResultText(ActionResults);
             if(Store.HasSession(reply.SessionId))
             {

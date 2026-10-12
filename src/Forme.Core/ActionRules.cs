@@ -87,6 +87,13 @@ public sealed record ActionRules(int Version,ActionRule[] Rules)
         }
         return result;
     }
+    public IReadOnlyList<CompanionCommand>? MatchCustom(string input)
+    {
+        if(input.Length>160||IntentResolver.Suppressed(input))return null;
+        string phrase=Normalize(input);var builtin=Default().Rules;
+        var rule=Rules.FirstOrDefault(r=>!builtin.Any(b=>b.Phrases.Select(Normalize).Order(StringComparer.Ordinal).SequenceEqual(r.Phrases.Select(Normalize).Order(StringComparer.Ordinal))&&b.Commands.SequenceEqual(r.Commands))&&r.Phrases.Any(p=>Normalize(p)==phrase));
+        return rule?.Commands;
+    }
     private static string Normalize(string text)
     {
         text=Regex.Replace(text.Trim(),"[\\s。！？!?，,、；;：:]","");

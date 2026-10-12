@@ -31,6 +31,20 @@ public sealed class IntentTests
         Assert.AreEqual(1,IntentResolver.Resolve("你能不能走两步吗？",ActionRules.Default()).Intents.Count);
     }
     [TestMethod]
+    public void SafetyFastPathKeepsStopRecallAndExplicitCustomShortcutsLocal()
+    {
+        foreach(string phrase in new[]{"停下","取消","取消当前动作","别动"})
+            Assert.AreEqual(CompanionIntentType.Stop,IntentResolver.ResolveFastPath(phrase).Intents.Single().Type,phrase);
+        foreach(string phrase in new[]{"回来","过来","回到我身边"})
+            Assert.AreEqual(CompanionIntentType.Recall,IntentResolver.ResolveFastPath(phrase).Intents.Single().Type,phrase);
+        Assert.AreEqual(0,IntentResolver.ResolveFastPath("散散步",ActionRules.Default()).Intents.Count,"ordinary movement remains routed through AI when connected");
+        var custom=new ActionRules(1,[new(["立即回到我身边"],[new("recall")])]);
+        var customResult=IntentResolver.ResolveFastPath("立即回到我身边",custom);
+        Assert.AreEqual("recall",ActionPlanner.Build(customResult.Intents,SceneKind.Indoor).Steps.Single().Action);
+        foreach(string phrase in new[]{"不要取消","如果你停下会怎样","‘回来’是什么意思"})
+            Assert.AreEqual(0,IntentResolver.ResolveFastPath(phrase,custom).Intents.Count,phrase);
+    }
+    [TestMethod]
     public void PlansSwitchScenesOnceAndRespectStepBudget()
     {
         var plan=ActionPlanner.Build(IntentResolver.Resolve("先去户外，再到池塘边").Intents,SceneKind.Indoor);

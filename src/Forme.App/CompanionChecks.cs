@@ -185,7 +185,11 @@ internal static class CompanionChecks
             }
             handler.Reply="我们可以聊聊你今天的感受。";protocol.Store.Set("ai-consent",protocol.Preferences.Endpoint);protocol.Draft="谢谢你";await ChatRequests.Send(protocol);
             if(handler.Calls!=4||executed!=5||!protocol.Store.Messages(protocol.Session!.Id).Last().Content.Contains("我们可以聊聊",StringComparison.Ordinal)||protocol.Store.Get<string>("ai-consent-v2-routing")!=protocol.Preferences.Endpoint)throw new Exception("Prior provider consent did not hide the repeated prompt or preserve ordinary chat");
-            File.WriteAllText("artifacts/intent-smoke-result.txt","PASS: AI routes every text-only message as ordinary chat or a bounded marked action plan; compound house walk and book target execute from AI output without phrase-specific local matching; whole-plan permission/target preflight; actual arrival; negative/discussion local suppression; floating chat and tray; malformed AI promise rejected; ordinary chat preserved; one offline mock request per message.\n");
+            protocol.Draft="取消";await ChatRequests.Send(protocol);if(handler.Calls!=4||executed!=6||protocol.ActionResults.Single().Code!=ActionResultCode.Completed)throw new Exception("Local cancel fast path called the AI service");
+            protocol.Draft="回来";await ChatRequests.Send(protocol);if(handler.Calls!=4||executed!=7||protocol.ActionResults.Single().Code!=ActionResultCode.Completed)throw new Exception("Local recall fast path called the AI service");
+            protocol.SavePreferences(protocol.Preferences with{LocalActionRules=true});protocol.SaveRules(new ActionRules(1,[new(["专属快捷回到我身边"],[new("recall")])]).Serialize());protocol.Draft="专属快捷回到我身边";await ChatRequests.Send(protocol);
+            if(handler.Calls!=4||executed!=8||protocol.ActionResults.Single().Code!=ActionResultCode.Completed)throw new Exception("Explicit custom shortcut was not handled locally");
+            File.WriteAllText("artifacts/intent-smoke-result.txt","PASS: AI routes normal text as ordinary chat or a bounded marked action plan; stop/cancel, recall and explicit custom shortcuts use the local fast path; compound house walk and book target execute from AI output; whole-plan permission/target preflight; actual arrival; negative/discussion suppression; floating chat and tray; malformed AI promise rejected; one offline mock request for each AI-routed message.\n");
         }
         finally{c.Store.SaveWorld(world);c.SavePreferences(before);c.Draft="";host.ShowHouse("home");host.House!.SwitchWorld(false);}
     }
