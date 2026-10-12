@@ -6,15 +6,16 @@ namespace Forme.App;
 
 internal static class ChatTranscript
 {
-    public static StackPanel Entry(string? nickname,TextBlock text,string? status=null)
+    public static StackPanel Entry(string? nickname,TextBlock text,string? status=null,bool user=false)
     {
+        var alignment=user?TextAlignment.Right:TextAlignment.Left;
         var entry=new StackPanel{Margin=new Thickness(0,0,0,18)};
-        if(nickname is not null)
+        if(user||nickname is not null)
         {
-            var heading=Ui.Text(nickname,11,Ui.Sage,true);heading.Margin=new Thickness(0,0,0,4);entry.Children.Add(heading);
+            var heading=Ui.Text(user?"我":nickname!,11,user?Ui.Muted:Ui.Sage,true);heading.TextAlignment=alignment;heading.Margin=new Thickness(0,0,0,4);entry.Children.Add(heading);
         }
-        text.Margin=new Thickness(0);entry.Children.Add(text);
-        if(status is not null){var hint=Ui.Text(status,11,Ui.Muted);hint.Margin=new Thickness(0,4,0,0);entry.Children.Add(hint);}
+        text.TextAlignment=alignment;text.Margin=new Thickness(0);entry.Children.Add(text);
+        if(status is not null){var hint=Ui.Text(status,11,Ui.Muted);hint.TextAlignment=alignment;hint.Margin=new Thickness(0,4,0,0);entry.Children.Add(hint);}
         return entry;
     }
 
@@ -28,7 +29,7 @@ internal static class ChatTranscript
         {
             string visible=message.Role=="user"?message.Content:ChatDisplay.Message(message.Content);
             if(visible.Length==0)return "";
-            return message.Role=="user"?visible:nickname+"\n"+visible;
+            return (message.Role=="user"?"我":nickname)+"\n"+visible;
         }).Where(text=>text.Length>0));
     }
 

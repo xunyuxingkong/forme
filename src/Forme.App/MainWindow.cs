@@ -400,7 +400,7 @@ internal sealed partial class MainWindow : Window
             if(message.Status=="streaming"&&_c.Busy)continue;
             string visible=message.Role=="user"?message.Content:ChatDisplay.Message(message.Content);
             if(message.Role!="user"&&visible.Length==0&&message.Content.Length>0)continue;
-            transcript.Children.Add(ChatTranscript.Entry(message.Role=="user"?null:_c.Preferences.PetName,Ui.Text(message.Content.Length==0?"未收到内容":visible,14),message.Status=="stopped"?"已停止":message.Status=="error"?"未完成":null));
+            transcript.Children.Add(ChatTranscript.Entry(message.Role=="user"?null:_c.Preferences.PetName,Ui.Text(message.Content.Length==0?"未收到内容":visible,14),message.Status=="stopped"?"已停止":message.Status=="error"?"未完成":null,user:message.Role=="user"));
         }
         if(messages.Count==0&&!_c.Busy)transcript.Children.Add(Ui.Stack(Ui.Text(_chatSearch.Length>0?"没有找到匹配的聊天记录":"这里还没有聊天记录",15,null,true),Ui.Text(_chatSearch.Length>0?"可以调整关键词，或清除搜索查看完整会话。":"在下方输入内容，就能和伙伴开始聊天。",12,Ui.Muted)));
         if(_c.Busy){_liveText=Ui.Text(_c.LiveReply.Length==0?"…":ChatDisplay.Message(_c.LiveReply),14);transcript.Children.Add(ChatTranscript.Entry(_c.Preferences.PetName,_liveText));}

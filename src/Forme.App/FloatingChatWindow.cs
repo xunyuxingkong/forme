@@ -82,7 +82,7 @@ internal sealed class FloatingChatWindow : Window
             if(message.Status=="streaming"&&_c.Busy)continue;
             string visible=message.Role=="user"?message.Content:ChatDisplay.Message(message.Content);
             if(message.Role!="user"&&visible.Length==0&&message.Content.Length>0)continue;
-            _messages.Children.Add(ChatTranscript.Entry(message.Role=="user"?null:_c.Preferences.PetName,Ui.Text(message.Content.Length==0?"未收到内容":visible,13),message.Status=="stopped"?"已停止":message.Status=="error"?"未完成":null));
+            _messages.Children.Add(ChatTranscript.Entry(message.Role=="user"?null:_c.Preferences.PetName,Ui.Text(message.Content.Length==0?"未收到内容":visible,13),message.Status=="stopped"?"已停止":message.Status=="error"?"未完成":null,user:message.Role=="user"));
         }
         if(!_c.Secrets.Exists)_messages.Children.Add(Ui.Text("明确动作可按本地规则执行，例如“走两步”“跳个舞”；先开启对应权限。自由对话需在设置连接AI，调用可能收费。",12,Ui.Muted));
         else if(history.Count==0&&!_c.Busy)_messages.Children.Add(Ui.Text("我在这里，听你说。分享范围可在发送预览中查看。",13,Ui.Muted));
