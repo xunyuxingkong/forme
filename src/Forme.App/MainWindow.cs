@@ -363,11 +363,13 @@ internal sealed partial class MainWindow : Window
         var newSession=Ui.Button("新对话",()=>{_chatOffset=0;_chatSearch="";_c.NewSession();});Grid.SetColumn(newSession,1);sessionBar.Children.Add(newSession);
         var deleteSession=Ui.Button("删除本次",()=>{if(Ui.Confirm("删除此会话和相关应用备份？已发送给服务商及外部导出副本不在删除范围内。"))_c.DeleteSession();});Grid.SetColumn(deleteSession,2);sessionBar.Children.Add(deleteSession);Place(sessionBar,1);
 
+        var messages=_c.Session is null?new List<ChatMessage>():_chatSearch.Length>0?_c.Store.SearchMessages(_c.Session.Id,_chatSearch,_chatOffset,20):_c.Store.Messages(_c.Session.Id,_chatOffset,20);
+        string RecordText()=>ChatTranscript.Text(messages,_c.Preferences.PetName,_c.PendingChatSave);
         int memories=_c.Store.Memories().Count(x=>x.Enabled&&x.Provider==provider);
         var optionActions=Ui.Row(Ui.Button("管理记忆",()=>Navigate("memory")),Ui.Button("角色与动作权限",()=>Navigate("settings")),Ui.Button("查看本次发送内容",()=>ChatRequests.Preview(_c,this)));
         if(!_c.Secrets.Exists)optionActions.Children.Add(Ui.Button("连接 AI",()=>Navigate("settings")));
         else optionActions.Children.Add(Ui.Button("给我一点鼓励（本地）",()=>Toast("今天不用做得完美。先照顾自己，再开始一件小事。")));
-        var optionItems=Ui.Stack(optionActions,Ui.Text(_c.Preferences.MemoryEnabled?$"记忆分享已开启 · 当前服务可用 {memories} 条 · 只发送预算内的已确认内容":"记忆分享已关闭 · 历史仍保存在本机",11,Ui.Muted));
+        var optionItems=Ui.Stack(ChatTranscript.Actions(RecordText,draft=>{_c.MemoryDraft=draft;Navigate("memory");Toast("已放入记忆编辑框，确认内容和标题后再保存。");},RecordText().Length>0),optionActions,Ui.Text(_c.Preferences.MemoryEnabled?$"记忆分享已开启 · 当前服务可用 {memories} 条 · 只发送预算内的已确认内容":"记忆分享已关闭 · 历史仍保存在本机",11,Ui.Muted));
         if(_c.Session is {} current)
         {
             var savedNote=_c.Store.Note(current.Id);
@@ -383,34 +385,30 @@ internal sealed partial class MainWindow : Window
         var clearSearch=Ui.Button("清除搜索",()=>{_chatSearch="";_chatOffset=0;_chatOptionsExpanded=true;Navigate("chat");});Grid.SetColumn(clearSearch,2);searchBar.Children.Add(clearSearch);optionItems.Children.Add(searchBar);
         if(sessions.Count==10||_sessionOffset>0)optionItems.Children.Add(Pager(_sessionOffset,sessions.Count,10,offset=>{_sessionOffset=offset;_chatOptionsExpanded=true;Navigate("chat");}));
         var optionScroll=new ScrollViewer{Content=optionItems,MaxHeight=230,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};
-        var options=new Expander{Header="会话设置、记忆与搜索",IsExpanded=_chatOptionsExpanded,Content=optionScroll,Margin=new Thickness(0,0,0,6)};System.Windows.Automation.AutomationProperties.SetName(options,"聊天记录管理");
+        var options=new Expander{Header="聊天记录管理 · 会话、记忆与搜索",IsExpanded=_chatOptionsExpanded,Content=optionScroll,Margin=new Thickness(0,0,0,6)};System.Windows.Automation.AutomationProperties.SetName(options,"聊天记录管理");
         options.Expanded+=(_,_)=>_chatOptionsExpanded=true;options.Collapsed+=(_,_)=>_chatOptionsExpanded=false;Place(options,2);
 
-        var messages=_c.Session is null?new List<ChatMessage>():_chatSearch.Length>0?_c.Store.SearchMessages(_c.Session.Id,_chatSearch,_chatOffset,20):_c.Store.Messages(_c.Session.Id,_chatOffset,20);
         var history=new Grid();history.RowDefinitions.Add(new(){Height=GridLength.Auto});history.RowDefinitions.Add(new(){Height=new GridLength(1,GridUnitType.Star)});
-        var historyHeader=new Grid{Margin=new Thickness(0,0,0,6)};historyHeader.ColumnDefinitions.Add(new(){Width=new GridLength(1,GridUnitType.Star)});historyHeader.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
+        var historyHeader=new Grid();historyHeader.ColumnDefinitions.Add(new(){Width=new GridLength(1,GridUnitType.Star)});historyHeader.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
         var historyTitle=Ui.Text(_chatSearch.Length>0?$"聊天记录 · 搜索“{_chatSearch}”":"聊天记录",15,null,true);historyTitle.VerticalAlignment=VerticalAlignment.Center;Grid.SetColumn(historyTitle,0);historyHeader.Children.Add(historyTitle);
         if(_c.Session is not null){var pager=Pager(_chatOffset,messages.Count,20,offset=>{_chatOffset=offset;Navigate("chat");});Grid.SetColumn(pager,1);historyHeader.Children.Add(pager);}
         Grid.SetRow(historyHeader,0);history.Children.Add(historyHeader);
         var transcript=new StackPanel();
-        if(_c.PendingChatSave is {} unsaved)transcript.Children.Add(Ui.Card(Ui.Stack(Ui.Text("这条回复尚未保存到本机",13,Ui.Sage,true),Ui.Text(ChatDisplay.Message(unsaved.Content),13),Ui.Row(Ui.Button("复制暂存回复",()=>Clipboard.SetText(ChatDisplay.Message(unsaved.Content))),Ui.Button("重试保存",_c.RetryChatSave),Ui.Button("放弃保存",()=>{if(Ui.Confirm("放弃这条暂存回复的保存？"))_c.DiscardPendingSave();}))),new Thickness(12)));
+        if(_c.PendingChatSave is {} unsaved)transcript.Children.Add(Ui.Stack(ChatTranscript.Entry(_c.Preferences.PetName,Ui.Text(ChatDisplay.Message(unsaved.Content),14),"这条回复尚未保存到本机"),Ui.Row(Ui.Button("重试保存",_c.RetryChatSave),Ui.Button("放弃保存",()=>{if(Ui.Confirm("放弃这条暂存回复的保存？"))_c.DiscardPendingSave();}))));
         foreach(var message in messages)
         {
             if(message.Status=="streaming"&&_c.Busy)continue;
             string visible=message.Role=="user"?message.Content:ChatDisplay.Message(message.Content);
             if(message.Role!="user"&&visible.Length==0&&message.Content.Length>0)continue;
-            var content=Ui.Stack(Ui.Text(message.Role=="user"?"你":_c.Preferences.PetName,11,Ui.Muted,true),Ui.Text(message.Content.Length==0?"未收到内容":visible,14));
-            if(message.Status is "stopped" or "error")content.Children.Add(Ui.Text(message.Status=="stopped"?"已停止":"未完成",11,Ui.Muted));
-            content.Children.Add(Ui.Row(Ui.Button("复制",()=>Clipboard.SetText(message.Role=="user"?message.Content:visible)),Ui.Button("存为记忆…",()=>{string memory=CompanionCommands.ContextText(message.Content);_c.MemoryDraft=memory.Length>400?memory[..400]:memory;Navigate("memory");Toast("已放入记忆编辑框，确认内容和标题后再保存。");})));
-            transcript.Children.Add(new Border{Child=content,Background=Ui.Brush(message.Role=="user"?"#EEF1EA":"#FFFFFF"),CornerRadius=new CornerRadius(14),BorderBrush=Ui.Line,BorderThickness=new Thickness(1),Padding=new Thickness(12),Margin=new Thickness(0,0,0,8)});
+            transcript.Children.Add(ChatTranscript.Entry(message.Role=="user"?null:_c.Preferences.PetName,Ui.Text(message.Content.Length==0?"未收到内容":visible,14),message.Status=="stopped"?"已停止":message.Status=="error"?"未完成":null));
         }
-        if(messages.Count==0&&!_c.Busy)transcript.Children.Add(Ui.Card(Ui.Stack(Ui.Text(_chatSearch.Length>0?"没有找到匹配的聊天记录":"这里还没有聊天记录",15,null,true),Ui.Text(_chatSearch.Length>0?"可以调整关键词，或清除搜索查看完整会话。":"在下方输入内容，就能和伙伴开始聊天。",12,Ui.Muted)),new Thickness(16)));
-        if(_c.Busy){_liveText=Ui.Text(_c.LiveReply.Length==0?"…":ChatDisplay.Message(_c.LiveReply),14);transcript.Children.Add(Ui.Card(Ui.Stack(Ui.Text(_c.Preferences.PetName,11,Ui.Muted,true),_liveText),new Thickness(12)));}
+        if(messages.Count==0&&!_c.Busy)transcript.Children.Add(Ui.Stack(Ui.Text(_chatSearch.Length>0?"没有找到匹配的聊天记录":"这里还没有聊天记录",15,null,true),Ui.Text(_chatSearch.Length>0?"可以调整关键词，或清除搜索查看完整会话。":"在下方输入内容，就能和伙伴开始聊天。",12,Ui.Muted)));
+        if(_c.Busy){_liveText=Ui.Text(_c.LiveReply.Length==0?"…":ChatDisplay.Message(_c.LiveReply),14);transcript.Children.Add(ChatTranscript.Entry(_c.Preferences.PetName,_liveText));}
         var transcriptScroll=new ScrollViewer{Name="聊天记录滚动区",Content=transcript,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Padding=new Thickness(0,2,8,0)};
-        Grid.SetRow(transcriptScroll,1);history.Children.Add(transcriptScroll);Place(history,3);
+        var transcriptFrame=ChatTranscript.Frame(transcriptScroll);Grid.SetRow(transcriptFrame,1);history.Children.Add(transcriptFrame);Place(history,3);
         if(_chatOffset==0)transcriptScroll.Loaded+=(_,_)=>transcriptScroll.ScrollToEnd();
 
-        var composer=Ui.Stack();composer.Margin=new Thickness(0,8,0,0);
+        var composer=Ui.Stack();composer.Margin=new Thickness(0,4,0,0);
         _chatState=Ui.Text(ChatDisplay.Status(_c.ChatStatus),11,Ui.Muted);_chatState.Margin=new Thickness(0,0,0,4);_chatState.Visibility=string.IsNullOrEmpty(_chatState.Text)?Visibility.Collapsed:Visibility.Visible;composer.Children.Add(_chatState);
         var input=Ui.Input(_c.Draft,true,automationName:"聊天消息");input.MinHeight=58;input.MaxHeight=100;input.Margin=new Thickness(0,0,0,6);input.TextChanged+=(_,_)=>_c.Draft=input.Text;
         async Task Send()
