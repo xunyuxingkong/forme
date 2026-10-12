@@ -25,6 +25,12 @@ internal static class StreamingChecks
             using var ai=new AiClient(new FakeHandler((_,_)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(bad)})));
             await throws(()=>ai.SendAsync(new(),"fake",[new("user","hello")],_=>{},CancellationToken.None),"oversized or error SSE rejected");
         }
+        string oversizedStream=string.Concat(Enumerable.Repeat(": keepalive\n",24000));
+        using(var ai=new AiClient(new FakeHandler((_,_)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(oversizedStream)}))))
+        {
+            try{await ai.SendAsync(new(),"fake",[new("user","hello")],_=>{},CancellationToken.None);throw new Exception("Oversized stream accepted");}
+            catch(InvalidDataException ex){check(ex.Message.Contains("256KB")&&ex.Message.Contains("思考强度")&&ex.Message.Contains("动作未执行"),"oversized stream explains limit and safe retry");}
+        }
         using var cancel=new CancellationTokenSource();var partial=new ReplyBuffer();
         using(var ai=new AiClient(new FakeHandler((_,_)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StreamContent(new StallStream(Encoding.UTF8.GetBytes("data: {\"choices\":[{\"delta\":{\"content\":\"保留\"}}]}\n\n")))}))))
         {

@@ -19,7 +19,7 @@ internal sealed class BufferedSseReader(StreamReader input)
             }
             while(_position<_length)
             {
-                char c=_buffer[_position++];if(++_received>256000)throw new InvalidDataException("服务响应过大，已停止接收。");
+                char c=_buffer[_position++];if(++_received>256000)throw new InvalidDataException("服务流式响应超过本地256KB接收上限，已停止；若启用了模型思考，请降低思考强度后手动重试。动作未执行。");
                 if(_skipLf){_skipLf=false;if(c=='\n')continue;}
                 if(c=='\r'){_skipLf=true;return line.ToString();}
                 if(c=='\n')return line.ToString();
