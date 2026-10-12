@@ -110,21 +110,21 @@ internal sealed partial class DesktopHost : IDisposable
     public void ShowHouse(string page)
     {
         FloatingChat?.CloseForTransfer();
-        _pet?.Close();_pet=null;
         if(House is null)
         {
-            House=new(_c,Changed);House.Closed+=(_,_)=>{House=null;if(!_exit&&_petWanted)ShowPet(false);};
+            _pet?.StopCommands();
+            House=new(_c,Changed,()=>ShowPet(),HideDesktopPet);House.Closed+=(_,_)=>{House=null;if(!_exit&&_petWanted)ShowPet(false);};
         }
         if(_smoke)House.ShowActivated=false;
         House.Show();if(House.WindowState==WindowState.Minimized)House.WindowState=WindowState.Normal;
         if(!_smoke)House.Activate();House.Navigate(page);
+        if(_petWanted)ShowPet(false);
         if(_pendingNotice is {} notice){House.Toast(notice);_pendingNotice=null;}Changed();
     }
     public void ShowPet(bool expand=true)
     {
         _petWanted=true;if(expand&&_c.Preferences.DisplayMode!="pet")_c.SavePreferences(_c.Preferences with{DisplayMode="pet"});
-        if(House is not null){FloatingChat?.CloseForTransfer();House.Close();return;}
-        _pet??=new(_c,page=>{if(page=="chat")ShowFloatingChat();else ShowHouse(page);},HidePet,()=>_ =Exit());_pet.Show();Changed();
+        _pet??=new(_c,page=>{if(page=="chat")ShowFloatingChat();else ShowHouse(page);},HideDesktopPet,()=>_ =Exit());_pet.Show();Changed();
     }
     public void ShowFloatingChat()
     {
@@ -137,7 +137,8 @@ internal sealed partial class DesktopHost : IDisposable
         _pet.ChatOpen(true);if(_smoke)FloatingChat.ShowActivated=false;
         FloatingChat.Show();FloatingChat.WindowState=WindowState.Normal;if(!_smoke)FloatingChat.Activate();
     }
-    public void HidePet(){FloatingChat?.Close();_petWanted=false;if(_c.Preferences.DisplayMode!="tray")_c.SavePreferences(_c.Preferences with{DisplayMode="tray"});_pet?.Close();_pet=null;if(House is not null)House.Close();Changed();}
+    public void HideDesktopPet(){FloatingChat?.Close();_petWanted=false;_pet?.Close();_pet=null;if(_c.Preferences.DisplayMode!="tray")_c.SavePreferences(_c.Preferences with{DisplayMode="tray"});Changed();}
+    public void HidePet(){HideDesktopPet();House?.Close();}
     public async Task Exit()
     {
         if(_exit)return;_exit=true;_c.Cancel();
@@ -233,6 +234,7 @@ internal static class Smoke
             Directory.CreateDirectory("artifacts/screenshots");
             if(Environment.GetCommandLineArgs().Contains("--rules-only")){c.SavePreferences(new Preferences{Onboarded=true});await CompanionChecks.DesktopRules(host,c);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--attachments-only")){c.SavePreferences(new Preferences{Onboarded=true});await CompanionChecks.Attachments(host,c);Environment.ExitCode=0;await host.Exit();return;}
+            if(Environment.GetCommandLineArgs().Contains("--presentation-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("chat");await CompanionChecks.ChatCleanup(host,c);await CompanionChecks.DesktopVisibility(host,c);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--creation-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);var creationRoom=Descendants(host.House!).OfType<Room3DView>().Single();await CompanionChecks.Creation(host,c,creationRoom);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--living-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);var living=Descendants(host.House!).OfType<Room3DView>().Single();await LivingChecks.Run(host,c,living);Environment.ExitCode=0;await host.Exit();return;}
             await PetAnimationChecks.Run();
@@ -353,7 +355,7 @@ internal static class Smoke
             Save(floating,"artifacts/screenshots/floating-chat.png");
             floating.Close();if(host.FloatingChat is not null||host.Pet?.IsVisible!=true||c.Draft!="小窗口修改后的草稿")throw new Exception("Closing floating chat lost draft or pet");
             host.ShowFloatingChat();Click(host.FloatingChat!,"完整聊天");await Task.Delay(100);
-            if(host.FloatingChat is not null||host.House?.CurrentPage!="chat"||host.Pet is not null||c.Draft!="小窗口修改后的草稿")throw new Exception("Floating chat transfer failed");
+            if(host.FloatingChat is not null||host.House?.CurrentPage!="chat"||host.Pet?.IsVisible!=true||c.Draft!="小窗口修改后的草稿")throw new Exception("Floating chat transfer failed");
             var chat=host.House??throw new Exception("Full chat window missing after transfer");chat.Width=1080;chat.Height=685;c.SavePreferences(c.Preferences with{ShowHome3D=false});chat.UpdateLayout();
             var chatInput=Descendants(chat).OfType<System.Windows.Controls.TextBox>().Single(x=>System.Windows.Automation.AutomationProperties.GetName(x)=="聊天消息");
             var chatHistory=Descendants(chat).OfType<System.Windows.Controls.ScrollViewer>().Single(x=>x.Name=="聊天记录滚动区");
@@ -367,6 +369,7 @@ internal static class Smoke
             searchInput.Text="本地界面检查";Click(chat,"搜索记录");chat.UpdateLayout();
             if(!Descendants(chat).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text=="聊天记录 · 搜索“本地界面检查”")||!Descendants(chat).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text=="本地界面检查"))throw new Exception("Chat history search did not show the matching message");
             Click(chat,"清除搜索");chat.UpdateLayout();if(!Descendants(chat).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text=="聊天记录"))throw new Exception("Clearing chat history search did not restore the session");
+            await CompanionChecks.ChatCleanup(host,c);await CompanionChecks.DesktopVisibility(host,c);
             host.HidePet();host.ShowPet();await Task.Delay(100);
             petSource=(System.Windows.Interop.HwndSource)PresentationSource.FromVisual(host.Pet!)!;
             animatedPet=Descendants(host.Pet!).OfType<Pet3DView>().Single();

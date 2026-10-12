@@ -20,6 +20,8 @@ internal sealed partial class MainWindow : Window
     private readonly StackPanel _left=new();
     private readonly Button _sceneToggle;
     private readonly Button _roomVisibility;
+    private readonly Button _petControls;
+    private readonly Action _showDesktopPet,_hideDesktopPet;
     private bool _compactScene,_sidebarCollapsed;
     private readonly Button _sidebarToggle;
     private readonly TextBlock _toast=Ui.Text("",12,Ui.Sage);
@@ -36,8 +38,9 @@ internal sealed partial class MainWindow : Window
     private Pet3DView? _relaxPet;
     private bool _relaxFinished;
     public string CurrentPage=>_page;
-    public MainWindow(Controller c,Action settingsChanged)
+    public MainWindow(Controller c,Action settingsChanged,Action showDesktopPet,Action hideDesktopPet)
     {
+        _showDesktopPet=showDesktopPet;_hideDesktopPet=hideDesktopPet;
         _c=c;_settingsChanged=settingsChanged;Title="Forme · 陪伴小屋";Width=Math.Min(1280,SystemParameters.WorkArea.Width-24);Height=Math.Min(850,SystemParameters.WorkArea.Height-24);MinWidth=Math.Min(650,SystemParameters.WorkArea.Width-24);MinHeight=Math.Min(480,SystemParameters.WorkArea.Height-24);WindowStartupLocation=WindowStartupLocation.CenterScreen;Background=Ui.Cream;
         var shell=new Grid();shell.RowDefinitions.Add(new(){Height=GridLength.Auto});shell.RowDefinitions.Add(new());shell.RowDefinitions.Add(new(){Height=GridLength.Auto});
         var header=new Grid{Margin=new Thickness(0,0,0,20)};header.ColumnDefinitions.Add(new());header.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
@@ -45,13 +48,13 @@ internal sealed partial class MainWindow : Window
         var quiet=Ui.Button("安静模式",()=>c.SavePreferences(c.Preferences with{Quiet=!c.Preferences.Quiet}));quiet.ToolTip="关闭声音、主动招呼和自动动作；点击仍会回应";
         _sceneToggle=Ui.Button("查看3D小屋",()=>{_compactScene=!_compactScene;ApplyLayout();});_sceneToggle.Visibility=Visibility.Collapsed;
         _sidebarToggle=Ui.Button("收起侧栏",()=>{_sidebarCollapsed=!_sidebarCollapsed;ApplyLayout();});
-        var controls=Ui.Button("伙伴控制",ShowPetControls);
+        _petControls=Ui.Button("伙伴控制",ShowPetControls);_petControls.ToolTip="显示或隐藏桌面伙伴、叫回伙伴、停止当前活动";
         _roomVisibility=Ui.Button(c.Preferences.ShowHome3D?"隐藏动画":"显示动画",()=>
         {
             bool show=!_c.Preferences.ShowHome3D;_c.SavePreferences(_c.Preferences with{ShowHome3D=show});
             _roomVisibility!.Content=show?"隐藏动画":"显示动画";ApplyLayout();
         });
-        var right=Ui.Stack(Ui.Row(_roomVisibility,_sidebarToggle,controls,quiet,Ui.Button("设置",()=>Navigate("settings")),_sceneToggle),_status);Grid.SetColumn(right,1);header.Children.Add(right);shell.Children.Add(header);
+        var right=Ui.Stack(Ui.Row(_roomVisibility,_sidebarToggle,_petControls,quiet,Ui.Button("设置",()=>Navigate("settings")),_sceneToggle),_status);Grid.SetColumn(right,1);header.Children.Add(right);shell.Children.Add(header);
         _body.ColumnDefinitions.Add(new(){Width=new GridLength(0.56,GridUnitType.Star)});_body.ColumnDefinitions.Add(new(){Width=new GridLength(24)});_body.ColumnDefinitions.Add(new(){Width=new GridLength(0.44,GridUnitType.Star)});
         _room=new(c,Navigate){MaxHeight=560,HorizontalAlignment=HorizontalAlignment.Stretch};_left.Children.Add(_room);_left.Children.Add(Ui.Text("你的节奏，就是这里的节奏。",13,Ui.Muted));_left.Children.Add(_toast);
         _body.Children.Add(_left);Grid.SetColumn(_panel,2);_body.Children.Add(_panel);Grid.SetRow(_body,1);shell.Children.Add(_body);
@@ -67,7 +70,13 @@ internal sealed partial class MainWindow : Window
         Navigate(c.Preferences.Onboarded?"home":"welcome");
     }
     public void Toast(string text){_toast.Text=text;_toastTimer.Stop();_toastTimer.Start();}
-    private void ShowPetControls(){var menu=new ContextMenu();foreach(var (title,action) in new (string,Action)[]{("叫回伙伴",_room.RecallFromUser),("停止当前活动",_room.StopFromUser)}){var entry=new MenuItem{Header=title};entry.Click+=(_,_)=>Ui.Guard(action);menu.Items.Add(entry);}menu.IsOpen=true;}
+    private void ShowPetControls()
+    {
+        var menu=new ContextMenu{PlacementTarget=_petControls};bool hidden=_c.Preferences.DisplayMode=="tray";
+        foreach(var (title,action) in new (string,Action)[]{(hidden?"显示桌面伙伴":"隐藏桌面伙伴",hidden?_showDesktopPet:_hideDesktopPet),("叫回伙伴",_room.RecallFromUser),("停止当前活动",_room.StopFromUser)})
+        {var entry=new MenuItem{Header=title};entry.Click+=(_,_)=>Ui.Guard(action);menu.Items.Add(entry);}
+        _petControls.ContextMenu=menu;menu.IsOpen=true;
+    }
     public void Navigate(string page)
         =>RenderPage(page,false);
     private void RenderPage(string page,bool preserveView)
@@ -398,9 +407,9 @@ internal sealed partial class MainWindow : Window
         foreach(var message in messages)
         {
             if(message.Status=="streaming"&&_c.Busy)continue;
-            string visible=message.Role=="user"?message.Content:ChatDisplay.Message(message.Content);
-            if(message.Role!="user"&&visible.Length==0&&message.Content.Length>0)continue;
-            transcript.Children.Add(ChatTranscript.Entry(message.Role=="user"?null:_c.Preferences.PetName,Ui.Text(message.Content.Length==0?"未收到内容":visible,14),message.Status=="stopped"?"已停止":message.Status=="error"?"未完成":null,user:message.Role=="user"));
+            string visible=ChatDisplay.RecordMessage(message);
+            if(visible.Length==0)continue;
+            transcript.Children.Add(ChatTranscript.Entry(message.Role=="user"?null:_c.Preferences.PetName,Ui.Text(visible,14),message.Status=="stopped"?"已停止":message.Status=="error"?"未完成":null,user:message.Role=="user"));
         }
         if(messages.Count==0&&!_c.Busy)transcript.Children.Add(Ui.Stack(Ui.Text(_chatSearch.Length>0?"没有找到匹配的聊天记录":"这里还没有聊天记录",15,null,true),Ui.Text(_chatSearch.Length>0?"可以调整关键词，或清除搜索查看完整会话。":"在下方输入内容，就能和伙伴开始聊天。",12,Ui.Muted)));
         if(_c.Busy){_liveText=Ui.Text(_c.LiveReply.Length==0?"…":ChatDisplay.Message(_c.LiveReply),14);transcript.Children.Add(ChatTranscript.Entry(_c.Preferences.PetName,_liveText));}

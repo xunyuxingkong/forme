@@ -27,7 +27,7 @@ internal static class ChatTranscript
         if(pending is not null){entries.RemoveAll(x=>x.Id==pending.Id);entries.Add(pending);}
         return string.Join("\n\n",entries.Select(message=>
         {
-            string visible=message.Role=="user"?message.Content:ChatDisplay.Message(message.Content);
+            string visible=ChatDisplay.RecordMessage(message);
             if(visible.Length==0)return "";
             return (message.Role=="user"?"我":nickname)+"\n"+visible;
         }).Where(text=>text.Length>0));

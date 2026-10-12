@@ -14,6 +14,48 @@ namespace Forme.App;
 
 internal static class CompanionChecks
 {
+    public static async Task ChatCleanup(DesktopHost host,Controller c)
+    {
+        c.NewSession();var now=DateTimeOffset.Now;
+        var upload=new ChatMessage("presentation-user",c.Session!.Id,"user","这是什么？\n\n[本次附件：sample (2).jpg；原内容未保存，后续消息不自动重传]","attachment",now);
+        var quoted=upload with{Status="complete"};var legacy=upload with{Content="这是什么？\n[本次附件：sample.jpg；原内容未保存]"};
+        var error=new ChatMessage("presentation-error",c.Session.Id,"assistant","网络或 TLS 连接失败，请检查网络和服务地址。","error",now.AddTicks(1));
+        if(ChatDisplay.RecordMessage(upload)!="这是什么？"||ChatDisplay.RecordMessage(legacy)!="这是什么？"||ChatDisplay.RecordMessage(quoted)!=quoted.Content||ChatDisplay.RecordMessage(error).Length!=0||ChatDisplay.RecordMessage(error with{Status="complete"})!=error.Content)throw new Exception("Chat cleanup removed real text or retained technical records");
+        if(ChatDisplay.Status("回复完成；上下文已按预算裁剪。").Length!=0||ChatDisplay.Status(error.Content)!=error.Content||ChatDisplay.Message("正在理解动作请求…")!="正在陪你互动…")throw new Exception("Chat cleanup hid an actionable failure or exposed internal progress");
+        if(ChatDisplay.RecordMessage(error with{Content="服务返回 HTTP 503，请检查连接或模型设置。"}).Length!=0||ChatDisplay.RecordMessage(error with{Status="complete",Content="服务返回 HTTP 503，请检查连接或模型设置。"})!="服务返回 HTTP 503，请检查连接或模型设置。"||ChatDisplay.RecordMessage(error with{Status="local",Content="本地规则匹配 · 未联网\n已走到书柜旁。"})!="已走到书柜旁。")throw new Exception("Legacy technical cleanup swallowed an actual reply or retained operation headers");
+        c.Store.SaveMessage(upload);c.Store.SaveMessage(error);c.Store.SaveMessage(new("presentation-reply",c.Session.Id,"assistant","我在这里，听你说。","complete",now.AddTicks(2)));c.Refresh();
+        if(ChatTranscript.Text(c.Store.Messages(c.Session.Id),c.Preferences.PetName,null).Contains("原内容未保存")||c.Store.Messages(c.Session.Id).First().Content!=upload.Content)throw new Exception("Transcript copy leaked metadata or mutated stored record");
+        void Check(Window window)
+        {
+            window.UpdateLayout();var transcript=Descendants(window).OfType<ScrollViewer>().Single(x=>x.Name=="聊天记录滚动区");var texts=Descendants(transcript).OfType<TextBlock>().Select(x=>x.Text).ToArray();
+            if(!texts.Contains("这是什么？")||!texts.Contains("我在这里，听你说。")||texts.Any(x=>x.Contains("原内容未保存")||x.Contains("网络或 TLS")||x=="未收到内容"||x.Contains("自由对话需在设置连接AI")))throw new Exception("Rendered chat contains technical records or omitted real messages");
+        }
+        Check(host.House!);Image(host.House!,"chat-cleanup");host.House!.Close();host.ShowFloatingChat();await Task.Delay(80);Check(host.FloatingChat!);Image(host.FloatingChat!,"floating-chat-cleanup");Click(host.FloatingChat!,"完整聊天");
+        var handler=new OfflineReplyHandler{Status=HttpStatusCode.ServiceUnavailable};using var protocol=new Controller(Path.Combine(c.Store.DirectoryPath,"presentation-protocol"),new AiClient(handler));protocol.Secrets.Save("offline-test-key");protocol.SavePreferences(protocol.Preferences with{AllowPetControl=true});protocol.Draft="你去有水的地方走走";await protocol.Send();
+        if(protocol.Store.Messages(protocol.Session!.Id).Last().Content.Length!=0||!protocol.ChatStatus.Contains("HTTP 503")||protocol.ActionResults.Count!=1)throw new Exception("Service diagnostic became a pet reply or was silently lost");
+        File.WriteAllText("artifacts/chat-cleanup-smoke-result.txt","PASS: exact generated attachment suffix hidden in both chats and transcript copy; quoted user text and actual replies retained; stored metadata unchanged; empty/error/protocol progress rows cleaned; failures remain in operation status. Offline mock only.\n");
+    }
+
+    public static async Task DesktopVisibility(DesktopHost host,Controller c)
+    {
+        var house=host.House!;host.ShowPet();var pet=host.Pet!;var animation=Descendants(pet).OfType<Pet3DView>().Single();
+        if(!house.IsVisible||!pet.IsVisible||c.CurrentScene?.Invoke()!=house.CompanionScene)throw new Exception("House and desktop pet do not coexist or action context changed");
+        void Toggle(string title)
+        {
+            var current=host.House!;Click(current,"伙伴控制");var button=Descendants(current).OfType<Button>().Single(x=>Equals(x.Content,"伙伴控制"));var menu=button.ContextMenu!;
+            var item=menu.Items.OfType<MenuItem>().Single(x=>Equals(x.Header,title));item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));menu.IsOpen=false;
+        }
+        Toggle("隐藏桌面伙伴");if(host.House!=house||!house.IsVisible||host.Pet is not null||c.Store.LoadPreferences().DisplayMode!="tray"||animation.AnimationRunning)throw new Exception("Hiding desktop pet closed the house, lost the preference, or kept rendering");
+        host.ShowHouse("chat");if(host.Pet is not null)throw new Exception("Opening the house ignored hidden preference");
+        house.Close();if(host.Pet is not null)throw new Exception("Closing the house resurrected hidden desktop pet");
+        host.ShowHouse("chat");Toggle("显示桌面伙伴");var shown=host.Pet!;var reopened=host.House!;
+        if(!shown.IsVisible||!reopened.IsVisible||c.Store.LoadPreferences().DisplayMode!="pet")throw new Exception("Showing desktop pet closed house or lost display preference");
+        host.ShowPet();host.ShowHouse("chat");if(host.Pet!=shown||host.House!=reopened||Application.Current.Windows.OfType<PetWindow>().Count()!=1)throw new Exception("Repeated show duplicated desktop or house windows");
+        reopened.Close();if(host.Pet!=shown||!shown.IsVisible||c.CurrentScene?.Invoke()!=SceneKind.Desktop)throw new Exception("Closing house replaced or hid visible desktop pet");
+        host.ShowHouse("chat");await Task.Delay(80);if(host.Pet!=shown||!host.House!.IsVisible)throw new Exception("Reopening house replaced desktop pet");
+        File.WriteAllText("artifacts/desktop-visibility-smoke-result.txt","PASS: house and desktop coexist; house action context preserved; hide keeps house open, releases desktop animation and persists tray preference; closing/reopening respects hide; show/close/reopen keeps one desktop instance. No network calls.\n");
+    }
+
     public static async Task Attachments(DesktopHost host,Controller c)
     {
         var before=c.Preferences;

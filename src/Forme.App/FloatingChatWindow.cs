@@ -80,11 +80,11 @@ internal sealed class FloatingChatWindow : Window
         foreach(var message in history)
         {
             if(message.Status=="streaming"&&_c.Busy)continue;
-            string visible=message.Role=="user"?message.Content:ChatDisplay.Message(message.Content);
-            if(message.Role!="user"&&visible.Length==0&&message.Content.Length>0)continue;
-            _messages.Children.Add(ChatTranscript.Entry(message.Role=="user"?null:_c.Preferences.PetName,Ui.Text(message.Content.Length==0?"未收到内容":visible,13),message.Status=="stopped"?"已停止":message.Status=="error"?"未完成":null,user:message.Role=="user"));
+            string visible=ChatDisplay.RecordMessage(message);
+            if(visible.Length==0)continue;
+            _messages.Children.Add(ChatTranscript.Entry(message.Role=="user"?null:_c.Preferences.PetName,Ui.Text(visible,13),message.Status=="stopped"?"已停止":message.Status=="error"?"未完成":null,user:message.Role=="user"));
         }
-        if(!_c.Secrets.Exists)_messages.Children.Add(Ui.Text("明确动作可按本地规则执行，例如“走两步”“跳个舞”；先开启对应权限。自由对话需在设置连接AI，调用可能收费。",12,Ui.Muted));
+        if(!_c.Secrets.Exists&&history.Count==0&&!_c.Busy)_messages.Children.Add(Ui.Text("明确动作可按本地规则执行，例如“走两步”“跳个舞”；先开启对应权限。自由对话需在设置连接AI，调用可能收费。",12,Ui.Muted));
         else if(history.Count==0&&!_c.Busy)_messages.Children.Add(Ui.Text("我在这里，听你说。分享范围可在发送预览中查看。",13,Ui.Muted));
         if(_c.PendingChatSave is {} unsaved)_messages.Children.Add(Ui.Stack(ChatTranscript.Entry(_c.Preferences.PetName,Ui.Text(ChatDisplay.Message(unsaved.Content),13),"回复还未保存到磁盘"),Ui.Row(Ui.Button("重试保存",_c.RetryChatSave),Ui.Button("放弃保存",()=>{if(Ui.Confirm("放弃这条暂存回复的保存？"))_c.DiscardPendingSave();}))));
         if(_c.Busy){_live=Ui.Text("…",13);_messages.Children.Add(ChatTranscript.Entry(_c.Preferences.PetName,_live));}

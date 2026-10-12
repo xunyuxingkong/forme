@@ -173,7 +173,7 @@ internal sealed partial class Controller : IDisposable
                 catch(ActionFailureException ex){ActionResults=[ActionResult.Failure(ex.Code,ex.Message)];}
                 text=ResultText(ActionResults);ChatStatus=ActionResults.LastOrDefault()?.UserMessage??text;
             }
-            else if(intentRequest){text=ChatStatus;ActionResults=[ActionResult.Failure(request.IsCancellationRequested?ActionResultCode.Cancelled:ActionResultCode.Failed,text)];}
+            else if(intentRequest){ActionResults=[ActionResult.Failure(request.IsCancellationRequested?ActionResultCode.Cancelled:ActionResultCode.Failed,ChatStatus)];text="";}
             try
             {
                 if(Store.HasSession(response.SessionId) && (epoch==_epoch || request.IsCancellationRequested))
