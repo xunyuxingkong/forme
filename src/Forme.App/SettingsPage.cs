@@ -52,17 +52,19 @@ internal sealed partial class MainWindow
         const string siliconEndpoint="https://api.siliconflow.cn/v1";
         const string siliconModel="deepseek-ai/DeepSeek-V3.2";
         var defaults=new Preferences();
-        var providers=new[]{"DeepSeek 官方","硅基流动 · DeepSeek","自定义兼容服务"};
-        var provider=Ui.Select(providers,p.Endpoint.TrimEnd('/')==siliconEndpoint?providers[1]:p.Endpoint.TrimEnd('/')==defaults.Endpoint?providers[0]:providers[2],"AI 服务预设");
+        var effortValues=new[]{"low","high","max"};var effortLabels=new[]{"低 · low","较高 · high","最高 · max"};
+        var effort=Ui.Select(effortLabels,effortLabels[Array.IndexOf(effortValues,p.ZhipuReasoningEffort)],"智谱思考强度");
+        var providers=new[]{"DeepSeek 官方","硅基流动 · DeepSeek","自定义兼容服务","智谱官方 · GLM"};
+        var provider=Ui.Select(providers,AiClient.IsZhipuEndpoint(p.Endpoint)?providers[3]:p.Endpoint.TrimEnd('/')==siliconEndpoint?providers[1]:p.Endpoint.TrimEnd('/')==defaults.Endpoint?providers[0]:providers[2],"AI 服务预设");
         provider.SelectionChanged+=(_,_)=>
         {
             if(provider.SelectedIndex==2)return;
-            endpoint.Text=provider.SelectedIndex==1?siliconEndpoint:defaults.Endpoint;
-            model.Text=provider.SelectedIndex==1?siliconModel:defaults.Model;
+            endpoint.Text=provider.SelectedIndex==3?AiClient.ZhipuEndpoint:provider.SelectedIndex==1?siliconEndpoint:defaults.Endpoint;
+            model.Text=provider.SelectedIndex==3?AiClient.ZhipuModel:provider.SelectedIndex==1?siliconModel:defaults.Model;
             key.Clear();connectionStatus.Text="预设已填入，尚未保存。请填写该服务的 API Key；切换预设不会联网。";
         };
-        var advanced=new Expander{Header="高级：服务地址与模型",Content=Ui.Stack(Ui.Text("基础地址（不要包含 /chat/completions 或密钥）",12),endpoint,Ui.Text("模型名称",12),model),Margin=new Thickness(0,0,0,14)};
-        var aiPanel=Ui.Stack(Ui.Text("AI 连接",17,null,true),Ui.Text("自由对话会联网，可能产生费用。房间、专注和放松一直在本地运行。",12,Ui.Muted),Ui.Text("服务预设"),provider,Ui.Text("硅基流动预设：DeepSeek-V3.2，关闭深度思考。使用硅基流动平台的密钥，可在高级设置修改模型；可用性和价格以平台为准。",11,Ui.Muted),Ui.Text("API Key"),key,connectionStatus,advanced);
+        var advanced=new Expander{Header="高级：服务地址与模型",Content=Ui.Stack(Ui.Text("基础地址（不要包含 /chat/completions 或密钥）",12),endpoint,Ui.Text("模型名称",12),model,Ui.Text("智谱思考强度 · GLM-5.3、5.3-Flash/FlashX"),effort,Ui.Text("保存AI配置后生效。较高强度可能增加等待时间与费用；输出与90秒总时限仍保持原有上限。其他服务不发送此参数。",11,Ui.Muted)),Margin=new Thickness(0,0,0,14)};
+        var aiPanel=Ui.Stack(Ui.Text("AI 连接",17,null,true),Ui.Text("自由对话会联网，可能产生费用。房间、专注和放松一直在本地运行。",12,Ui.Muted),Ui.Text("服务预设"),provider,Ui.Text("硅基流动：DeepSeek-V3.2，关闭深度思考。智谱官方：glm-5.3-flash，支持PNG/JPEG与PDF；思考强度可在高级设置选择，默认低强度。输出额度包含思考，可在费用与输出控制中设为1024；智谱连接测试也遵循该输出上限。使用所选平台的API Key，可在高级设置修改模型；智谱预设使用普通API计费入口，Coding Plan不适用于本预设。价格与可用性以平台为准。",11,Ui.Muted),Ui.Text("API Key"),key,connectionStatus,advanced);
         aiPanel.Children.Add(Ui.Row(Ui.AsyncButton("测试连接",async()=>
         {
             if(!Forme.Core.AiClient.SameEndpoint(endpoint.Text.Trim(),_c.Preferences.Endpoint)&&key.Password.Length==0&&
@@ -70,13 +72,13 @@ internal sealed partial class MainWindow
                 throw new OperationFailureException("测试新服务商前请填写该服务的 API Key，旧服务密钥不会自动发送。先前配置未改变。");
             if(!Ui.Confirm("将向填写的服务发送固定测试文字，不含私人记录。可能产生少量费用。继续？"))return;
             connectionStatus.Text="正在测试，可以点击停止。";
-            try {await _c.TestConnection(endpoint.Text.Trim(),model.Text.Trim(),key.Password.Length>0?key.Password:_c.Secrets.Read());connectionStatus.Text="连接成功。点击保存后用于聊天。";}
+            try {await _c.TestConnection(endpoint.Text.Trim(),model.Text.Trim(),key.Password.Length>0?key.Password:_c.Secrets.Read(),effortValues[effort.SelectedIndex]);connectionStatus.Text="连接成功。点击保存后用于聊天。";}
             catch(Exception ex) when(OperationErrors.Expected(ex)){connectionStatus.Text=OperationErrors.Message(ex);}
         }),Ui.Button("停止测试",_c.StopReply)));
         aiPanel.Children.Add(Ui.Button("保存 AI 配置",()=>
         {
             if(_c.Busy)throw new OperationFailureException("请先停止并等待当前请求结束。");
-            var next=_c.Preferences with{Endpoint=Forme.Core.AiClient.NormalizeEndpoint(endpoint.Text.Trim()),Model=model.Text.Trim()};next.Validate();
+            var next=_c.Preferences with{Endpoint=Forme.Core.AiClient.NormalizeEndpoint(endpoint.Text.Trim()),Model=model.Text.Trim(),ZhipuReasoningEffort=effortValues[effort.SelectedIndex]};next.Validate();
             var previousKey=_c.Secrets.Read();string newKey=key.Password;
             if(!Forme.Core.AiClient.SameEndpoint(next.Endpoint,_c.Preferences.Endpoint) && !Ui.Confirm("更换服务地址会新建对话，不自动分享旧历史。"))return;
             _c.SaveAiConfiguration(next,newKey);

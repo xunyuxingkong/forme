@@ -9,13 +9,14 @@ public sealed record AiTurn(string Role, string Content, IReadOnlyList<AiAttachm
 {
     public string TextContent=>Content+string.Concat((Attachments??[]).Select(x=>x.ContextText));
     public string Preview=>TextContent+string.Concat((Attachments??[]).Where(x=>x.Text is null).Select(x=>"\n[本次将发送："+x.Label+"；二进制内容不显示为Base64]\n"));
-    public object WireContent()
+    public object WireContent(bool includeImageDetail=true)
     {
         if(Attachments is not {Count:>0})return Content;
+        object ImagePart(AiAttachment image)=>includeImageDetail?(object)new {type="image_url",image_url=new {url=image.DataUrl,detail="auto"}}:new {type="image_url",image_url=new {url=image.DataUrl}};
         var parts=new List<object>{new {type="text",text=TextContent}};
         foreach(var item in Attachments.Where(x=>x.Text is null))
-            if(item.IsRenderedPdf)foreach(var page in item.Pages)parts.Add(new {type="image_url",image_url=new {url=page.DataUrl,detail="auto"}});
-            else parts.Add(item.IsImage?(object)new {type="image_url",image_url=new {url=item.DataUrl,detail="auto"}}:new {type="file",file=new {filename=item.Name,file_data=item.DataUrl}});
+            if(item.IsRenderedPdf)foreach(var page in item.Pages)parts.Add(ImagePart(page));
+            else parts.Add(item.IsImage?ImagePart(item):new {type="file",file=new {filename=item.Name,file_data=item.DataUrl}});
         return parts.Count==1?TextContent:parts;
     }
 }
@@ -55,9 +56,12 @@ public sealed class AiClient : IDisposable
         return $"custom:{uri.Scheme}://{uri.Authority}";
     }
     public static bool SameEndpoint(string left,string right)=>NormalizeEndpoint(left).Equals(NormalizeEndpoint(right),StringComparison.OrdinalIgnoreCase);
+    public const string ZhipuEndpoint="https://open.bigmodel.cn/api/paas/v4",ZhipuModel="glm-5.3-flash";
+    public static bool IsZhipuEndpoint(string endpoint)=>SameEndpoint(endpoint,ZhipuEndpoint);
     public static bool RequiresPdfImages(string endpoint)=>ValidateEndpoint(endpoint).Host.Equals("api.deepseek.com",StringComparison.OrdinalIgnoreCase);
     private static void ValidateProviderAttachments(string endpoint,IReadOnlyList<AiAttachment> attachments)
     {
+        if(IsZhipuEndpoint(endpoint)&&attachments.SelectMany(x=>x.IsRenderedPdf?x.Pages:new[]{x}).Any(x=>x.IsImage&&x.MediaType is not ("image/png" or "image/jpeg")))throw new InvalidDataException("智谱官方图片输入请使用PNG或JPEG；WebP请先自行转换后重新添加，未联网。");
         if(RequiresPdfImages(endpoint)&&attachments.Any(x=>x.MediaType=="application/pdf"&&!x.IsRenderedPdf))throw new InvalidDataException("DeepSeek需将PDF转为页面图片。请移除并重新添加PDF，本地转换后再发送；未联网。");
     }
     // UTF-8 byte count is deliberately conservative for byte-based text tokenizers.
@@ -124,13 +128,16 @@ public sealed class AiClient : IDisposable
         try
         {
             var baseUri=ValidateEndpoint(settings.Endpoint);
+            bool zhipu=IsZhipuEndpoint(settings.Endpoint);
             if(string.IsNullOrWhiteSpace(key) || key.Contains('\r') || key.Contains('\n')) throw new InvalidDataException("请先填写有效密钥。");
             settings.Validate();if(turns.Sum(Estimate)>settings.ContextBudget) throw new InvalidDataException("上下文超过预算，未发送。");
             var uri=new Uri(baseUri.AbsoluteUri.TrimEnd('/')+"/chat/completions");
             foreach(var turn in turns){AiAttachment.Validate(turn.Attachments??[]);if(turn.Attachments is {Count:>0}&&turn.Role!="user")throw new InvalidDataException("附件只能随用户消息发送。");}
             AiAttachment.Validate(turns.SelectMany(x=>x.Attachments??[]).ToArray());
             ValidateProviderAttachments(settings.Endpoint,turns.SelectMany(x=>x.Attachments??[]).ToArray());
-            var payload=new Dictionary<string,object> { ["model"]=settings.Model,["messages"]=turns.Select(t=>new {role=t.Role,content=t.WireContent()}),["stream"]=true,["max_tokens"]=settings.MaxReplyTokens,["temperature"]=settings.Temperature };
+            var payload=new Dictionary<string,object> { ["model"]=settings.Model,["messages"]=turns.Select(t=>new {role=t.Role,content=t.WireContent(includeImageDetail:!zhipu)}),["stream"]=true,["max_tokens"]=settings.MaxReplyTokens,["temperature"]=settings.Temperature };
+            if(zhipu&&settings.Model is "glm-5.3" or "glm-5.3-flash" or "glm-5.3-flashx")
+            {payload["thinking"]=new {type="enabled",clear_thinking=true};payload["reasoning_effort"]=settings.ZhipuReasoningEffort;}
             if(baseUri.Host.Equals("api.deepseek.com",StringComparison.OrdinalIgnoreCase)) payload["thinking"]=new {type="disabled"};
             if(baseUri.Host.Equals("api.siliconflow.cn",StringComparison.OrdinalIgnoreCase)&&
                 settings.Model is "deepseek-ai/DeepSeek-V3.2" or "Pro/deepseek-ai/DeepSeek-V3.2")payload["enable_thinking"]=false;
@@ -148,7 +155,7 @@ public sealed class AiClient : IDisposable
                     HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden=>"认证失败，请检查密钥或服务权限。",
                     HttpStatusCode.PaymentRequired=>"服务余额不足，请到服务商处检查。",
                     HttpStatusCode.TooManyRequests=>"额度或频率受限，请检查服务商账户，稍后手动重试。",
-                    HttpStatusCode.BadRequest or HttpStatusCode.UnsupportedMediaType or HttpStatusCode.UnprocessableEntity when turns.Any(x=>x.Attachments is {Count:>0})=>RequiresPdfImages(settings.Endpoint)?"服务拒绝了附件请求（DeepSeek）。请检查模型名称、所选附件对应的输入能力、文字预算及输出参数。未自动重试。":"服务拒绝了附件请求。请确认模型支持图片，PDF还需服务支持file消息格式；也请检查文字预算及输出参数。未自动转换或重试。",
+                    HttpStatusCode.BadRequest or HttpStatusCode.UnsupportedMediaType or HttpStatusCode.UnprocessableEntity when turns.Any(x=>x.Attachments is {Count:>0})=>zhipu?"智谱拒绝了附件请求，请检查模型视觉/文件能力、图片格式及大小和输出上限。未自动重试。":RequiresPdfImages(settings.Endpoint)?"服务拒绝了附件请求（DeepSeek）。请检查模型名称、所选附件对应的输入能力、文字预算及输出参数。未自动重试。":"服务拒绝了附件请求。请确认模型支持图片，PDF还需服务支持file消息格式；也请检查文字预算及输出参数。未自动转换或重试。",
                     _ when (int)response.StatusCode>=300 && (int)response.StatusCode<400=>"服务返回重定向，为保护凭据未跟随，请核对地址。",
                     _=>$"服务返回 HTTP {(int)response.StatusCode}，请检查连接或模型设置。"
                 });
@@ -162,6 +169,9 @@ public sealed class AiClient : IDisposable
                     if(doc.RootElement.TryGetProperty("error",out _)) throw new OperationFailureException("服务返回流式错误，请手动重试。");
                     if(!doc.RootElement.TryGetProperty("choices",out var choices) || choices.GetArrayLength()==0) continue;
                     var choice=choices[0];
+                    // Real reasoning output is progress, but is never displayed, stored, or resent.
+                    // The fixed total timeout still bounds requests that only produce reasoning.
+                    if(zhipu&&choice.TryGetProperty("delta",out var reasoningDelta)&&reasoningDelta.TryGetProperty("reasoning_content",out var reasoning)&&reasoning.ValueKind==JsonValueKind.String&&!string.IsNullOrEmpty(reasoning.GetString()))inactivity.CancelAfter(_limits.Idle);
                     if(choice.TryGetProperty("delta",out var delta) && delta.TryGetProperty("content",out var c) && c.ValueKind==JsonValueKind.String)
                     {
                         var fragment=c.GetString();
@@ -171,7 +181,7 @@ public sealed class AiClient : IDisposable
                     {length=reason.GetString()=="length";done=true;break;}
                 }
                 if(!done) throw new OperationFailureException("回复连接中断，已有内容已保留。");
-                if(!gotContent) throw new OperationFailureException("服务未返回文本，请检查模型是否支持非思考文本对话。");
+                if(!gotContent) throw new OperationFailureException(zhipu?"智谱未返回正文；模型思考可能已占满输出上限。请在费用与输出控制中检查输出上限（可设1024），再手动重试；未自动增加额度。":"服务未返回文本，请检查模型是否支持非思考文本对话。");
                 return new(content.ToString(),length,trimmed);
             }
             catch(OperationCanceledException) when(!cancellation.IsCancellationRequested)

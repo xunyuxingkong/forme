@@ -274,7 +274,12 @@ internal static class Smoke
                     if(key.Password.Length!=0)throw new Exception("Provider change retained draft key");
                     provider.SelectedIndex=1;provider.SelectedIndex=2;
                     if(endpoint.Text!="https://api.siliconflow.cn/v1")throw new Exception("Custom provider erased draft");
+                    key.Password="previous-provider-draft";provider.SelectedIndex=3;
+                    if(endpoint.Text!=AiClient.ZhipuEndpoint||model.Text!=AiClient.ZhipuModel||key.Password.Length!=0||c.Preferences.Endpoint!=previousEndpoint)throw new Exception("Zhipu preset missing, retained another provider key, or saved implicitly");
+                    provider.SelectedIndex=2;if(endpoint.Text!=AiClient.ZhipuEndpoint||model.Text!=AiClient.ZhipuModel)throw new Exception("Custom provider erased Zhipu draft");
                     provider.SelectedIndex=previousProvider;endpoint.Text=previousEndpoint;model.Text=previousModel;advanced.IsExpanded=false;
+                    var effort=Descendants(host.House).OfType<System.Windows.Controls.ComboBox>().Single(x=>System.Windows.Automation.AutomationProperties.GetName(x)=="智谱思考强度");effort.SelectedIndex=2;
+                    Click(host.House,"保存 AI 配置");if(c.Preferences.ZhipuReasoningEffort!="max"||c.Store.LoadPreferences().ZhipuReasoningEffort!="max")throw new Exception("Zhipu reasoning strength UI did not persist");
                 }
             }
             host.House!.Navigate("home");

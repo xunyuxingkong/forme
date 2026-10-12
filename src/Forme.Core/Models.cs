@@ -49,9 +49,11 @@ public sealed record Preferences
     public double Temperature { get; set; } = .7;
     public string Endpoint { get; set; } = "https://api.deepseek.com";
     public string Model { get; set; } = "deepseek-flash";
+    public string ZhipuReasoningEffort { get; set; } = "low";
 
     public void Validate()
     {
+        if(ZhipuReasoningEffort is not ("low" or "high" or "max"))throw new InvalidDataException("智谱思考强度请选择低、较高或最高。");
         if (string.IsNullOrWhiteSpace(PetName)||UserName is null||ReplyStyle is null||RoleDescription is null||PetName.Length is < 1 or > 20 || UserName.Length > 30 || ReplyStyle.Length > 400 || RoleDescription.Length > 1200)
             throw new InvalidDataException("名字或回复偏好过长。");
         if(!new[]{"sprout","cat","fox","penguin"}.Contains(PetModel)||!new[]{"balanced","economy"}.Contains(PerformanceMode)||!new[]{"clear","rain","snow"}.Contains(Weather)||
