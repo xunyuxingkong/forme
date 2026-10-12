@@ -24,7 +24,11 @@ internal static class ChatRequests
         }
         if(c.Store.Get<string>("ai-consent-v2-routing")!=c.Preferences.Endpoint)
         {
-            if(!Ui.Confirm("AI会理解本次消息是普通聊天还是伙伴动作。消息会发送给服务商，并可能包含有限会话上下文、角色设定及已启用的确认记忆；已选择的附件只随本次发送。动作执行仍受本地权限、目标和安全校验限制。服务地址："+c.Preferences.Endpoint+"。调用可能收费；删除本地记录无法删除服务商留存。确认使用此服务？"))return;
+            // The earlier per-provider consent already covered AI chat with the same bounded history,
+            // role settings, memories and selected attachment. Do not prompt again just because
+            // intent routing now uses that same request context.
+            if(c.Store.Get<string>("ai-consent")!=c.Preferences.Endpoint&&
+                !Ui.Confirm("AI会理解本次消息是普通聊天还是伙伴动作。消息会发送给服务商，并可能包含有限会话上下文、角色设定及已启用的确认记忆；已选择的附件只随本次发送。动作执行仍受本地权限、目标和安全校验限制。服务地址："+c.Preferences.Endpoint+"。调用可能收费；删除本地记录无法删除服务商留存。确认使用此服务？"))return;
             c.Store.Set("ai-consent-v2-routing",c.Preferences.Endpoint);
         }
         await c.Send();

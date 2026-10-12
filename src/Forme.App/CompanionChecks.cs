@@ -183,8 +183,8 @@ internal static class CompanionChecks
                 string actionResults=string.Join(" | ",protocol.ActionResults.Select(x=>$"{x.Code}: {x.UserMessage}"));
                 throw new Exception($"AI routing did not infer and execute the house walk plus book target: calls={handler.Calls}, executed={executed}, results={protocol.ActionResults.Count} [{actionResults}], requestInput={routedText.Contains("在小屋走一圈，然后去书架旁边",StringComparison.Ordinal)}, requestPrompt={routedText.Contains("意图路由：依据本轮消息和有限会话上下文判断",StringComparison.Ordinal)}");
             }
-            handler.Reply="我们可以聊聊你今天的感受。";protocol.Draft="谢谢你";await protocol.Send();
-            if(handler.Calls!=4||executed!=5||!protocol.Store.Messages(protocol.Session!.Id).Last().Content.Contains("我们可以聊聊",StringComparison.Ordinal))throw new Exception("Ordinary chat was not preserved by the AI intent router");
+            handler.Reply="我们可以聊聊你今天的感受。";protocol.Store.Set("ai-consent",protocol.Preferences.Endpoint);protocol.Draft="谢谢你";await ChatRequests.Send(protocol);
+            if(handler.Calls!=4||executed!=5||!protocol.Store.Messages(protocol.Session!.Id).Last().Content.Contains("我们可以聊聊",StringComparison.Ordinal)||protocol.Store.Get<string>("ai-consent-v2-routing")!=protocol.Preferences.Endpoint)throw new Exception("Prior provider consent did not hide the repeated prompt or preserve ordinary chat");
             File.WriteAllText("artifacts/intent-smoke-result.txt","PASS: AI routes every text-only message as ordinary chat or a bounded marked action plan; compound house walk and book target execute from AI output without phrase-specific local matching; whole-plan permission/target preflight; actual arrival; negative/discussion local suppression; floating chat and tray; malformed AI promise rejected; ordinary chat preserved; one offline mock request per message.\n");
         }
         finally{c.Store.SaveWorld(world);c.SavePreferences(before);c.Draft="";host.ShowHouse("home");host.House!.SwitchWorld(false);}

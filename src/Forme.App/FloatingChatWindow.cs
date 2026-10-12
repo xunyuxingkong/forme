@@ -72,7 +72,7 @@ internal sealed class FloatingChatWindow : Window
     private void Render()
     {
         Topmost=_c.Preferences.Topmost;
-        _target.Text="动作目标：桌面伙伴（屏幕环绕／桌面走动）或小屋；由AI结合对话判断\nAI理解与聊天 · "+_c.Preferences.Endpoint+"\n"+_c.Preferences.Model+(_c.Preferences.MemoryEnabled?" · 记忆开启":" · 记忆关闭");
+        _target.Text="“小屋里走走”控制3D小屋伙伴；“桌面／屏幕上走一圈”控制桌面伙伴。AI结合对话判断\nAI理解与聊天 · "+_c.Preferences.Endpoint+"\n"+_c.Preferences.Model+(_c.Preferences.MemoryEnabled?" · 记忆开启":" · 记忆关闭");
         _messages.Children.Clear();_live=null;
         var history=_c.Session is null?[]:_c.Store.Messages(_c.Session.Id,0,20);
         string RecordText()=>ChatTranscript.Text(history,_c.Preferences.PetName,_c.PendingChatSave);

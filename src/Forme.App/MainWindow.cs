@@ -436,7 +436,7 @@ internal sealed partial class MainWindow : Window
         var stop=Ui.Button("停止",_c.StopReply);stop.IsEnabled=_c.Busy;
         var lastUser=messages.LastOrDefault(x=>x.Role=="user");var retry=Ui.AsyncButton("重试最后消息",async()=>{if(lastUser is not null)await _c.Send(lastUser.Id);});retry.IsEnabled=!_c.Busy&&lastUser is not null&&_c.Secrets.Exists&&messages.LastOrDefault()?.Status is "error" or "stopped";
         composer.Children.Add(AttachmentControls.List(_c,this));composer.Children.Add(input);composer.Children.Add(Ui.Row(send,stop,AttachmentControls.PickButton(_c,this),retry));
-        composer.Children.Add(Ui.Text("Enter 发送 · Shift+Enter 换行。动作目标：小屋／花园伙伴；明确说“绕屏幕一圈”会控制桌面伙伴。小屋散步为场景内自由走动。附件仅本次上传，带附件不执行动作。",10,Ui.Muted));
+        composer.Children.Add(Ui.Text("Enter 发送 · Shift+Enter 换行。“小屋里走走”控制3D小屋伙伴；“桌面／屏幕上走一圈”控制桌面伙伴。由AI结合对话判断。附件仅本次上传，带附件不执行动作。",10,Ui.Muted));
         Place(composer,4);return page;
     }
 }
