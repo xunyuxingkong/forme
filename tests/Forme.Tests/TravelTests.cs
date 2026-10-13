@@ -5,6 +5,19 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 public class TravelTests
 {
     [TestMethod,TestCategory("Motion")]
+    public void LocomotionClipSignalsFollowRoomAndDesktopMovement()
+    {
+        var travel=new PetTravel(-10,10,-10,10,[]);travel.Reset(new(0,0));Assert.IsTrue(travel.MoveTo(new(2,0)));
+        var walk=travel.Advance(.05);Assert.AreEqual("walk",walk.Locomotion);Assert.AreEqual(.05,walk.LocomotionSeconds,1e-9);
+        travel.SetGait(true);var run=travel.Advance(.05);Assert.AreEqual("run",run.Locomotion);Assert.AreEqual(.1,run.LocomotionSeconds,1e-9);
+        travel.Stop();Assert.AreEqual("",travel.Advance(.05).Locomotion);
+        travel.MoveTo(new(5,0));Assert.AreEqual(.05,travel.Advance(.05).LocomotionSeconds,1e-9);
+        var desktop=new DesktopWander(new Random(1));desktop.Reset(new(100,100),0,1000,0,1000);Assert.IsTrue(desktop.BeginStep(300));
+        var desktopWalk=desktop.Advance(.05,false)!.Value;Assert.AreEqual("walk",desktopWalk.Locomotion);Assert.AreEqual(.05,desktopWalk.LocomotionSeconds,1e-9);
+        var desktopRun=desktop.Advance(.05,true)!.Value;Assert.AreEqual("run",desktopRun.Locomotion);Assert.AreEqual(.1,desktopRun.LocomotionSeconds,1e-9);
+        desktop.Pause();Assert.IsNull(desktop.Advance(.05,true));Assert.IsTrue(desktop.BeginStep(300));Assert.AreEqual(.05,desktop.Advance(.05,true)!.Value.LocomotionSeconds,1e-9);
+    }
+    [TestMethod,TestCategory("Motion")]
     public void MovementAvoidsFurnitureAndArrivesExactly()
     {
         var travel=new PetTravel(-10,10,-10,10,[new(0,0,2,3)]);travel.Reset(new(-4,0));

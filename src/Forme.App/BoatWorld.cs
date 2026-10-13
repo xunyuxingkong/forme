@@ -49,14 +49,14 @@ internal sealed partial class Room3DView
     {
         if(_boatOpen)return;
         SwitchScene(true);_boatOpen=true;_pendingInteraction=null;_ballVisual.Content=null;
-        _worldPetScale.ScaleX=_worldPetScale.ScaleY=_worldPetScale.ScaleZ=.72;
+        ApplyPetSize();
         _roomInteractions.Visibility=Visibility.Collapsed;_sceneCaption.Text="拖动绿叶改变水流 · 拖空地旋转 · 滚轮缩放";
         _azimuth=15;_elevation=44;_zoom=1;BuildBoatWorld();Camera();_animator.MoveTo(new(-5.0,-2.85));BoatChanged?.Invoke();
     }
     public void CloseBoats()
     {
         _boatOpen=false;_boatTimer.Stop();_boatGame=null;_boatDragging=-1;_boatView.Content=null;_boatLeafHits.Clear();
-        _worldPetScale.ScaleX=_worldPetScale.ScaleY=_worldPetScale.ScaleZ=1;
+        ApplyPetSize();
         _roomInteractions.Visibility=Visibility.Visible;_sceneCaption.Text="点击地面行走 · 远处奔跑 · 拖动旋转 · 滚轮缩放";
         _animator.StopAction();_travel.Stop();_azimuth=30;_elevation=32;_zoom=1;Camera();BoatChanged?.Invoke();
     }
@@ -108,7 +108,7 @@ internal sealed partial class Room3DView
         _boatTimer.Stop();if(_boatGame is not {Complete:true} game)return;
         PositionShip(game.Position,game.Heading,0);_travel.Stop();_heading.Angle=0;_animator.Play(PetAction.Cheer);
         _boatLast=new(Guid.NewGuid().ToString("N"),PaperBoat.DockName(game.Dock)+"的小旅行",game.Layout.Copy(),game.Dock!,game.PetalFound,_c.Preferences.PetModel,DateTimeOffset.Now);
-        _hint.Text=game.PetalFound?"船带回了一片小花瓣，伙伴开心地拍了拍手。":"到岸啦！伙伴为你的小船欢呼。";_c.Store.RecordBoatCompleted(DateOnly.FromDateTime(DateTime.Now));_c.Refresh();BoatChanged?.Invoke();
+        _hint.Text=game.PetalFound?"船带回了一片小花瓣，伙伴开心地拍了拍手。":"到岸啦！伙伴为你的小船欢呼。";_c.Store.RecordBoatCompleted(DateOnly.FromDateTime(DateTime.Now));_c.CompleteCooperativeBoat(game.Dock!);_c.Refresh();BoatChanged?.Invoke();
     }
     private void PositionShip(GroundPoint p,double heading,double elapsed)
     {var world=BoatPoint(p);_shipPosition.OffsetX=world.X;_shipPosition.OffsetY=world.Y+(elapsed==0?0:.009*Math.Sin(elapsed*4));_shipPosition.OffsetZ=world.Z;_shipHeading.Angle=heading;}

@@ -103,6 +103,11 @@ internal sealed partial class Room3DView
         var p=_c.Preferences;bool night=p.Theme=="night"||p.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7);
         return LifeRules.Evaluate(CurrentWorld,EnvironmentContext.From(DateTime.Now,p.Weather,p.Theme,p.RoomLamp));
     }
+    internal string StartLifeForSelection(string id)
+    {
+        var life=AvailableLife().FirstOrDefault(x=>x.Id==id)??throw new OperationFailureException("当前家具或天气已不满足这个生活事件。");
+        RunLife(life);return "伙伴开始体验「"+life.Title+"」，到达后记录本地发现。";
+    }
     internal void RecordRequestedLife(LifeEvent life)
     {if(_pendingInteraction is not null)_pendingLife=life.Id;else{_c.Store.DiscoverLife(life.Id);_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),"life");_c.Refresh();}_hint.Text=life.Title+"："+life.Description;}
     internal string CreationContext()

@@ -111,8 +111,8 @@ internal sealed partial class Room3DView
     private void EndFurnitureDrag(bool cancel=false){if(!_furnitureDrag)return;_furnitureDrag=false;if(_dragLayout is {} before){if(cancel)ChangeFurniture(before,false);else{var now=CurrentWorld.Copy();_worldPreview=before;ChangeFurniture(now);}}_dragLayout=null;_viewport.ReleaseMouseCapture();}
     internal void StopWorld()
     {
-        _activityGeneration++;
-        if(_furnitureDrag)EndFurnitureDrag(true);if(_hideMode!="")_hideStatus="本局已结束，可以换个藏法再玩。";_throwDrag=false;if(_viewport.IsMouseCaptured)_viewport.ReleaseMouseCapture();_hideChecked.Clear();_toyTimer.Stop();_ballVisual.Content=null;_pendingInteraction=null;_pendingLife=null;_moveTarget=null;_hideMode="";_hideTarget=null;_travel.Stop();_animator.StopAction();if(_boatOpen&&BoatRunning)RetrieveBoat();_hint.Text="活动已停止，伙伴留在原地。";PaintWorld();WorldChanged?.Invoke();
+        _c.NotifyActivityInteraction();_activityGeneration++;
+        if(_furnitureDrag)EndFurnitureDrag(true);if(_hideMode!="")_hideStatus="本局已结束，可以换个藏法再玩。";_aiHide=false;_aiHideFound=false;_throwDrag=false;if(_viewport.IsMouseCaptured)_viewport.ReleaseMouseCapture();_hideChecked.Clear();_toyTimer.Stop();_ballVisual.Content=null;_pendingInteraction=null;_pendingLife=null;_moveTarget=null;_hideMode="";_hideTarget=null;_travel.Stop();_animator.StopAction();if(_boatOpen&&BoatRunning)RetrieveBoat();_hint.Text="活动已停止，伙伴留在原地。";PaintWorld();WorldChanged?.Invoke();
     }
     internal void RecallPet(){StopWorld();TryMove(new(.15,1.25));}
     internal void StopFromUser(){if(_c.Busy)_c.StopReply();StopWorld();}
@@ -127,12 +127,13 @@ internal sealed partial class Room3DView
         if(item.Kind=="lamp"){Interact("lamp");return true;}StopWorld();var point=LivingWorld.Approach(item,_travel);if(point is null){_hint.Text="没有可达位置，请在布置页留出通道。";return false;}_animator.MoveTo(point.Value);_pendingInteraction=action??LivingWorld.Kind(item.Kind).Action;_moveTarget=point;_hint.Text="前往"+LivingWorld.Kind(item.Kind).Name;PaintWorld();if(!_travel.Moving){var pending=_pendingInteraction;_pendingInteraction=null;CompleteInteraction(pending!);}return true;
     }
     internal void RunLife(LifeEvent life){if(!UseFurniture(life.Target,life.Action))return;if(_pendingInteraction is not null)_pendingLife=life.Id;else{_c.Store.DiscoverLife(life.Id);_c.Store.RecordGameAction(DateOnly.FromDateTime(DateTime.Now),"life");_c.Refresh();}_hint.Text=life.Title+"："+life.Description;}
-    internal void StartHide(bool petHides,string? selected)
+    internal void StartHide(bool petHides,string? selected,bool aiManaged=false)
     {
         StopWorld();if(_outdoors)SwitchScene(false);var items=CurrentWorld.Items;if(items.Count<2)throw new InvalidDataException("至少摆两件家具再玩藏物。");_hideMode=petHides?"player":"pet";
+        _aiHide=aiManaged;_aiHideFound=false;
         _hideTarget=petHides?items[Random.Shared.Next(items.Count)].Id:selected;if(!items.Any(i=>i.Id==_hideTarget))throw new InvalidDataException("请先选择藏物家具。");
         var hidden=items.First(i=>i.Id==_hideTarget);_hideStatus=petHides?$"伙伴藏好了！线索：{(hidden.Z<0?"在小屋后半边":"在小屋前半边")}，{(hidden.X<0?"偏左":"偏右")}。点击家具或侧栏选择来找。":"小球藏好了，伙伴正在逐个寻找。";
-        if(!petHides)ContinuePetSearch();WorldChanged?.Invoke();
+        if(!petHides&&!aiManaged)ContinuePetSearch();WorldChanged?.Invoke();
     }
     private readonly HashSet<string> _hideChecked=new();
     private void ContinuePetSearch()
@@ -142,7 +143,7 @@ internal sealed partial class Room3DView
     }
     private void FinishSearch(string id)
     {
-        if(_hideMode!="pet")return;if(id==_hideTarget){FoundHidden();return;}_animator.Play(PetAction.Look);_hideStatus=LivingWorld.Kind(CurrentWorld.Items.First(i=>i.Id==id).Kind).Name+"这里没有，再找一处。";WorldChanged?.Invoke();ContinuePetSearch();
+        if(_hideMode!="pet")return;if(id==_hideTarget){if(_aiHide)_aiHideFound=true;FoundHidden();return;}_animator.Play(PetAction.Look);_hideStatus=LivingWorld.Kind(CurrentWorld.Items.First(i=>i.Id==id).Kind).Name+"这里没有，再找一处。";WorldChanged?.Invoke();if(!_aiHide)ContinuePetSearch();
     }
     internal void GuessHidden(string id){if(_hideMode!="player")return;if(id==_hideTarget)FoundHidden();else{_hideStatus="这里没有小球，再根据位置线索试试。";_animator.Play(PetAction.Look);WorldChanged?.Invoke();}}
     private void FoundHidden(){_hideMode="";_hideChecked.Clear();_pendingInteraction=null;_moveTarget=null;_animator.Play(PetAction.Cheer);_hideStatus="找到小球啦！换个藏法可以再玩。";_hint.Text=_hideStatus;var item=CurrentWorld.Items.First(i=>i.Id==_hideTarget);_ballPosition.OffsetX=item.X;_ballPosition.OffsetY=.35;_ballPosition.OffsetZ=item.Z;_ballVisual.Content=_ballGroup;PaintWorld();WorldChanged?.Invoke();}

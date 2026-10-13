@@ -117,7 +117,7 @@ public sealed partial class Store
     }
     public void RecordPetModels(string previous,string current,DateOnly day)
     {
-        var valid=new HashSet<string>(["sprout","cat","fox","penguin"],StringComparer.Ordinal);if(!valid.Contains(previous)||!valid.Contains(current))return;
+        var valid=new HashSet<string>(["sprout","cat","fox","penguin","space-marine"],StringComparer.Ordinal);if(!valid.Contains(previous)||!valid.Contains(current))return;
         using var tx=_db.BeginTransaction();string date=day.ToString("yyyy-MM-dd");
         GrantGameAchievement(tx,"model-used-"+previous,date);GrantGameAchievement(tx,"model-used-"+current,date);
         using(var c=Command("SELECT count(*) FROM game_achievements WHERE id LIKE 'model-used-%'",tx))if(Convert.ToInt32(c.ExecuteScalar())>=valid.Count)GrantGameAchievement(tx,"pet-all",date);

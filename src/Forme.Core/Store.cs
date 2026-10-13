@@ -6,7 +6,7 @@ namespace Forme.Core;
 public sealed partial class Store : IDisposable
 {
     public const int Version = DatabaseMigrator.CurrentVersion;
-    public const int ExportVersion = 7; // Attachment message markers; SQLite schema is unchanged.
+    public const int ExportVersion = 9; // Adds portable companion-life records.
     private readonly SqliteConnection _db;
     public string DirectoryPath { get; }
     public string BackupPath => Path.Combine(DirectoryPath, "recovery.json");
@@ -94,7 +94,7 @@ public sealed partial class Store : IDisposable
         tx.Commit(); return true;
     }
     public int PlantPoints => Convert.ToInt32(Scalar("SELECT count(*) FROM growth WHERE type='water'"));
-    public ExportDocument Export(bool chat, bool moods, bool focus, bool room)
+    public ExportDocument Export(bool chat, bool moods, bool focus, bool room,bool productivity=false)
     {
         // Keep all selected categories in one snapshot while other connections save.
         Exec("BEGIN DEFERRED TRANSACTION");
@@ -107,7 +107,8 @@ public sealed partial class Store : IDisposable
                 Messages = sessions?.SelectMany(s=>Messages(s.Id,0,int.MaxValue)).ToList(),
                 Memories=chat?Memories():null,Notes=chat?Notes():null,
                 Moods = moods ? Moods(0,int.MaxValue) : null, Focus = focus ? Focus(0,int.MaxValue) : null,
-                Room = room ? new RoomExport(p.PetName,p.Theme,p.Rug,p.Ornament,Growth()){Game=GameExportData(),Boats=Boats(),World=World(),PetModel=p.PetModel,Weather=p.Weather,RoomLamp=p.RoomLamp,Fireplace=p.Fireplace} : null
+                Room = room ? new RoomExport(p.PetName,p.Theme,p.Rug,p.Ornament,Growth()){Game=GameExportData(),Boats=Boats(),World=World(),CompanionLife=CompanionLife(),PetModel=p.PetModel,Weather=p.Weather,RoomLamp=p.RoomLamp,Fireplace=p.Fireplace} : null,
+                UserNotes=productivity?UserNotes(true,"",0,int.MaxValue):null,UserTasks=productivity?UserTasks(null,null,0,int.MaxValue):null,UserReminders=productivity?AllUserReminders():null
             };
             Exec("COMMIT");return document;
         }
@@ -116,12 +117,17 @@ public sealed partial class Store : IDisposable
     private static void ValidateMood(MoodEntry m) { if (string.IsNullOrWhiteSpace(m.Id) || m.Mood.Length > 30 || m.Note.Length > 1000) throw new InvalidDataException("心情记录格式错误。"); }
     public static void ValidateExport(ExportDocument d)
     {
-        if (d.SchemaVersion is not (1 or 2 or 3 or 4 or 5 or 6 or ExportVersion)) throw new InvalidDataException("不支持的导出版本，原数据未修改。");
+        if (d.SchemaVersion is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or ExportVersion)) throw new InvalidDataException("不支持的导出版本，原数据未修改。");
         if ((d.Sessions is null) != (d.Messages is null)) throw new InvalidDataException("聊天数据不完整。");
         if(d.Sessions is null&&(d.Memories is not null||d.Notes is not null))throw new InvalidDataException("记忆和摘要需要随聊天类别一起导入。");
-        if (d.Sessions is null && d.Moods is null && d.Focus is null && d.Room is null) throw new InvalidDataException("文件没有可导入的数据。");
+        if (d.Sessions is null && d.Moods is null && d.Focus is null && d.Room is null&&d.UserNotes is null&&d.UserTasks is null&&d.UserReminders is null) throw new InvalidDataException("文件没有可导入的数据。");
+        bool hasProductivity=d.UserNotes is not null||d.UserTasks is not null||d.UserReminders is not null;
+        if(hasProductivity&&(d.UserNotes is null||d.UserTasks is null||d.UserReminders is null))throw new InvalidDataException("记事、待办和提醒数据不完整。");
         void Unique(IEnumerable<string> ids) { var all = ids.ToList(); if (all.Any(string.IsNullOrWhiteSpace) || all.Distinct().Count()!=all.Count) throw new InvalidDataException("记录 ID 无效或重复。"); }
         if (d.Moods is not null) { Unique(d.Moods.Select(x=>x.Id)); foreach(var m in d.Moods) ValidateMood(m); }
+        if(d.UserNotes is {} userNotes){Unique(userNotes.Select(x=>x.Id));foreach(var n in userNotes)ValidateUserNote(n);}
+        if(d.UserTasks is {} userTasks){Unique(userTasks.Select(x=>x.Id));foreach(var t in userTasks)ValidateUserTask(t);}
+        if(d.UserReminders is {} userReminders){Unique(userReminders.Select(x=>x.Id));foreach(var r in userReminders)ValidateUserReminder(r);var taskIds=(d.UserTasks??[]).Select(x=>x.Id).ToHashSet();if(userReminders.Any(r=>r.TaskId is {} taskId&&!taskIds.Contains(taskId)))throw new InvalidDataException("提醒关联的待办不存在。");}
         if (d.Sessions is not null)
         {
             if(d.Memories is {} memories){if(memories.Count>30)throw new InvalidDataException("记忆超过30条。");Unique(memories.Select(x=>x.Id));foreach(var memory in memories)ValidateMemory(memory);}
@@ -139,7 +145,7 @@ public sealed partial class Store : IDisposable
         if(d.Room is not null)
         {
             new Preferences {PetName=d.Room.PetName,Theme=d.Room.Theme,Rug=d.Room.Rug,Ornament=d.Room.Ornament,PetModel=d.Room.PetModel,Weather=d.Room.Weather,RoomLamp=d.Room.RoomLamp,Fireplace=d.Room.Fireplace}.Validate(); Unique(d.Room.Events.Select(x=>x.Id));if(d.Room.Game is {} game)ValidateGameExport(game);
-            d.Room.Boats?.Validate();if(d.Room.World is {} world&&world.PlacementProblem() is {} placement)throw new InvalidDataException(placement);
+            d.Room.Boats?.Validate();d.Room.CompanionLife?.Validate();if(d.Room.World is {} world&&world.PlacementProblem() is {} placement)throw new InvalidDataException(placement);
             if(d.Room.Events.Any(x=>x.Type=="water" ? !DateOnly.TryParseExact(x.Day,"yyyy-MM-dd",out _) || x.Id!="water:"+x.Day : x.Type!="unlock" || !new[]{"unlock:star","unlock:cloud","unlock:flower"}.Contains(x.Id))) throw new InvalidDataException("成长记录无效。");
         }
     }
@@ -148,7 +154,7 @@ public sealed partial class Store : IDisposable
         ValidateExport(d);
         var existingPreferences=LoadPreferences();
         // Backup is written before any mutation. Transaction prevents a half-import.
-        ExportFile(BackupPath,true,true,true,true);
+        ExportFile(BackupPath,true,true,true,true,productivity:true);
         using var tx = _db.BeginTransaction();
         if(d.Sessions is not null)
         {
@@ -162,22 +168,27 @@ public sealed partial class Store : IDisposable
         }
         if(d.Moods is not null) { Exec("DELETE FROM moods",tx); foreach(var m in d.Moods) Exec("INSERT INTO moods VALUES($0,$1,$2,$3,$4)",tx,m.Id,m.Mood,m.Note,Date(m.Created),Date(m.Updated)); }
         if(d.Focus is not null) { Exec("DELETE FROM focus",tx); foreach(var f in d.Focus) Exec("INSERT INTO focus VALUES($0,$1,$2,$3,$4,$5,$6)",tx,f.Id,f.Kind,f.Title,Date(f.Started),f.TargetSeconds,f.ElapsedSeconds,f.Result); }
+        if(d.UserNotes is not null){Exec("DELETE FROM user_notes",tx);foreach(var n in d.UserNotes)Exec("INSERT INTO user_notes VALUES($0,$1,$2,$3,$4,$5,$6,$7,$8)",tx,n.Id,n.Title,n.Content,JsonSerializer.Serialize(n.Tags),n.Pinned?1:0,n.Archived?1:0,n.Source,Date(n.Created),Date(n.Updated));}
+        if(d.UserTasks is not null){Exec("DELETE FROM user_reminders; DELETE FROM user_tasks",tx);foreach(var t in d.UserTasks)Exec("INSERT INTO user_tasks VALUES($0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",tx,t.Id,t.Title,t.Description,t.Status,t.Priority,t.DueAt is null?null:Date(t.DueAt.Value),t.RemindAt is null?null:Date(t.RemindAt.Value),Date(t.Created),Date(t.Updated),t.CompletedAt is null?null:Date(t.CompletedAt.Value),t.Source,t.Project,JsonSerializer.Serialize(t.Tags),t.SortOrder);foreach(var r in d.UserReminders!)InsertReminder(r,tx);}
         if(d.Room is not null)
         {
             var p=existingPreferences with {}; p.PetName=d.Room.PetName; p.Theme=d.Room.Theme; p.Rug=d.Room.Rug; p.Ornament=d.Room.Ornament;p.PetModel=d.Room.PetModel;p.Weather=d.Room.Weather;p.RoomLamp=d.Room.RoomLamp;p.Fireplace=d.Room.Fireplace;
+            if(d.Room.CompanionLife is not null)p=p with{AutonomyEnabled=false,ShareExperiences=false,SharePlayState=false,ShareGameState=false,GameStateEndpoint=""};
             Exec("INSERT INTO settings VALUES('preferences',$0) ON CONFLICT(k) DO UPDATE SET v=excluded.v",tx,JsonSerializer.Serialize(p));
             Exec("DELETE FROM growth",tx); foreach(var e in d.Room.Events) Grant(e.Id,e.Type,e.Day,tx);
             if(d.Room.Game is {} game)ReplaceGame(game,tx);
-            if(d.Room.Boats is {} boats)ReplaceBoats(boats,tx);if(d.Room.World is {} world)ReplaceWorld(world,tx);
+        if(d.Room.Boats is {} boats)ReplaceBoats(boats,tx);if(d.Room.World is {} world)ReplaceWorld(world,tx);
+            if(d.Room.CompanionLife is {} companionLife)Exec("INSERT INTO settings VALUES('companion-life-v1',$0) ON CONFLICT(k) DO UPDATE SET v=excluded.v",tx,JsonSerializer.Serialize(companionLife));
         }
         tx.Commit();
     }
     public void ClearCategory(string category)
     {
-        if(category is not ("chat" or "moods" or "focus")) throw new ArgumentException("类别无效。");
-        Exec(category=="chat"?"DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_notes; DELETE FROM chat_memories;":$"DELETE FROM {category}"); RemoveBackup();
+        if(category is not ("chat" or "moods" or "focus" or "room")) throw new ArgumentException("类别无效。");
+        if(category=="room")Exec("DELETE FROM growth; DELETE FROM settings WHERE k='companion-life-v1';");
+        else Exec(category=="chat"?"DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_notes; DELETE FROM chat_memories;":$"DELETE FROM {category}"); RemoveBackup();
     }
-    public void ResetAll() { Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_memories; DELETE FROM chat_notes; DELETE FROM moods; DELETE FROM focus; DELETE FROM growth; DELETE FROM settings; DELETE FROM game_progress; INSERT INTO game_progress(id,xp,stars) VALUES(1,0,0); DELETE FROM game_inventory; INSERT INTO game_inventory VALUES('ball-yellow',1); DELETE FROM game_tasks; DELETE FROM game_daily; DELETE FROM game_discoveries; DELETE FROM game_slots; DELETE FROM game_achievements;"); RemoveBackup(); Exec("VACUUM"); }
+    public void ResetAll() { Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_memories; DELETE FROM chat_notes; DELETE FROM moods; DELETE FROM focus; DELETE FROM user_notes; DELETE FROM user_tasks; DELETE FROM user_reminders; DELETE FROM growth; DELETE FROM settings; DELETE FROM game_progress; INSERT INTO game_progress(id,xp,stars) VALUES(1,0,0); DELETE FROM game_inventory; INSERT INTO game_inventory VALUES('ball-yellow',1); DELETE FROM game_tasks; DELETE FROM game_daily; DELETE FROM game_discoveries; DELETE FROM game_slots; DELETE FROM game_achievements;"); RemoveBackup(); Exec("VACUUM"); }
     public void RemoveBackup()
     {
         if(File.Exists(BackupPath))File.Delete(BackupPath);

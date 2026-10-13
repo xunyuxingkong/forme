@@ -46,7 +46,7 @@ internal sealed class PetWindow : Window
         _c=c;_open=open;_hide=hide;_exit=exit;
         Title="Forme 桌面伙伴";Width=190;Height=260;WindowStyle=WindowStyle.None;AllowsTransparency=true;Background=System.Windows.Media.Brushes.Transparent;
         ResizeMode=ResizeMode.NoResize;ShowInTaskbar=false;ShowActivated=false;Topmost=c.Preferences.Topmost;
-        var grid=new Grid();_normalContent=grid;grid.RowDefinitions.Add(new(){Height=new GridLength(85)});grid.RowDefinitions.Add(new(){Height=new GridLength(170)});
+        var grid=new Grid();_normalContent=grid;grid.RowDefinitions.Add(new(){Height=new GridLength(85)});grid.RowDefinitions.Add(new(){Height=new GridLength(1,GridUnitType.Star)});
         var buttons=Ui.Row(Ui.Button("聊天",()=>_open("chat")),Ui.Button("小屋",()=>_open("home")),Ui.Button("专注",()=>_open("focus")),Ui.Button("放松",()=>_open("relax")));
         foreach(Button b in buttons.Children){b.Padding=new Thickness(7,5,7,5);b.FontSize=11;b.MinHeight=27;b.Margin=new Thickness(2);}
         _idleChoice=Ui.Select(IdleModes,IdleModes[Array.IndexOf(IdleIds,c.Preferences.PetIdleMode)],"桌宠待机模式");_idleChoice.FontSize=11;_idleChoice.MinHeight=27;_idleChoice.Margin=new Thickness(0,0,0,6);
@@ -137,7 +137,7 @@ internal sealed class PetWindow : Window
         Topmost=_c.Preferences.Topmost;
         if(_c.Clock.Active){_bubble.Visibility=Visibility.Visible;UpdateTimer();}else if(_timerText.Text.StartsWith("专注")||_timerText.Text.StartsWith("休息")){_timerText.Text="";_bubble.Visibility=Visibility.Collapsed;}
         // A finite route uses the current native window bounds. Defer bubble resizing until it finishes.
-        if(!_edge&&!_stepActive){bool expanded=_bubble.Visibility==Visibility.Visible;Width=(expanded?240:190)*_c.Preferences.PetScale;Height=(expanded?435:260)*_c.Preferences.PetScale;_normalContent.RowDefinitions[0].Height=new GridLength(expanded?260:85);}
+        if(!_edge&&!_stepActive){bool expanded=_bubble.Visibility==Visibility.Visible;double modelScale=_modelId=="space-marine"?2:1;Width=(expanded?240:190)*modelScale*_c.Preferences.PetScale;Height=((expanded?435:260)+175*(modelScale-1))*_c.Preferences.PetScale;_normalContent.RowDefinitions[0].Height=new GridLength(expanded?260:85);}
         var mode=_c.Preferences.PetIdleMode;if(_lastIdle!=mode){_lastIdle=mode;_wanderReady=false;_pet.StopAction();}_idleChoice.SelectedIndex=Array.IndexOf(IdleIds,mode);
         bool roaming=CanWander||CanStep;
         if(!roaming){_wanderReady=false;_wander.Pause();}
@@ -146,11 +146,21 @@ internal sealed class PetWindow : Window
         _pet.DesktopMotion(WanderFrame,roaming,()=>_wander.Moving);
     }
     private bool CanWander=>IsVisible&&(!_chatOpen||_allowChatWander)&&!_edge&&!_dragging&&!_pet.IsMouseCaptured&&!_menu.IsOpen&&_bubble.Visibility!=Visibility.Visible&&!_c.Clock.Active&&!_c.Busy&&!_c.Preferences.Quiet&&!_c.Preferences.ReducedMotion&&!_c.AnimationSuspended&&_c.Preferences.PetIdleMode is "walk" or "run";
-    internal void SetIdleMode(string mode){_wanderReady=false;_pet.StopAction();_c.SavePreferences(_c.Preferences with{PetIdleMode=mode});_bubbleTimeout.Stop();_bubbleTimeout.Start();Clamp();}
+    internal void SetIdleMode(string mode)
+    {
+        _c.NotifyActivityInteraction();_allowChatWander=mode is "walk" or "run";_wanderReady=false;_pet.StopAction();
+        // The idle selector lives in the bubble panel. Close it immediately so the
+        // selected wander mode is not kept paused by the panel's visibility gate.
+        _bubbleTimeout.Stop();_bubble.Visibility=Visibility.Collapsed;_c.SavePreferences(_c.Preferences with{PetIdleMode=mode});Update();Dispatcher.BeginInvoke(Clamp);
+    }
     internal void SetAiIdleMode(string mode){StopCommands();_allowChatWander=mode is "walk" or "run";_bubble.Visibility=Visibility.Collapsed;SetIdleMode(mode);}
+    internal string ActivitySubject {get;}=Guid.NewGuid().ToString("N");
+    internal int ActivityRevision=>_commandGeneration;
+    internal bool ActivityVisible=>IsVisible&&!_edge&&!_dragging&&!_c.AnimationSuspended;
+    internal bool ActivityAvailable=>ActivityVisible&&!_stepActive&&!_pet.Reacting;
     private int _commandGeneration;
-    internal void ExecuteAction(PetAction action){if(_edge)return;_commandGeneration++;_wander.Pause();_wanderReady=false;_pet.Play(action);_bubbleTimeout.Stop();_bubbleTimeout.Start();}
-    internal void StopCommands(){_commandGeneration++;_stepActive=false;_stepLap=false;_wander.Pause();_wanderReady=false;_pet.StopAction();}
+    internal void ExecuteAction(PetAction action){_c.NotifyActivityInteraction();if(_edge)return;_commandGeneration++;_wander.Pause();_wanderReady=false;_pet.Play(action);_bubbleTimeout.Stop();_bubbleTimeout.Start();}
+    internal void StopCommands(){_c.NotifyActivityInteraction();_commandGeneration++;_stepActive=false;_stepLap=false;_wander.Pause();_wanderReady=false;_pet.StopAction();}
     internal string StartStep(bool run)
     {
         if(!IsVisible||_edge||_c.AnimationSuspended)throw new OperationFailureException("伙伴隐藏、收起或暂停，移动未执行");

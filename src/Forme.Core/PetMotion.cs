@@ -1,7 +1,7 @@
 namespace Forme.Core;
 
 // Normalized pose: no mesh coordinates, renderer types, or model names.
-public readonly record struct PetPose(double ScaleX,double ScaleY,double Lift,double Yaw,double Lean,bool Blink,string Expression,double Stride=0,double Reach=0)
+public readonly record struct PetPose(double ScaleX,double ScaleY,double Lift,double Yaw,double Lean,bool Blink,string Expression,double Stride=0,double Reach=0,string Locomotion="",double LocomotionSeconds=0)
 {
     public static PetPose Neutral(string expression="idle")=>new(1,1,0,0,0,false,expression);
 }

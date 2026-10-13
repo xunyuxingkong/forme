@@ -55,19 +55,22 @@ internal sealed partial class Controller : IDisposable
     public void Refresh() => Changed?.Invoke();
     public void SavePreferences(Preferences next)
     {
-        next.Validate();string previous=Preferences.PetModel;Store.SavePreferences(next);Preferences=next;
+        bool providerChanged=next.Endpoint!=Preferences.Endpoint||next.Model!=Preferences.Model;
+        if(providerChanged)next=next with{AutonomyEnabled=false};
+        next.Validate();if(_selectionView is not null&&(providerChanged||next.PetModel!=Preferences.PetModel||next.AllowPetControl!=Preferences.AllowPetControl||next.AllowSceneControl!=Preferences.AllowSceneControl||next.ShareGameState!=Preferences.ShareGameState||next.GameStateEndpoint!=Preferences.GameStateEndpoint||next.SharePlayState!=Preferences.SharePlayState))NotifyActivityInteraction();string previous=Preferences.PetModel;Store.SavePreferences(next);Preferences=next;SyncCompanionLife();
         if(previous!=next.PetModel)Store.RecordPetModels(previous,next.PetModel,DateOnly.FromDateTime(DateTime.Now));
         Changed?.Invoke();
     }
     public void SaveAiConfiguration(Preferences next,string? replacementKey)
     {
         if(Busy)throw new OperationFailureException("请先停止并等待当前请求结束。");
+        if(next.Endpoint!=Preferences.Endpoint||next.Model!=Preferences.Model)next=next with{AutonomyEnabled=false};
         var session=Store.SaveAiConfiguration(next,Session,Secrets,replacementKey);
-        Preferences=next;Session=session;LiveReply="";ChatStatus="";Changed?.Invoke();
+        Preferences=next;Session=session;LiveReply="";ChatStatus="";SyncCompanionLife();Changed?.Invoke();
     }
     public void Start(string kind,int minutes,string title)
     {
-        Clock.Start(kind,minutes,title);
+        NotifyActivityInteraction();Clock.Start(kind,minutes,title);
         try {Store.SaveActivity(Clock.Snapshot());} catch {Clock.Finish();throw;}
         if(kind=="focus")FocusDraft="";
         _saveTicks=0; SyncTimer(); Changed?.Invoke();
@@ -82,7 +85,7 @@ internal sealed partial class Controller : IDisposable
         var before=Clock.Snapshot(); var entry=Clock.Finish();
         try{Store.FinishFocus(entry);}catch{if(before is not null)Clock.Restore(before);SyncTimer();throw;}
         SyncTimer(); Changed?.Invoke();
-        if(entry.Result=="completed") Finished?.Invoke(entry.Kind=="focus"?"专注完成了，休息一下吧。":"休息结束了，按自己的节奏继续。");
+        if(entry.Result=="completed"){Finished?.Invoke(entry.Kind=="focus"?"专注完成了，休息一下吧。":"休息结束了，按自己的节奏继续。");if(entry.Kind=="focus")CompletedFocusInvitation();}
     }
     private void OnTick()
     {
@@ -101,10 +104,11 @@ internal sealed partial class Controller : IDisposable
     public void SelectSession(ChatSession session){if(Busy)throw new OperationFailureException("请先停止当前回复。");if(Session?.Id!=session.Id)ClearAttachments();Session=session;LiveReply="";ChatStatus="";Changed?.Invoke();}
     public void NewSession(){if(Busy)throw new OperationFailureException("请先停止当前回复。");ClearAttachments();Session=Store.NewSession(Preferences.Endpoint);LiveReply="";ChatStatus="";Changed?.Invoke();}
     public void DeleteSession(){Cancel();ClearAttachments();if(Session is not null){Store.DeleteSession(Session.Id);if(PendingChatSave?.SessionId==Session.Id)PendingChatSave=null;}Session=Store.Sessions().FirstOrDefault();LiveReply="";ChatStatus="";Changed?.Invoke();}
-    public void Cancel(){_epoch++;_attachmentRead?.Cancel();_request?.Cancel();if(_request is not null)StopCommands?.Invoke();}
+    public void Cancel(){_epoch++;_attachmentRead?.Cancel();_request?.Cancel();if(_request is not null)StopSelectedActivity();}
     public void StopReply(){Cancel();ChatStatus=_localExecuting?"已停止本地动作，没有发起AI请求。":"已停止。服务端已发生的用量可能仍计费。";Changed?.Invoke();}
     public async Task Send(string? retryId=null)
     {
+        await TakeForegroundAsync();
         if(Busy) return;
         if(PendingChatSave is not null)throw new OperationFailureException("请先保存或放弃暂存回复，再继续聊天。");
         var key=Secrets.Read(); if(string.IsNullOrEmpty(key)) throw new OperationFailureException("请先在设置中连接 AI；也可以继续使用本地活动。");
@@ -139,12 +143,18 @@ internal sealed partial class Controller : IDisposable
         var request=new CancellationTokenSource();_request=request;int epoch=++_epoch;_requestedAt=DateTimeOffset.UtcNow;
         var p=Preferences with {};SyncTimer();Changed?.Invoke();
         DateTimeOffset lastSave=DateTimeOffset.UtcNow;int savedLength=0;bool limited=false;
-        string text="",status="error";
+        string text="",status="error";bool productivityTurn=false;
         var pending=new ReplyBuffer();
+        int pendingStage=(int)AiRequestStage.WaitingForResponse,paintedStage=-1;
         var paint=new DispatcherTimer(DispatcherPriority.Background){Interval=TimeSpan.FromMilliseconds(80)};
         paint.Tick+=(_,_)=>
         {
             if(epoch!=_epoch)return;
+            int stage=Volatile.Read(ref pendingStage);
+            if(stage!=paintedStage)
+            {
+                paintedStage=stage;ChatStatus=(AiRequestStage)stage switch{AiRequestStage.WaitingForResponse=>"正在等待服务响应…",AiRequestStage.WaitingForContent=>"服务已响应，等待回复…",AiRequestStage.Thinking=>"模型正在思考，等待回复…",_=>"正在回应…"};Tick?.Invoke();
+            }
             if(pending.ReadChanges() is not {} partial)return;
             text=partial;LiveReply=ConversationText.Visible(partial);
             try{if(DateTimeOffset.UtcNow-lastSave>TimeSpan.FromSeconds(3)&&partial.Length-savedLength>=64){Store.SaveMessage(response with{Content=LiveReply});lastSave=DateTimeOffset.UtcNow;savedLength=partial.Length;}}
@@ -154,7 +164,7 @@ internal sealed partial class Controller : IDisposable
         paint.Start();
         try
         {
-            var result=await Ai.SendAsync(p,key,turns,pending.Append,request.Token,trimmed);
+            var result=await Ai.SendAsync(p,key,turns,pending.Append,request.Token,trimmed,stage=>Volatile.Write(ref pendingStage,(int)stage));
             limited=result.LengthLimited;if(epoch==_epoch){text=result.Content;status="complete";}else status="stopped";
             if(epoch==_epoch)ChatStatus=result.LengthLimited?"已达到单次回复上限，未自动续写，未执行动作。":trimmed?"回复完成；上下文已按预算裁剪。":"回复完成。";
         }
@@ -167,26 +177,60 @@ internal sealed partial class Controller : IDisposable
             {
                 try
                 {
-                    if(AiIntentProtocol.TryExtractActions(pending.Snapshot(),out string actionJson))
+                    string completedReply=pending.Snapshot();
+                    if(completedReply.Contains(CompanionCommands.Marker,StringComparison.Ordinal)&&completedReply.Contains(ProductivityIntentProtocol.Marker,StringComparison.Ordinal))throw new InvalidDataException("AI同时返回了伙伴动作和工作辅助操作，没有执行。");
+                    if(AiIntentProtocol.TryExtractActions(completedReply,out string actionJson))
                     {
                         var intents=AiIntentProtocol.Parse(actionJson,input);
                         ActionResults=intents.Count==0?[ActionResult.Failure(ActionResultCode.NotRecognized,"没有识别到明确动作，没有执行；请换一种说法。")]:await ExecuteIntents(intents,request.Token);
                         text=ResultText(ActionResults);ChatStatus=ActionResults.LastOrDefault()?.UserMessage??text;
                     }
+                    else if(ProductivityIntentProtocol.TryExtract(completedReply,out string productivityJson))
+                    {
+                        var intents=ProductivityIntentProtocol.Parse(productivityJson,input);
+                        text=ExecuteProductivityIntents(intents);ChatStatus=text;productivityTurn=true;
+                    }
                 }
                 catch(ActionFailureException ex){ActionResults=[ActionResult.Failure(ex.Code,ex.Message)];text=ResultText(ActionResults);ChatStatus=ActionResults[0].UserMessage;}
+                catch(InvalidDataException ex){text=ex.Message;ChatStatus=text;}
             }
             try
             {
                 if(Store.HasSession(response.SessionId) && (epoch==_epoch || request.IsCancellationRequested))
                 {
-                    var final=response with {Content=text,Status=request.IsCancellationRequested?"stopped":status};
-                    try{Store.SaveMessage(final);}
-                    catch(Exception ex) when(OperationErrors.Expected(ex)){PendingChatSave=final;ChatStatus="回复暂存于内存，可复制或重试保存："+OperationErrors.Message(ex);Notice?.Invoke(ChatStatus);}
+                    var final=response with {Content=text,Status=request.IsCancellationRequested?"stopped":productivityTurn?"local":status};
+                    try{Store.SaveMessage(final);if(productivityTurn)Store.MarkLocalProductivityTurn(userMessage.Id,response.Id);}
+                    catch(Exception ex) when(OperationErrors.Expected(ex)){if(productivityTurn)Store.MarkLocalProductivityTurn(userMessage.Id,response.Id);PendingChatSave=final;ChatStatus="回复暂存于内存，可复制或重试保存："+OperationErrors.Message(ex);Notice?.Invoke(ChatStatus);}
                 }
             }
             finally{if(status=="complete"&&!request.IsCancellationRequested)_attachmentRetry=null;_request=null;request.Dispose();LiveReply="";SyncTimer();Changed?.Invoke();}
         }
+    }
+    private string ExecuteProductivityIntents(IReadOnlyList<ProductivityIntent> intents)
+    {
+        if(intents.Count==0)return "没有识别到明确的记事或待办操作，没有保存任何内容。";
+        var output=new List<string>();var now=DateTimeOffset.Now;
+        foreach(var intent in intents)
+        {
+            switch(intent.Type)
+            {
+                case ProductivityIntentType.CreateNote:
+                    Store.SaveUserNote(new(Guid.NewGuid().ToString("N"),intent.Title!,intent.Content!,intent.Tags??[],false,false,"ai",now,now));output.Add("已在本机保存 1 条记事。标题和正文未写入聊天记录，请到“记事”页面查看。");break;
+                case ProductivityIntentType.SearchNote:
+                    var notes=Store.UserNotes(search:intent.Query,limit:50);output.Add(notes.Count==0?"没有找到匹配的本机记事。":$"找到 {notes.Count} 条本机记事。请到“记事”页面查看内容；记事正文未复制到聊天记录，也未发送给 AI。");break;
+                case ProductivityIntentType.CreateTask:
+                    DateTimeOffset? due=intent.DueAt is null?null:DateTimeOffset.Parse(intent.DueAt,System.Globalization.CultureInfo.InvariantCulture);
+                    DateTimeOffset? remind=intent.RemindAt is null?null:DateTimeOffset.Parse(intent.RemindAt,System.Globalization.CultureInfo.InvariantCulture);
+                    var taskId=Guid.NewGuid().ToString("N");Store.SaveUserTask(new(taskId,intent.Title!,intent.Description??"","todo",intent.Priority??"normal",due,remind,now,now,null,"ai","",[],0));
+                    output.Add("已在本机保存 1 条待办。标题和说明未写入聊天记录，请到“今日”页面查看。"+(due is {} dueAt?$"截止时间：{dueAt.LocalDateTime:MM-dd HH:mm}。":""));break;
+                case ProductivityIntentType.CreateReminder:
+                    var reminderAt=DateTimeOffset.Parse(intent.DueAt!,System.Globalization.CultureInfo.InvariantCulture);Store.SaveUserReminder(new(Guid.NewGuid().ToString("N"),intent.Title!,reminderAt,null,"pending","",now,now,null));output.Add($"已在本机保存 1 条提醒（{reminderAt.LocalDateTime:MM-dd HH:mm}）。提醒内容未写入聊天记录，请到“今日”页面查看。");break;
+                case ProductivityIntentType.ListTodayTasks:
+                    var today=DateOnly.FromDateTime(now.LocalDateTime);var todayTasks=Store.UserTasks(status:"todo",limit:100).Where(x=>x.DueAt is null||DateOnly.FromDateTime(x.DueAt.Value.LocalDateTime)==today).ToList();
+                    output.Add(todayTasks.Count==0?"今天没有待办。":$"今天有 {todayTasks.Count} 条待办。请到“今日”页面查看；待办标题未复制到聊天记录，也未发送给 AI。");break;
+            }
+        }
+        return string.Join("\n",output);
     }
     public async Task TestConnection(string endpoint,string model,string key,string? reasoningEffort=null)
     {
@@ -201,5 +245,5 @@ internal sealed partial class Controller : IDisposable
         if(Busy)throw new OperationFailureException("请先停止请求并等待结束，再清除数据。");
         ClearAttachments();if(Clock.Active)Clock.Finish();File.Delete(ActionRulesPath);File.Delete(ActionRulesPath+".tmp");Store.ResetAll();Secrets.Delete();LoadActionRules();Preferences=new(){Onboarded=true};Store.SavePreferences(Preferences);Session=null;PendingChatSave=null;MemoryDraft="";Draft="";FocusDraft="";FocusDurationDraft=null;RestDurationDraft=null;LiveReply="";ChatStatus="";SyncTimer();Changed?.Invoke();
     }
-    public void Dispose(){Cancel();ClearAttachments();_timer.Stop();Clock.Pause();try{Store.SaveActivity(Clock.Snapshot());}finally{Ai.Dispose();Store.Dispose();}}
+    public void Dispose(){DisposeCompanionLife();Cancel();ClearAttachments();_timer.Stop();Clock.Pause();try{Store.SaveActivity(Clock.Snapshot());}finally{Ai.Dispose();Store.Dispose();}}
 }

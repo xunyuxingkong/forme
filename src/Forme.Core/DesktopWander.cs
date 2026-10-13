@@ -6,15 +6,15 @@ public sealed class DesktopWander(Random? random=null)
     private readonly Random _random=random??new Random();
     private GroundPoint? _target;
     private Queue<GroundPoint>? _route;
-    private double _minX,_maxX,_minY,_maxY,_wait=2,_phase;
+    private double _minX,_maxX,_minY,_maxY,_wait=2,_phase,_locomotionSeconds;
     public GroundPoint Position {get;private set;}
     public bool Moving=>_target is not null;
     public void Reset(GroundPoint position,double minX,double maxX,double minY,double maxY)
     {
         _minX=minX;_maxX=Math.Max(minX,maxX);_minY=minY;_maxY=Math.Max(minY,maxY);
-        Position=new(Math.Clamp(position.X,_minX,_maxX),Math.Clamp(position.Z,_minY,_maxY));_target=null;_route=null;_wait=2;_phase=0;
+        Position=new(Math.Clamp(position.X,_minX,_maxX),Math.Clamp(position.Z,_minY,_maxY));_target=null;_route=null;_wait=2;_phase=0;_locomotionSeconds=0;
     }
-    public void Pause(){_target=null;_route=null;_wait=2;}
+    public void Pause(){_target=null;_route=null;_wait=2;_locomotionSeconds=0;}
     public bool BeginStep(double distance)
     {
         if(!double.IsFinite(distance)||distance<=0||distance>1000)throw new ArgumentOutOfRangeException(nameof(distance));
@@ -51,7 +51,7 @@ public sealed class DesktopWander(Random? random=null)
             else{_target=null;_route=null;_wait=3+_random.NextDouble()*5;}
             return null;
         }
-        Position=new(Position.X+dx/distance*step,Position.Z+dy/distance*step);_phase+=dt*(running?3.6:2.2)*Math.PI*2;
-        return new(1,1,.018*Math.Abs(Math.Sin(_phase)),dx<0?-18:18,2*Math.Sin(_phase),false,"idle",Math.Sin(_phase)*(running?1:.65));
+        Position=new(Position.X+dx/distance*step,Position.Z+dy/distance*step);_phase+=dt*(running?3.6:2.2)*Math.PI*2;_locomotionSeconds+=dt;
+        return new(1,1,.018*Math.Abs(Math.Sin(_phase)),dx<0?-18:18,2*Math.Sin(_phase),false,"idle",Math.Sin(_phase)*(running?1:.65),Locomotion:running?"run":"walk",LocomotionSeconds:_locomotionSeconds);
     }
 }

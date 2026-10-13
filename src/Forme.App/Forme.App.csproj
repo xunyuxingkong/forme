@@ -17,11 +17,14 @@
     <DefineConstants>$(DefineConstants);FORME_DEVELOPMENT_TOOLS</DefineConstants>
   </PropertyGroup>
   <ItemGroup Condition="'$(FormeDevelopmentTools)' != 'true'">
-    <Compile Remove="Probe.cs;PetAnimationChecks.cs;CompanionChecks.cs;BoatChecks.cs;LivingChecks.cs" />
+    <Compile Remove="Probe.cs;PetAnimationChecks.cs;CompanionChecks.cs;BoatChecks.cs;LivingChecks.cs;ActivitySelectionChecks.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Forme.Core/Forme.Core.csproj" />
   </ItemGroup>
-  <ItemGroup><EmbeddedResource Include="Assets/forme.ico" LogicalName="Forme.Icon" /></ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets/forme.ico" LogicalName="Forme.Icon" />
+    <EmbeddedResource Include="Assets/PetModels/space-marine.glb" LogicalName="Forme.SpaceMarine.glb" />
+  </ItemGroup>
   <ItemGroup><Using Include="System"/><Using Include="System.IO"/><Using Include="System.Linq"/><Using Include="System.Collections.Generic"/><Using Include="System.Threading"/><Using Include="System.Threading.Tasks"/></ItemGroup>
 </Project>

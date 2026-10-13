@@ -33,6 +33,12 @@ internal static class CompanionChecks
         Check(host.House!);Image(host.House!,"chat-cleanup");host.House!.Close();host.ShowFloatingChat();await Task.Delay(80);Check(host.FloatingChat!);Image(host.FloatingChat!,"floating-chat-cleanup");Click(host.FloatingChat!,"完整聊天");
         var handler=new OfflineReplyHandler{Status=HttpStatusCode.ServiceUnavailable};using var protocol=new Controller(Path.Combine(c.Store.DirectoryPath,"presentation-protocol"),new AiClient(handler));protocol.Secrets.Save("offline-test-key");protocol.SavePreferences(protocol.Preferences with{AllowPetControl=true});protocol.Draft="你去有水的地方走走";await protocol.Send();
         if(protocol.Store.Messages(protocol.Session!.Id).Last().Content.Length!=0||!protocol.ChatStatus.Contains("HTTP 503")||protocol.ActionResults.Count!=0)throw new Exception("Service diagnostic became a pet reply or was silently lost");
+        using(var latency=new Controller(Path.Combine(c.Store.DirectoryPath,"stream-latency"),new AiClient(new LatencyReplyHandler(),new(TimeSpan.FromMilliseconds(200),TimeSpan.FromSeconds(3),TimeSpan.FromSeconds(5)))))
+        {
+            latency.Secrets.Save("offline-test-key");latency.Draft="你好";var sending=latency.Send();await Task.Delay(350);
+            if(!latency.Busy||!latency.ChatStatus.Contains("正在思考")||latency.LiveReply.Length!=0||latency.Store.Messages(latency.Session!.Id).Any(message=>message.Content.Contains("PRIVATE_REASONING")))throw new Exception("Aligned reasoning stream did not update controller status privately before the final reply");
+            await sending;if(latency.Store.Messages(latency.Session!.Id).Last().Content!="及时回复"||latency.ActionResults.Count!=0)throw new Exception("Delayed streaming reply was lost or executed an action");
+        }
         File.WriteAllText("artifacts/chat-cleanup-smoke-result.txt","PASS: exact generated attachment suffix hidden in both chats and transcript copy; quoted user text and actual replies retained; stored metadata unchanged; empty/error/protocol progress rows cleaned; failures remain in operation status. Offline mock only.\n");
     }
 
@@ -183,15 +189,41 @@ internal static class CompanionChecks
                 string actionResults=string.Join(" | ",protocol.ActionResults.Select(x=>$"{x.Code}: {x.UserMessage}"));
                 throw new Exception($"AI routing did not infer and execute the house walk plus book target: calls={handler.Calls}, executed={executed}, results={protocol.ActionResults.Count} [{actionResults}], requestInput={routedText.Contains("在小屋走一圈，然后去书架旁边",StringComparison.Ordinal)}, requestPrompt={routedText.Contains("意图路由：依据本轮消息和有限会话上下文判断",StringComparison.Ordinal)}");
             }
-            handler.Reply="我们可以聊聊你今天的感受。";protocol.Store.Set("ai-consent",protocol.Preferences.Endpoint);protocol.Draft="谢谢你";await ChatRequests.Send(protocol);
-            if(handler.Calls!=4||executed!=5||!protocol.Store.Messages(protocol.Session!.Id).Last().Content.Contains("我们可以聊聊",StringComparison.Ordinal)||protocol.Store.Get<string>("ai-consent-v2-routing")!=protocol.Preferences.Endpoint)throw new Exception("Prior provider consent did not hide the repeated prompt or preserve ordinary chat");
+            handler.Reply="我们可以聊聊你今天的感受。";protocol.Store.Set("ai-consent-v3-productivity",protocol.Preferences.Endpoint);protocol.Draft="谢谢你";await ChatRequests.Send(protocol);
+            if(handler.Calls!=4||executed!=5||!protocol.Store.Messages(protocol.Session!.Id).Last().Content.Contains("我们可以聊聊",StringComparison.Ordinal)||protocol.Store.Get<string>("ai-consent-v3-productivity")!=protocol.Preferences.Endpoint)throw new Exception("Productivity consent did not preserve ordinary chat");
             protocol.Draft="取消";await ChatRequests.Send(protocol);if(handler.Calls!=4||executed!=6||protocol.ActionResults.Single().Code!=ActionResultCode.Completed)throw new Exception("Local cancel fast path called the AI service");
             protocol.Draft="回来";await ChatRequests.Send(protocol);if(handler.Calls!=4||executed!=7||protocol.ActionResults.Single().Code!=ActionResultCode.Completed)throw new Exception("Local recall fast path called the AI service");
             protocol.SavePreferences(protocol.Preferences with{LocalActionRules=true});protocol.SaveRules(new ActionRules(1,[new(["专属快捷回到我身边"],[new("recall")])]).Serialize());protocol.Draft="专属快捷回到我身边";await ChatRequests.Send(protocol);
             if(handler.Calls!=4||executed!=8||protocol.ActionResults.Single().Code!=ActionResultCode.Completed)throw new Exception("Explicit custom shortcut was not handled locally");
+            var productivityHandler=new OfflineReplyHandler{Reply="```forme-productivity\n[{\"intent\":\"CreateNote\",\"title\":\"本地隐私样例\",\"content\":\"只应保存在本机的正文\",\"tags\":[\"smoke\"]}]\n```"};
+            using(var productivity=new Controller(Path.Combine(c.Store.DirectoryPath,"productivity-protocol"),new AiClient(productivityHandler)))
+            {
+                productivity.Secrets.Save("offline-test-key");productivity.SavePreferences(productivity.Preferences with{LocalActionRules=false});productivity.Draft="帮我记一下：只应保存在本机的正文";await productivity.Send();
+                var session=productivity.Session!;var messages=productivity.Store.Messages(session.Id);
+                if(productivity.Store.UserNotes(search:"本地隐私样例").Single().Content!="只应保存在本机的正文"||messages.Any(x=>x.Status!="local")||productivity.Store.ContextMessages(session.Id).Any(x=>x.Content.Contains("本地隐私样例")||x.Content.Contains("只应保存在本机的正文")))throw new Exception("Productivity creation did not isolate local content from future AI context");
+                productivityHandler.Reply="好的。";productivity.Draft="你好";await productivity.Send();
+                using var request=JsonDocument.Parse(productivityHandler.LastRequest);string requestContent=request.RootElement.GetProperty("messages").ToString();if(requestContent.Contains("只应保存在本机的正文")||requestContent.Contains("本地隐私样例"))throw new Exception("Private productivity data leaked into a later AI request");
+            }
             File.WriteAllText("artifacts/intent-smoke-result.txt","PASS: AI routes normal text as ordinary chat or a bounded marked action plan; stop/cancel, recall and explicit custom shortcuts use the local fast path; compound house walk and book target execute from AI output; whole-plan permission/target preflight; actual arrival; negative/discussion suppression; floating chat and tray; malformed AI promise rejected; one offline mock request for each AI-routed message.\n");
         }
         finally{c.Store.SaveWorld(world);c.SavePreferences(before);c.Draft="";host.ShowHouse("home");host.House!.SwitchWorld(false);}
+    }
+    private sealed class LatencyReplyHandler:HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken token)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StreamContent(new LatencyReplyStream())});
+    }
+    private sealed class LatencyReplyStream:Stream
+    {
+        private int _stage;
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer,CancellationToken token=default)
+        {
+            if(_stage>=2)return 0;
+            const string thought="data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"PRIVATE_REASONING\"}}]}\n\n";
+            byte[] bytes;if(_stage++==0)bytes=Encoding.UTF8.GetBytes(thought+":"+new string(' ',1024-Encoding.UTF8.GetByteCount(thought)-3)+"\n\n");
+            else{await Task.Delay(1500,token);bytes=Encoding.UTF8.GetBytes("data: {\"choices\":[{\"delta\":{\"content\":\"及时回复\"},\"finish_reason\":\"stop\"}]}\n\n");}
+            bytes.CopyTo(buffer);return bytes.Length;
+        }
+        public override bool CanRead=>true;public override bool CanSeek=>false;public override bool CanWrite=>false;public override long Length=>throw new NotSupportedException();public override long Position{get=>throw new NotSupportedException();set=>throw new NotSupportedException();}public override void Flush(){}public override int Read(byte[] buffer,int offset,int count)=>throw new NotSupportedException();public override long Seek(long offset,SeekOrigin origin)=>throw new NotSupportedException();public override void SetLength(long value)=>throw new NotSupportedException();public override void Write(byte[] buffer,int offset,int count)=>throw new NotSupportedException();
     }
     private sealed class OfflineReplyHandler:HttpMessageHandler
     {
@@ -314,10 +346,17 @@ internal static class CompanionChecks
         foreach(var model in PetModels.Catalog)
         {
             using var rig=PetModels.For(model.Id).Create();var body=rig.Root.Children[0];
+            if(model.Id=="space-marine")
+            {
+                var bounds=body.Bounds;int triangles=Shapes(rig.Root).OfType<GeometryModel3D>().Sum(x=>((MeshGeometry3D)x.Geometry).TriangleIndices.Count/3);
+                if(bounds.SizeY<3.0||bounds.SizeY>3.3||triangles!=260314)throw new Exception($"Embedded Space Marine geometry, rifle or doubled size are invalid: {bounds}, {triangles}");
+                await MarineAnimation((SpaceMarinePetModel)rig);
+            }
             for(int i=0;i<1000;i++)rig.Apply(new PetMotion{State=i%2==0?"idle":"sleep"}.Sample(i*.02));
-            if(!ReferenceEquals(body,rig.Root.Children[0])||!body.IsFrozen||!Shapes(rig.Root).All(rig.Contains))throw new Exception("Model pose cache or hit ownership failed: "+model.Id);
+            if(!ReferenceEquals(body,rig.Root.Children[0])||(model.Id=="space-marine"?!Shapes(rig.Root).All(x=>x.IsFrozen):!body.IsFrozen)||!Shapes(rig.Root).All(rig.Contains))throw new Exception("Model pose cache or hit ownership failed: "+model.Id);
             c.SavePreferences(c.Preferences with{PetModel=model.Id});host.House!.Navigate("home");await Task.Delay(100);Image(host.House,"companion-"+model.Id);
         }
+        await MarineSize(host,c,room);
         c.SavePreferences(c.Preferences with{ReducedMotion=true,AllowPetControl=true,AllowSceneControl=true});
         room.SwitchScene(false);
         foreach(string id in new[]{"feed","book","fish","sleep"})if(room.Interact(id).Contains("走不到"))throw new Exception("Indoor interaction unreachable: "+id);
@@ -346,6 +385,51 @@ internal static class CompanionChecks
         Descendants(host.House).OfType<TextBox>().Single(x=>AutomationProperties.GetName(x)=="会话摘要").Text="我们约好去池塘看看。";Click(host.House,"保存会话摘要");
         if(c.Store.Note(c.Session!.Id)?.Content!="我们约好去池塘看看。")throw new Exception("Session note UI failed");
         c.SavePreferences(original);room.SwitchScene(false);host.House.Navigate("home");
-        File.WriteAllText("artifacts/companion-smoke-result.txt","PASS: 4 interchangeable models and immutable meshes, indoor and outdoor interaction paths, lamp toggle, watering deduplication, 100 scene switches with cache <=2, authorized and disabled AI control, persona, memory and session note UI. Offline; no AI API calls.\n");
+        File.WriteAllText("artifacts/companion-smoke-result.txt","PASS: 5 interchangeable models; complete Space Marine with rifle, original Walk/Run clips, doubled desktop/house size, front-facing idle, independent joints and shared frozen meshes; indoor/outdoor interactions, lamp toggle, watering deduplication, 100 scene switches with cache <=2, authorized/disabled AI control, persona, memory and session note UI. Offline; no AI API calls.\n");
+    }
+    private static async Task MarineAnimation(SpaceMarinePetModel marine)
+    {
+        if(marine.Clips.Count!=2||Math.Abs(marine.Clips["Walk"].Duration-1.35)>.001||Math.Abs(marine.Clips["Run"].Duration-.8)>.001||marine.JointMatrices.Length!=8)throw new Exception("Original marine clips or joints were lost");
+        var idle=marine.JointMatrices;var shapes=Shapes(marine.Root).ToArray();var forward=marine.Root.Transform.Transform(new Vector3D(0,0,1));if(Math.Abs(forward.X)>.001||forward.Z<.99)throw new Exception("Marine neutral pose is not front-facing");
+        using var other=new SpaceMarinePetModel();if(!shapes.SequenceEqual(Shapes(other.Root))||ReferenceEquals(marine.Root.Children[0],other.Root.Children[0]))throw new Exception("Marine instances did not share frozen geometry or isolate joints");
+        foreach(string gait in new[]{"walk","run"})
+        {
+            marine.Apply(PetPose.Neutral() with{Locomotion=gait,LocomotionSeconds=.17});var first=marine.JointMatrices;
+            marine.Apply(PetPose.Neutral() with{Locomotion=gait,LocomotionSeconds=.37});var second=marine.JointMatrices;
+            if(marine.ActiveClip!=gait||first.SequenceEqual(second)||idle.SequenceEqual(first)||!other.JointMatrices.SequenceEqual(idle)||!shapes.SequenceEqual(Shapes(marine.Root)))throw new Exception("Imported marine gait did not animate joints independently or rebuilt geometry: "+gait);
+            marine.Apply(PetPose.Neutral() with{Locomotion=gait,LocomotionSeconds=.17+marine.Clips[gait].Duration});if(!first.SequenceEqual(marine.JointMatrices))throw new Exception("Imported gait did not loop: "+gait);
+        }
+        marine.Apply(PetPose.Neutral());if(marine.ActiveClip.Length!=0||!marine.JointMatrices.SequenceEqual(idle))throw new Exception("Stopped marine retained a gait pose");
+        var viewport=new Viewport3D{Camera=new PerspectiveCamera(new(0,1.55,8),new(0,0,-8),new(0,1,0),31)};var visual=new ModelVisual3D{Content=marine.Root};viewport.Children.Add(visual);
+        var window=new Window{Title="Forme 模型验收",Width=440,Height=470,ShowActivated=false,ShowInTaskbar=false,Content=viewport,Background=Ui.Brush("#F7F5EE")};
+        try
+        {
+            window.Show();await Task.Delay(80);Image(window,"space-marine-front");
+            foreach(string gait in new[]{"walk","run"})foreach(double seconds in new[]{.17,.37}){marine.Apply(PetPose.Neutral() with{Locomotion=gait,LocomotionSeconds=seconds});await Task.Delay(40);Image(window,$"space-marine-{gait}-{seconds:0.00}");}
+        }
+        finally{visual.Content=null;window.Close();marine.Apply(PetPose.Neutral());}
+        using var animator=new PetAnimator(other);var travel=new PetTravel(-10,10,-10,10,[]);travel.Reset(new(0,0));animator.AttachTravel(travel,(_,_)=>{});animator.Configure("idle",true,false,false,false);
+        if(!animator.MoveTo(new(2,0)))throw new Exception("Marine animator rejected room travel");await Task.Delay(150);
+        if(other.ActiveClip!="walk")throw new Exception("Room travel did not select the imported Walk clip");travel.SetGait(true);await Task.Delay(150);
+        if(other.ActiveClip!="run")throw new Exception("Room travel did not switch to the imported Run clip");animator.Configure("idle",true,true,false,false);
+        if(animator.Running||other.ActiveClip.Length!=0||!other.JointMatrices.SequenceEqual(idle))throw new Exception("Reduced motion did not reset marine joints or stop travel animation");
+        bool running=false;var wander=new DesktopWander(new Random(1));wander.Reset(new(100,100),0,2000,0,2000);wander.BeginStep(300);animator.ExternalActive=true;animator.ExternalMoving=()=>wander.Moving;animator.ExternalMotion=(seconds,_)=>wander.Advance(seconds,running);animator.Configure("idle",true,false,false,false);await Task.Delay(150);
+        if(other.ActiveClip!="walk")throw new Exception("Desktop wander did not select the imported Walk clip");running=true;await Task.Delay(150);
+        if(other.ActiveClip!="run")throw new Exception("Desktop wander did not select the imported Run clip");animator.Configure("idle",false,false,false,false);
+        if(animator.Running||other.ActiveClip.Length!=0||!other.JointMatrices.SequenceEqual(idle))throw new Exception("Hidden marine continued animating");
+    }
+    private static async Task MarineSize(DesktopHost host,Controller c,Room3DView room)
+    {
+        var before=c.Preferences;
+        try
+        {
+            c.SavePreferences(before with{PetModel="space-marine",PetScale=1,ReducedMotion=true,Quiet=true,PetIdleMode="idle"});host.House!.Navigate("home");host.HideDesktopPet();host.ShowPet();await Task.Delay(80);
+            var pet=host.Pet!;pet.UpdateLayout();host.House.UpdateLayout();double height=room.DisplayedPetBounds.SizeY;var view=Descendants(pet).OfType<Pet3DView>().Single();var baseline=view.TransformToAncestor(pet).TransformBounds(new Rect(0,0,view.ActualWidth,view.ActualHeight));
+            if(height<3.0||pet.Width<379||!view.CharacterFits())throw new Exception("Doubled house/desktop marine size is missing or clipped");Image(pet,"space-marine-desktop-standard");Image(host.House,"space-marine-house-standard");
+            c.SavePreferences(c.Preferences with{PetScale=1.3});await Task.Delay(80);pet.UpdateLayout();host.House.UpdateLayout();var large=view.TransformToAncestor(pet).TransformBounds(new Rect(0,0,view.ActualWidth,view.ActualHeight));
+            if(room.DisplayedPetBounds.SizeY/height<1.29||large.Height/baseline.Height<1.2||!view.CharacterFits())throw new Exception("Large size did not enlarge both marine displays or clipped the desktop model");Image(pet,"space-marine-desktop-large");Image(host.House,"space-marine-house-large");
+            File.WriteAllText("artifacts/space-marine-smoke-result.txt",$"PASS: original Walk=1.35s / Run=0.8s clips; 8 independent animated joints, 260314 triangles including rifle, shared frozen geometry, loop/reset and +Z neutral facing; house height {height:0.000}m -> {room.DisplayedPetBounds.SizeY:0.000}m on large; desktop model area {baseline.Height:0.0} -> {large.Height:0.0} DIP; projection bounds fit; no network calls.\n");
+        }
+        finally{c.SavePreferences(before);}
     }
 }

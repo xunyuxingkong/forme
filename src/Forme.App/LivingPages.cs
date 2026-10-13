@@ -5,7 +5,9 @@ namespace Forme.App;
 internal sealed partial class MainWindow
 {
     private Action? _worldPageUpdate;
-    private void DetachWorldPage(){if(_worldPageUpdate is {} update)_room.WorldChanged-=update;_worldPageUpdate=null;}
+    private Action? _hideLifeUpdate;
+    private Action? _hideLifeChanged;
+    private void DetachWorldPage(){if(_worldPageUpdate is {} update)_room.WorldChanged-=update;_worldPageUpdate=null;if(_hideLifeUpdate is {} lifeUpdate)_c.Tick-=lifeUpdate;if(_hideLifeChanged is {} lifeChanged)_c.Changed-=lifeChanged;_hideLifeUpdate=null;_hideLifeChanged=null;}
     private UIElement FurniturePage()
     {
         _room.OpenFurniture();var select=new ComboBox{Margin=new Thickness(0,0,0,10),MinHeight=36};System.Windows.Automation.AutomationProperties.SetName(select,"选择家具");var status=Ui.Text("",12);bool sync=false;
@@ -40,7 +42,13 @@ internal sealed partial class MainWindow
     private UIElement HidePage()
     {
         if(_room.Outdoors)_room.SwitchScene(false);var select=new ComboBox{Margin=new Thickness(0,0,0,10),MinHeight=36};System.Windows.Automation.AutomationProperties.SetName(select,"藏物家具");foreach(var item in _room.CurrentWorld.Items)select.Items.Add(new ComboBoxItem{Content=LivingWorld.Kind(item.Kind).Name+" · "+item.X.ToString("0.0")+","+item.Z.ToString("0.0"),Tag=item.Id});select.SelectedIndex=0;string? chosen()=>select.SelectedItem is ComboBoxItem item?(string)item.Tag:null;
-        var state=Ui.Text(_room.HideStatus,14);_worldPageUpdate=()=>state.Text=_room.HideStatus;_room.WorldChanged+=_worldPageUpdate;
-        return Ui.Stack(Ui.Text("伙伴藏物",24,null,true),Ui.Text("家具位置决定线索与搜索路线。"+PetBehaviors.For(_c.Preferences.PetModel).Personality+"伙伴会先检查自己偏好的家具；有通道才能找过去。可以随时结束，无次数限制。",13,Ui.Muted),Ui.Card(Ui.Stack(state,select,Ui.Row(Ui.Button("我藏，伙伴找",()=>_room.StartHide(false,chosen()),true),Ui.Button("伙伴藏，我来找",()=>_room.StartHide(true,null)),Ui.Button("检查选中家具",()=>{if(chosen() is {} id)_room.GuessHidden(id);})),Ui.Row(Ui.Button("结束藏物",()=>{if(_c.Busy)_c.StopReply();_room.EndHide();}),Ui.Button("叫回伙伴",_room.RecallFromUser)))),Ui.Button("调整家具再玩",()=>Navigate("furniture")));
+        var hint=Ui.Input("",max:300,automationName:"给AI的藏物线索");var revisedHint=Ui.Input("",max:300,automationName:"调整后的藏物线索");var status=Ui.Text(_room.HideStatus,14);var aiStatus=Ui.Text(_c.CompanionLifeStatus,12,Ui.Sage);
+        void Refresh(){status.Text=_room.HideStatus;aiStatus.Text=_c.CompanionLifeStatus;}
+        _worldPageUpdate=Refresh;_room.WorldChanged+=_worldPageUpdate;_hideLifeUpdate=Refresh;_hideLifeChanged=Refresh;_c.Tick+=_hideLifeUpdate;_c.Changed+=_hideLifeChanged;
+        return Ui.Stack(Ui.Text("伙伴藏物",24,null,true),Ui.Text("家具位置决定线索与搜索路线。"+PetBehaviors.For(_c.Preferences.PetModel).Personality+"伙伴会先检查自己偏好的家具；有通道才能找过去。可以随时结束，无次数限制。",13,Ui.Muted),Ui.Card(Ui.Stack(status,select,Ui.Row(Ui.Button("我藏，伙伴找",()=>_room.StartHide(false,chosen()),true),Ui.Button("伙伴藏，我来找",()=>_room.StartHide(true,null)),Ui.Button("检查选中家具",()=>{if(chosen() is {} id)_room.GuessHidden(id);})),
+            Ui.Text("AI合作藏物（仅在点击时发送）",16,null,true),Ui.Text("需在伙伴生活设置开启“合作玩法状态分享”和“玩法权限”。点击后仅发送家具候选区域、已检查项和你填写的线索到当前AI服务；藏球答案留在本机。AI给出顺序后，伙伴会在小屋里实际逐项检查。",12,Ui.Muted),hint,
+            Ui.AsyncButton("开始AI合作藏物",()=>_c.RunAiHide(chosen()??throw new OperationFailureException("请先选择藏物家具。"),hint.Text),true),
+            Ui.Text("本局可补充一次线索，AI会据此调整尚未检查的位置。",12,Ui.Muted),revisedHint,Ui.Button("发送一次新线索",()=>{_c.GiveHideHint(revisedHint.Text);revisedHint.Text="";}),aiStatus,
+            Ui.Row(Ui.Button("结束藏物",()=>{if(_c.Busy)_c.StopReply();_room.EndHide();}),Ui.Button("叫回伙伴",_room.RecallFromUser)))),Ui.Button("调整家具再玩",()=>Navigate("furniture")));
     }
 }

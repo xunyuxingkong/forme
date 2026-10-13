@@ -17,6 +17,7 @@ public sealed class PreparedImport : IDisposable
     public bool HasChat=>_categories.Contains("Sessions");
     public bool HasMoods=>_categories.Contains("Moods");
     public bool HasFocus=>_categories.Contains("Focus");
+    public bool HasProductivity=>_categories.Contains("UserNotes");
     public RoomExport? Room {get;private set;}
     public int Sessions {get;private set;}
     public int Messages {get;private set;}
@@ -69,12 +70,12 @@ public sealed class PreparedImport : IDisposable
                 if(!names.Add(name))throw new InvalidDataException("重复的数据类别。");
                 if(name=="SchemaVersion"){version=json.Value<int>();continue;}
                 if(name=="ExportedAt"){json.Value<DateTimeOffset>();continue;}
-                    if(name is not ("Sessions" or "Messages" or "Memories" or "Notes" or "Moods" or "Focus" or "Room"))throw new InvalidDataException("未知的数据类别。");
+                if(name is not ("Sessions" or "Messages" or "Memories" or "Notes" or "Moods" or "Focus" or "Room" or "UserNotes" or "UserTasks" or "UserReminders"))throw new InvalidDataException("未知的数据类别。");
                 if(json.Peek()==JsonTokenType.Null){json.Read(JsonTokenType.Null);continue;}
                 plan._categories.Add(name);
                 if(name=="Room")
                 {
-                    json.Read(JsonTokenType.StartObject);var fields=new Dictionary<string,string>();bool events=false,hasGame=false,lamp=true,fire=false;var extras=new HashSet<string>();GameExport? game=null;BoatAlbum? boats=null;LivingWorld? world=null;
+                    json.Read(JsonTokenType.StartObject);var fields=new Dictionary<string,string>();bool events=false,hasGame=false,lamp=true,fire=false;var extras=new HashSet<string>();GameExport? game=null;BoatAlbum? boats=null;LivingWorld? world=null;CompanionLifeData? companionLife=null;
                     while(json.Peek()!=JsonTokenType.EndObject)
                     {
                         string field=json.Read(JsonTokenType.PropertyName)!;
@@ -105,6 +106,8 @@ public sealed class PreparedImport : IDisposable
                         else if(field=="World"){if(!extras.Add(field))throw new InvalidDataException("重复的家具数据。");world=json.Value<LivingWorld>();if(world is null)throw new InvalidDataException("家具数据缺失。");world.Validate();}
                         else if(field=="Boats")
                         {if(!extras.Add(field))throw new InvalidDataException("重复的纪念船数据。");boats=json.Value<BoatAlbum>();if(boats is null)throw new InvalidDataException("纪念船数据缺失。");boats.Validate();}
+                        else if(field=="CompanionLife")
+                        {if(!extras.Add(field))throw new InvalidDataException("重复的共同经历数据。");companionLife=json.Value<CompanionLifeData>();if(companionLife is null)throw new InvalidDataException("共同经历数据缺失。");companionLife.Validate();}
                         else if(field is "PetName" or "Theme" or "Rug" or "Ornament" or "PetModel" or "Weather")
                         {if(!fields.TryAdd(field,json.Value<string>()))throw new InvalidDataException("重复的房间字段。");}
                         else if(field is "RoomLamp" or "Fireplace")
@@ -113,7 +116,7 @@ public sealed class PreparedImport : IDisposable
                     }
                     json.Read(JsonTokenType.EndObject);
                     if(!events||!new[]{"PetName","Theme","Rug","Ornament"}.All(fields.ContainsKey))throw new InvalidDataException("房间数据不完整。");
-                    plan.Room=new RoomExport(fields["PetName"],fields["Theme"],fields["Rug"],fields["Ornament"],[]){Game=game,Boats=boats,World=world,PetModel=fields.GetValueOrDefault("PetModel","sprout"),Weather=fields.GetValueOrDefault("Weather","clear"),RoomLamp=lamp,Fireplace=fire};
+                    plan.Room=new RoomExport(fields["PetName"],fields["Theme"],fields["Rug"],fields["Ornament"],[]){Game=game,Boats=boats,World=world,CompanionLife=companionLife,PetModel=fields.GetValueOrDefault("PetModel","sprout"),Weather=fields.GetValueOrDefault("Weather","clear"),RoomLamp=lamp,Fireplace=fire};
                     Store.ValidateExport(new(){Room=plan.Room});continue;
                 }
                 json.Read(JsonTokenType.StartArray);
@@ -139,16 +142,27 @@ public sealed class PreparedImport : IDisposable
                         case "Focus":
                             var f=json.Value<FocusEntry>();Store.ValidateExport(new(){Focus=[f]});
                             Insert("INSERT INTO focus VALUES($0,$1,$2,$3,$4,$5,$6)",f.Id,f.Kind,f.Title,f.Started.ToString("O"),f.TargetSeconds,f.ElapsedSeconds,f.Result);plan.Focus++;break;
+                        case "UserNotes":
+                            var userNote=json.Value<UserNote>();Store.ValidateUserNote(userNote);
+                            Insert("INSERT INTO user_notes VALUES($0,$1,$2,$3,$4,$5,$6,$7,$8)",userNote.Id,userNote.Title,userNote.Content,JsonSerializer.Serialize(userNote.Tags),userNote.Pinned?1:0,userNote.Archived?1:0,userNote.Source,userNote.Created.ToString("O"),userNote.Updated.ToString("O"));break;
+                        case "UserTasks":
+                            var userTask=json.Value<UserTask>();Store.ValidateUserTask(userTask);
+                            Insert("INSERT INTO user_tasks VALUES($0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",userTask.Id,userTask.Title,userTask.Description,userTask.Status,userTask.Priority,userTask.DueAt?.ToString("O"),userTask.RemindAt?.ToString("O"),userTask.Created.ToString("O"),userTask.Updated.ToString("O"),userTask.CompletedAt?.ToString("O"),userTask.Source,userTask.Project,JsonSerializer.Serialize(userTask.Tags),userTask.SortOrder);break;
+                        case "UserReminders":
+                            var userReminder=json.Value<UserReminder>();Store.ValidateUserReminder(userReminder);
+                            Insert("INSERT INTO user_reminders VALUES($0,$1,$2,$3,$4,$5,$6,$7,$8)",userReminder.Id,userReminder.Title,userReminder.DueAt.ToString("O"),userReminder.TaskId,userReminder.Status,userReminder.RepeatRule,userReminder.Created.ToString("O"),userReminder.Updated.ToString("O"),userReminder.SnoozeUntil?.ToString("O"));break;
                     }
                 }
                 json.Read(JsonTokenType.EndArray);
             }
             json.Read(JsonTokenType.EndObject);
-            if(json.Peek()!=JsonTokenType.None||version is not (1 or 2 or 3 or 4 or 5 or 6 or Store.ExportVersion)||plan._categories.Count==0||plan.HasChat!=plan._categories.Contains("Messages")||(!plan.HasChat&&(plan._categories.Contains("Memories")||plan._categories.Contains("Notes"))))throw new InvalidDataException("导入文件结构或版本无效。");
+            bool anyProductivity=plan._categories.Overlaps(["UserNotes","UserTasks","UserReminders"]);
+            if(json.Peek()!=JsonTokenType.None||version is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or Store.ExportVersion)||plan._categories.Count==0||plan.HasChat!=plan._categories.Contains("Messages")||(!plan.HasChat&&(plan._categories.Contains("Memories")||plan._categories.Contains("Notes")))||(anyProductivity&&!new[]{"UserNotes","UserTasks","UserReminders"}.All(plan._categories.Contains)))throw new InvalidDataException("导入文件结构或版本无效。");
             using var orphan=db.CreateCommand();orphan.Transaction=tx;orphan.CommandText="SELECT count(*) FROM messages WHERE session NOT IN (SELECT id FROM sessions)";
             if(Convert.ToInt64(orphan.ExecuteScalar())!=0)throw new InvalidDataException("消息所属会话缺失。");
             orphan.CommandText="SELECT count(*) FROM chat_notes WHERE session NOT IN (SELECT id FROM sessions)";if(Convert.ToInt64(orphan.ExecuteScalar())!=0)throw new InvalidDataException("摘要所属会话缺失。");
             orphan.CommandText="SELECT count(*) FROM chat_memories";if(Convert.ToInt64(orphan.ExecuteScalar())>30)throw new InvalidDataException("记忆超过30条。");
+            orphan.CommandText="SELECT count(*) FROM user_reminders WHERE task_id IS NOT NULL AND task_id NOT IN (SELECT id FROM user_tasks)";if(Convert.ToInt64(orphan.ExecuteScalar())!=0)throw new InvalidDataException("提醒关联的待办不存在。");
             tx.Commit();return plan;
         }
         catch(Exception ex) when(ex is JsonException or NullReferenceException or SqliteException)

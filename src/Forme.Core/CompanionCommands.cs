@@ -60,7 +60,7 @@ public static class CompanionCommands
         "weather"=>preferences.AllowSceneControl&&command.Value is "clear" or "rain" or "snow"&&command.X is null&&command.Z is null,
         "light" or "fireplace"=>preferences.AllowSceneControl&&command.Value is "on" or "off"&&command.X is null&&command.Z is null,
         "interact"=>preferences.AllowSceneControl&&TargetCatalog.Supports(command.Value,TargetCapabilities.Interact)&&command.X is null&&command.Z is null,
-        "model"=>preferences.AllowPetControl&&command.Value is "sprout" or "cat" or "fox" or "penguin"&&command.X is null&&command.Z is null,
+        "model"=>preferences.AllowPetControl&&command.Value is "sprout" or "cat" or "fox" or "penguin" or "space-marine"&&command.X is null&&command.Z is null,
         "stop" or "recall"=> (preferences.AllowPetControl||preferences.AllowPlayControl)&&command.Value is null&&command.X is null&&command.Z is null,
         "life"=>preferences.AllowPlayControl&&LifeRules.Ids.Contains(command.Value)&&command.X is null&&command.Z is null,
         "hide"=>preferences.AllowPlayControl&&command.Value is "pet-hides" or "pet-seeks"&&command.X is null&&command.Z is null,

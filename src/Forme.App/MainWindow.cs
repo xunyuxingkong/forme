@@ -59,14 +59,14 @@ internal sealed partial class MainWindow : Window
         _room=new(c,Navigate){MaxHeight=560,HorizontalAlignment=HorizontalAlignment.Stretch};_left.Children.Add(_room);_left.Children.Add(Ui.Text("你的节奏，就是这里的节奏。",13,Ui.Muted));_left.Children.Add(_toast);
         _body.Children.Add(_left);Grid.SetColumn(_panel,2);_body.Children.Add(_panel);Grid.SetRow(_body,1);shell.Children.Add(_body);
         var footer=new WrapPanel{Margin=new Thickness(0,16,0,0)};
-        foreach(var (id,label) in new[]{("home","⌂  小屋"),("boat","玩纸船"),("living","玩耍与生活"),("play","成长"),("chat","聊一会儿"),("focus","专注"),("relax","放松"),("mood","心情"),("room","布置")})
+        foreach(var (id,label) in new[]{("home","⌂  小屋"),("boat","玩纸船"),("living","玩耍与生活"),("play","成长"),("today","今日"),("notes","记事"),("chat","聊一会儿"),("focus","专注"),("relax","放松"),("mood","心情"),("room","布置"),("companion","伙伴生活")})
         {var b=Ui.Button(label,()=>Navigate(id));_navigation[id]=b;footer.Children.Add(b);}
         Grid.SetRow(footer,2);shell.Children.Add(footer);_root.Background=Ui.Brush(c.Preferences.AppBackground);_root.Padding=new Thickness(26);_root.Child=shell;Content=_root;ApplyColors();
         SizeChanged+=(_,_)=>ApplyLayout();
         StateChanged+=(_,_)=>UpdateMotion();
-        c.Changed+=OnChanged;c.Tick+=OnTick;c.Notice+=Toast;
+        c.Changed+=OnChanged;c.Tick+=OnTick;c.Notice+=Toast;StartReminderScheduler();
         _toastTimer.Tick+=(_,_)=>{_toastTimer.Stop();_toast.Text="";};
-        Closed+=(_,_)=>{c.Changed-=OnChanged;c.Tick-=OnTick;c.Notice-=Toast;_toastTimer.Stop();StopRelax();DetachBoatPage();DetachWorldPage();_room.Release();};
+        Closed+=(_,_)=>{c.Changed-=OnChanged;c.Tick-=OnTick;c.Notice-=Toast;_toastTimer.Stop();StopReminderScheduler();StopRelax();DetachBoatPage();DetachWorldPage();DetachCompanionLifePage();_room.Release();};
         Navigate(c.Preferences.Onboarded?"home":"welcome");
     }
     public void Toast(string text){_toast.Text=text;_toastTimer.Stop();_toastTimer.Start();}
@@ -81,7 +81,7 @@ internal sealed partial class MainWindow : Window
         =>RenderPage(page,false);
     private void RenderPage(string page,bool preserveView)
     {
-        DetachWorldPage();if(_page=="furniture"&&page!="furniture")_room.CloseFurniture();if(_page=="hide"&&page!="hide")_room.EndHide();
+        DetachWorldPage();DetachCompanionLifePage();if(_page=="furniture"&&page!="furniture")_room.CloseFurniture();if(_page=="hide"&&page!="hide")_room.EndHide();
         DetachBoatPage();if(_page=="boat"&&page!="boat")_room.CloseBoats();
         if(_page=="relax" && page!="relax")StopRelax();
         if(_page=="room" && page!="room")_room.Preview=null;
@@ -90,7 +90,7 @@ internal sealed partial class MainWindow : Window
         UpdateHeader();foreach(var (id,b) in _navigation)b.Background=id==page?Ui.Brush("#DDE8D7"):Ui.Brush("#EFF2EB");
         var content=page switch
         {
-            "furniture"=>FurniturePage(),"living"=>LivingPage(),"hide"=>HidePage(),"welcome"=>Welcome(),"boat"=>BoatPage(),"chat"=>Chat(),"memory"=>MemorySettings(),"focus"=>FocusPage(),"relax"=>Relax(),"mood"=>Mood(),"plant"=>Plant(),"room"=>Room(),"play"=>Play(),"settings"=>Settings(),_=>Home()
+            "furniture"=>FurniturePage(),"living"=>LivingPage(),"hide"=>HidePage(),"welcome"=>Welcome(),"boat"=>BoatPage(),"chat"=>Chat(),"memory"=>MemorySettings(),"focus"=>FocusPage(),"relax"=>Relax(),"mood"=>Mood(),"plant"=>Plant(),"room"=>Room(),"play"=>Play(),"settings"=>Settings(),"today"=>TodayPage(),"notes"=>NotesPage(),"companion"=>CompanionLifePage(),_=>Home()
         };
         _panel.Content=page=="chat"?content:new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Padding=new Thickness(0,0,8,0)};
     }
@@ -118,7 +118,7 @@ internal sealed partial class MainWindow : Window
     {
         UpdateHeader();ApplyColors();_room.Refresh();
         UpdateMotion();
-        if(_page is "home" or "chat" or "focus" or "plant" or "play" or "living")RenderPage(_page,true);
+        if(_page is "home" or "chat" or "focus" or "plant" or "play" or "living" or "today" or "notes")RenderPage(_page,true);
         _settingsChanged();
     }
     private void ApplyColors()
@@ -139,7 +139,7 @@ internal sealed partial class MainWindow : Window
     {
         if(_clockText is not null)_clockText.Text=ClockLabel();
         if(_liveText is not null && _c.Busy)_liveText.Text=_c.LiveReply.Length==0?"…":ChatDisplay.Message(_c.LiveReply);
-        if(_chatState is not null){_chatState.Text=_c.Waiting?"仍在等待服务响应，可以随时停止。":ChatDisplay.Status(_c.ChatStatus);_chatState.Visibility=string.IsNullOrEmpty(_chatState.Text)?Visibility.Collapsed:Visibility.Visible;}
+        if(_chatState is not null){_chatState.Text=ChatDisplay.Status(_c.ChatStatus);if(_c.Waiting&&_chatState.Text.Length>0)_chatState.Text+=" 可随时停止。";_chatState.Visibility=string.IsNullOrEmpty(_chatState.Text)?Visibility.Collapsed:Visibility.Visible;}
     }
     private string ClockLabel()=>TimeSpan.FromSeconds(Math.Ceiling(_c.Clock.Remaining)).ToString(_c.Clock.Remaining>=3600?@"hh\:mm\:ss":@"mm\:ss");
     private UIElement Home()
@@ -412,7 +412,7 @@ internal sealed partial class MainWindow : Window
             transcript.Children.Add(ChatTranscript.Entry(message.Role=="user"?null:_c.Preferences.PetName,Ui.Text(visible,14),message.Status=="stopped"?"已停止":message.Status=="error"?"未完成":null,user:message.Role=="user"));
         }
         if(messages.Count==0&&!_c.Busy)transcript.Children.Add(Ui.Stack(Ui.Text(_chatSearch.Length>0?"没有找到匹配的聊天记录":"这里还没有聊天记录",15,null,true),Ui.Text(_chatSearch.Length>0?"可以调整关键词，或清除搜索查看完整会话。":"在下方输入内容，就能和伙伴开始聊天。",12,Ui.Muted)));
-        if(_c.Busy){_liveText=Ui.Text(_c.LiveReply.Length==0?"…":ChatDisplay.Message(_c.LiveReply),14);transcript.Children.Add(ChatTranscript.Entry(_c.Preferences.PetName,_liveText));}
+        if(_c.ForegroundBusy){_liveText=Ui.Text(_c.LiveReply.Length==0?"…":ChatDisplay.Message(_c.LiveReply),14);transcript.Children.Add(ChatTranscript.Entry(_c.Preferences.PetName,_liveText));}
         var transcriptScroll=new ScrollViewer{Name="聊天记录滚动区",Content=transcript,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Padding=new Thickness(0,2,8,0)};
         var transcriptFrame=ChatTranscript.Frame(transcriptScroll);Grid.SetRow(transcriptFrame,1);history.Children.Add(transcriptFrame);Place(history,3);
         if(_chatOffset==0)transcriptScroll.Loaded+=(_,_)=>transcriptScroll.ScrollToEnd();
@@ -428,14 +428,16 @@ internal sealed partial class MainWindow : Window
         {
             if(e.Key==Key.Enter && !Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) && !InputMethod.GetIsInputMethodEnabled(input)) {e.Handled=true;try{await Send();}catch(Exception ex) when(OperationErrors.Expected(ex)){Ui.Error(OperationErrors.Message(ex));}}
         };
+        input.PreviewTextInput+=(_,_)=>_c.NotifyActivityInteraction();
+        input.PreviewKeyDown+=(_,e)=>{if(e.Key is Key.Back or Key.Delete)_c.NotifyActivityInteraction();};
         bool composing=false;
-        TextCompositionManager.AddPreviewTextInputStartHandler(input,(_,_)=>composing=true);
+        TextCompositionManager.AddPreviewTextInputStartHandler(input,(_,_)=>{_c.NotifyActivityInteraction();composing=true;});
         TextCompositionManager.AddPreviewTextInputHandler(input,(_,_)=>composing=false);
         input.PreviewKeyDown+=async(_,e)=>{if(e.Handled)return;if(e.Key==Key.Enter&&!Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)&&!composing&&InputMethod.GetIsInputMethodEnabled(input)){e.Handled=true;try{await Send();}catch(Exception ex) when(OperationErrors.Expected(ex)){Ui.Error(OperationErrors.Message(ex));}}};
-        var send=Ui.AsyncButton("发送",Send,true);send.IsEnabled=!_c.Busy;
+        var send=Ui.AsyncButton("发送",Send,true);send.IsEnabled=!_c.ForegroundBusy;
         var stop=Ui.Button("停止",_c.StopReply);stop.IsEnabled=_c.Busy;
         var lastUser=messages.LastOrDefault(x=>x.Role=="user");var retry=Ui.AsyncButton("重试最后消息",async()=>{if(lastUser is not null)await _c.Send(lastUser.Id);});retry.IsEnabled=!_c.Busy&&lastUser is not null&&_c.Secrets.Exists&&messages.LastOrDefault()?.Status is "error" or "stopped";
-        composer.Children.Add(AttachmentControls.List(_c,this));composer.Children.Add(input);composer.Children.Add(Ui.Row(send,stop,AttachmentControls.PickButton(_c,this),retry));
+        composer.Children.Add(AttachmentControls.List(_c,this));composer.Children.Add(input);composer.Children.Add(Ui.Row(send,stop,AttachmentControls.PickButton(_c,this),retry,ActivitySelectionUi.Button(_c,this,CompanionView.Room)));
         composer.Children.Add(Ui.Text("Enter 发送 · Shift+Enter 换行。“小屋里走走”控制3D小屋伙伴；“桌面／屏幕上走一圈”控制桌面伙伴。停止/取消/召回和自定义快捷规则本地执行；其他文字由AI判断。附件仅本次上传，带附件不执行动作。",10,Ui.Muted));
         Place(composer,4);return page;
     }

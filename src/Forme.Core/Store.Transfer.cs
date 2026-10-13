@@ -8,7 +8,7 @@ public sealed partial class Store
     public static PreparedImport PrepareImport(string path,CancellationToken cancellation=default)=>PreparedImport.Read(path,cancellation);
     private IEnumerable<T> Enumerate<T>(string sql,Func<SqliteDataReader,T> map)
     {using var cmd=Command(sql);using var reader=cmd.ExecuteReader();while(reader.Read())yield return map(reader);}
-    public void ExportFile(string path,bool chat,bool moods,bool focus,bool room,CancellationToken cancellation=default)
+    public void ExportFile(string path,bool chat,bool moods,bool focus,bool room,CancellationToken cancellation=default,bool productivity=false)
     {
         cancellation.ThrowIfCancellationRequested();
         using var stage=PreparedImport.Empty();
@@ -18,11 +18,11 @@ public sealed partial class Store
         }
         cancellation.ThrowIfCancellationRequested();
         using var snapshot=new Store(stage.DirectoryPath,true);
-        snapshot.WriteExport(path,chat,moods,focus,room,cancellation);
+        snapshot.WriteExport(path,chat,moods,focus,room,productivity,cancellation);
     }
-    private void WriteExport(string path,bool chat,bool moods,bool focus,bool room,CancellationToken cancellation)
+    private void WriteExport(string path,bool chat,bool moods,bool focus,bool room,bool productivity,CancellationToken cancellation)
     {
-        if(!(chat||moods||focus||room))throw new InvalidDataException("至少选择一类数据。");
+        if(!(chat||moods||focus||room||productivity))throw new InvalidDataException("至少选择一类数据。");
         string temp=path+"."+Guid.NewGuid().ToString("N")+".tmp";
         try
         {
@@ -51,6 +51,7 @@ public sealed partial class Store
                     Array("Memories",chat,Memories());Array("Notes",chat,Notes());
                     Array("Moods",moods,Enumerate("SELECT * FROM moods ORDER BY created",r=>new MoodEntry(r.GetString(0),r.GetString(1),r.GetString(2),ReadDate(r,3),ReadDate(r,4))));
                     Array("Focus",focus,Enumerate("SELECT * FROM focus ORDER BY started",r=>new FocusEntry(r.GetString(0),r.GetString(1),r.GetString(2),ReadDate(r,3),r.GetInt32(4),r.GetDouble(5),r.GetString(6))));
+                    Array("UserNotes",productivity,UserNotes(true,"",0,int.MaxValue));Array("UserTasks",productivity,UserTasks(null,null,0,int.MaxValue));Array("UserReminders",productivity,AllUserReminders());
                     writer.WritePropertyName("Room");
                     if(room)
                     {
@@ -71,7 +72,7 @@ public sealed partial class Store
     public void ApplyImport(PreparedImport plan)
     {
         plan.EnsureAlive();var prefs=LoadPreferences();
-        ExportFile(BackupPath,true,true,true,true);
+        ExportFile(BackupPath,true,true,true,true,productivity:true);
         Exec("ATTACH DATABASE $0 AS staged",null,plan.DatabasePath);
         try
         {
@@ -80,6 +81,7 @@ public sealed partial class Store
             if(plan.HasChat)Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_memories; DELETE FROM chat_notes; INSERT INTO sessions SELECT * FROM staged.sessions; INSERT INTO messages SELECT * FROM staged.messages; INSERT INTO chat_memories SELECT * FROM staged.chat_memories; INSERT INTO chat_notes SELECT * FROM staged.chat_notes;",tx);
             if(plan.HasMoods)Exec("DELETE FROM moods; INSERT INTO moods SELECT * FROM staged.moods;",tx);
             if(plan.HasFocus)Exec("DELETE FROM focus; INSERT INTO focus SELECT * FROM staged.focus;",tx);
+            if(plan.HasProductivity)Exec("DELETE FROM user_reminders; DELETE FROM user_tasks; DELETE FROM user_notes; INSERT INTO user_notes SELECT * FROM staged.user_notes; INSERT INTO user_tasks SELECT * FROM staged.user_tasks; INSERT INTO user_reminders SELECT * FROM staged.user_reminders;",tx);
             if(plan.Room is {} room)
             {
                 prefs=prefs with{PetName=room.PetName,Theme=room.Theme,Rug=room.Rug,Ornament=room.Ornament,PetModel=room.PetModel,Weather=room.Weather,RoomLamp=room.RoomLamp,Fireplace=room.Fireplace};

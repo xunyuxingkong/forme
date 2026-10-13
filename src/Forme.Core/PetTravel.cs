@@ -13,8 +13,8 @@ public sealed class PetTravel(double minX,double maxX,double minZ,double maxZ,IR
     public IReadOnlyList<GroundPoint> Route=>_route.ToArray();
     public bool Running {get;private set;}
     public double Heading {get;private set;}
-    private double _phase;
-    public void Reset(GroundPoint point){_route.Clear();Position=point;_phase=0;}
+    private double _phase,_locomotionSeconds;
+    public void Reset(GroundPoint point){_route.Clear();Position=point;_phase=0;_locomotionSeconds=0;}
     public void Stop()=>_route.Clear();
     public void SetGait(bool running){if(Moving)Running=running;}
     public bool CanReach(GroundPoint point){var probe=new PetTravel(minX,maxX,minZ,maxZ,obstacles);probe.Reset(Position);return probe.MoveTo(point);}
@@ -56,19 +56,20 @@ public sealed class PetTravel(double minX,double maxX,double minZ,double maxZ,IR
         }
         if(!found)return false;
         var route=new List<GroundPoint>{target};for(int id=end;id!=start;){id=previous[id];if(id!=start)route.Add(Point(id));}route.Reverse();
-        _route.Clear();foreach(var point in route)_route.Enqueue(point);Running=cost[end]>3;_phase=0;
+        _route.Clear();foreach(var point in route)_route.Enqueue(point);Running=cost[end]>3;_phase=0;_locomotionSeconds=0;
         if(instant){Position=target;Stop();}return true;
     }
     public PetPose Advance(double seconds)
     {
         if(!double.IsFinite(seconds)||seconds<0)throw new ArgumentOutOfRangeException(nameof(seconds));
         double budget=Math.Min(seconds,.1)*(Running?3.4:1.4);_phase+=Math.Min(seconds,.1)*(Running?3.6:2.2)*Math.PI*2;
+        if(Moving)_locomotionSeconds+=Math.Min(seconds,.1);
         while(Moving&&budget>0)
         {
             var next=_route.Peek();double distance=Distance(Position,next);Heading=Math.Atan2(next.X-Position.X,next.Z-Position.Z)*180/Math.PI;
             if(distance<=budget){Position=next;_route.Dequeue();budget-=distance;}else{Position=new(Position.X+(next.X-Position.X)*budget/distance,Position.Z+(next.Z-Position.Z)*budget/distance);budget=0;}
         }
-        return Moving?new(1,1,.018*Math.Abs(Math.Sin(_phase)),0,Math.Sin(_phase)*2,false,"idle",Math.Sin(_phase)*(Running?1:.65)):PetPose.Neutral();
+        return Moving?new(1,1,.018*Math.Abs(Math.Sin(_phase)),0,Math.Sin(_phase)*2,false,"idle",Math.Sin(_phase)*(Running?1:.65),Locomotion:Running?"run":"walk",LocomotionSeconds:_locomotionSeconds):PetPose.Neutral();
     }
     private static double Distance(GroundPoint a,GroundPoint b)=>Math.Sqrt(Math.Pow(a.X-b.X,2)+Math.Pow(a.Z-b.Z,2));
 }

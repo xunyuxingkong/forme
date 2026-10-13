@@ -91,7 +91,7 @@ public sealed class AttachmentTests
     {
         string root=Path.Combine("artifacts","attachment-store",Guid.NewGuid().ToString("N"));using var store=new Store(root);var session=store.NewSession("https://example.com/v1");
         store.SaveMessage(new("attachment-user",session.Id,"user","看看图片\n[本次附件：image.png；原内容未保存]","attachment",DateTimeOffset.Now));
-        var export=store.Export(true,false,false,false);Store.ValidateExport(export);store.Import(export);Assert.AreEqual("attachment",store.Messages(session.Id).Single().Status);Assert.AreEqual(7,export.SchemaVersion);
+        var export=store.Export(true,false,false,false);Store.ValidateExport(export);store.Import(export);Assert.AreEqual("attachment",store.Messages(session.Id).Single().Status);Assert.AreEqual(Store.ExportVersion,export.SchemaVersion);
         export.SchemaVersion=6;export.Messages=[export.Messages!.Single() with{Status="complete"}];Store.ValidateExport(export);store.Import(export);
     }
     [TestMethod]

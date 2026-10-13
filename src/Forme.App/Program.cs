@@ -92,7 +92,7 @@ internal sealed partial class DesktopHost : IDisposable
     private readonly bool _smoke;
     public DesktopHost(Application app,Controller c,string pipeName,bool smoke)
     {
-        _app=app;_c=c;_smoke=smoke;
+        _app=app;_c=c;_smoke=smoke;InitializeActivitySelection();c.InitializeCompanionLife();_c.BlockAutonomy=()=>House is {IsActive:true}&&House.CurrentPage=="chat";
         c.CommandHandler=ExecuteCompanionCommand;c.SceneContext=()=>House?.SceneDescription??"桌面悬浮伙伴；房间坐标移动暂不可用";
         c.ActionHandler=ExecuteAction;c.ActionPreflight=PreflightActions;c.CurrentScene=()=>House?.CompanionScene??(_pet is {IsVisible:true}?SceneKind.Desktop:SceneKind.Tray);
         c.CommandWaiter=(command,token)=>command.Action=="stroll"&&command.Value is "lap1" or "lap2"?_pet?.WaitCommand(command,token)??Task.FromResult(true):House?.WaitCreation(command,token)??_pet?.WaitCommand(command,token)??Task.FromResult(true);
@@ -216,7 +216,7 @@ internal sealed partial class DesktopHost : IDisposable
     }
     public void Dispose()
     {
-        _c.CommandHandler=null;_c.SceneContext=null;
+        _c.CommandHandler=null;_c.SceneContext=null;_c.ActivityWorld=null;_c.BlockAutonomy=null;
         _c.ActionHandler=null;_c.ActionPreflight=null;_c.CurrentScene=null;
         _c.CommandWaiter=null;_c.StopCommands=null;
         _exit=true;_pipeCancel.Cancel();_greetings.Stop();SystemEvents.PowerModeChanged-=Power;SystemEvents.SessionSwitch-=Session;SystemEvents.DisplaySettingsChanged-=Displays;
@@ -232,11 +232,13 @@ internal static class Smoke
         try
         {
             Directory.CreateDirectory("artifacts/screenshots");
+            if(Environment.GetCommandLineArgs().Contains("--activities-only")){c.SavePreferences(new Preferences{Onboarded=true});await ActivitySelectionChecks.Run(host,c);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--rules-only")){c.SavePreferences(new Preferences{Onboarded=true});await CompanionChecks.DesktopRules(host,c);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--attachments-only")){c.SavePreferences(new Preferences{Onboarded=true});await CompanionChecks.Attachments(host,c);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--presentation-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("chat");await CompanionChecks.ChatCleanup(host,c);await CompanionChecks.DesktopVisibility(host,c);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--creation-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);var creationRoom=Descendants(host.House!).OfType<Room3DView>().Single();await CompanionChecks.Creation(host,c,creationRoom);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--living-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);var living=Descendants(host.House!).OfType<Room3DView>().Single();await LivingChecks.Run(host,c,living);Environment.ExitCode=0;await host.Exit();return;}
+            if(Environment.GetCommandLineArgs().Contains("--companion-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);var companion=Descendants(host.House!).OfType<Room3DView>().Single();await CompanionChecks.Run(host,c,companion);Environment.ExitCode=0;await host.Exit();return;}
             await PetAnimationChecks.Run();
             foreach(double scale in new[]{1d,1.25,1.5,2d})
             {int px=ScreenCoordinateService.DipToPhysical(-123.5,scale);double dip=ScreenCoordinateService.PhysicalToDip(px,scale);if(Math.Abs(dip+123.5)>1/scale)throw new Exception("DPI coordinate conversion drifted");}
@@ -373,7 +375,7 @@ internal static class Smoke
             searchInput.Text="本地界面检查";Click(chat,"搜索记录");chat.UpdateLayout();
             if(!Descendants(chat).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text=="聊天记录 · 搜索“本地界面检查”")||!Descendants(chat).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text=="本地界面检查"))throw new Exception("Chat history search did not show the matching message");
             Click(chat,"清除搜索");chat.UpdateLayout();if(!Descendants(chat).OfType<System.Windows.Controls.TextBlock>().Any(x=>x.Text=="聊天记录"))throw new Exception("Clearing chat history search did not restore the session");
-            await CompanionChecks.ChatCleanup(host,c);await CompanionChecks.DesktopVisibility(host,c);
+            await CompanionChecks.ChatCleanup(host,c);await CompanionChecks.DesktopVisibility(host,c);await ActivitySelectionChecks.Run(host,c);
             host.HidePet();host.ShowPet();await Task.Delay(100);
             petSource=(System.Windows.Interop.HwndSource)PresentationSource.FromVisual(host.Pet!)!;
             animatedPet=Descendants(host.Pet!).OfType<Pet3DView>().Single();

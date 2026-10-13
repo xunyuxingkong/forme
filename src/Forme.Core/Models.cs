@@ -43,6 +43,15 @@ public sealed record Preferences
     public bool AllowSceneControl { get; set; }
     public bool AllowPlayControl { get; set; }
     public bool AllowLayoutPreview { get; set; }
+    public bool ShareGameState { get; set; }
+    public string GameStateEndpoint { get; set; } = "";
+    public bool SharePlayState { get; set; }
+    public bool RememberPlayExperiences { get; set; }
+    public bool ShareExperiences { get; set; }
+    public bool AllowAutonomyInvitations { get; set; }
+    public bool AutonomyEnabled { get; set; }
+    public CompanionView AutonomyView { get; set; } = CompanionView.Room;
+    public int AutonomyDailyLimit { get; set; } = 20;
     public bool LocalActionRules { get; set; } = true;
     public int ContextBudget { get; set; } = 4096;
     public int MaxReplyTokens { get; set; } = 512;
@@ -56,7 +65,7 @@ public sealed record Preferences
         if(ZhipuReasoningEffort is not ("low" or "high" or "max"))throw new InvalidDataException("智谱思考强度请选择低、较高或最高。");
         if (string.IsNullOrWhiteSpace(PetName)||UserName is null||ReplyStyle is null||RoleDescription is null||PetName.Length is < 1 or > 20 || UserName.Length > 30 || ReplyStyle.Length > 400 || RoleDescription.Length > 1200)
             throw new InvalidDataException("名字或回复偏好过长。");
-        if(!new[]{"sprout","cat","fox","penguin"}.Contains(PetModel)||!new[]{"balanced","economy"}.Contains(PerformanceMode)||!new[]{"clear","rain","snow"}.Contains(Weather)||
+        if(!new[]{"sprout","cat","fox","penguin","space-marine"}.Contains(PetModel)||!new[]{"balanced","economy"}.Contains(PerformanceMode)||!new[]{"clear","rain","snow"}.Contains(Weather)||
             !new[]{"companion","focus","story","custom"}.Contains(CharacterPreset)||ContextBudget is not (2048 or 4096 or 8192 or 16384 or 32768 or 65536)||MaxReplyTokens is <128 or >1024||!double.IsFinite(Temperature)||Temperature is <0 or >1)
             throw new InvalidDataException("模型、场景或 AI 个性参数无效。");
         if (FocusMinutes is < 1 or > 180 || RestMinutes is < 1 or > 180 ||
@@ -69,6 +78,8 @@ public sealed record Preferences
             !new[] { "cream", "sage", "rose" }.Contains(Rug) ||
             !new[] { "none", "star", "cloud", "flower" }.Contains(Ornament))
             throw new InvalidDataException("房间选项无效。");
+        if(GameStateEndpoint is null || GameStateEndpoint.Length>500||!Enum.IsDefined(AutonomyView)||AutonomyDailyLimit is <1 or >100)throw new InvalidDataException("游戏状态分享地址或自主设置无效。");
+        if(GameStateEndpoint.Length>0)AiClient.ValidateEndpoint(GameStateEndpoint);
         AiClient.ValidateEndpoint(Endpoint);
         if (string.IsNullOrWhiteSpace(Model) || Model.Length > 100)
             throw new InvalidDataException("模型名称无效。");
@@ -80,6 +91,11 @@ public sealed record ChatSession(string Id, string Title, DateTimeOffset Created
 public sealed record ChatMessage(string Id, string SessionId, string Role, string Content, string Status, DateTimeOffset Created);
 public sealed record ChatMemory(string Id,string Title,string Content,string Provider,bool Enabled,DateTimeOffset Created,DateTimeOffset Updated);
 public sealed record ChatNote(string SessionId,string Content,string Provider);
+public sealed record UserNote(string Id,string Title,string Content,IReadOnlyList<string> Tags,bool Pinned,bool Archived,string Source,DateTimeOffset Created,DateTimeOffset Updated);
+public sealed record UserTask(string Id,string Title,string Description,string Status,string Priority,DateTimeOffset? DueAt,DateTimeOffset? RemindAt,DateTimeOffset Created,DateTimeOffset Updated,DateTimeOffset? CompletedAt,string Source,string Project,IReadOnlyList<string> Tags,int SortOrder);
+public sealed record UserReminder(string Id,string Title,DateTimeOffset DueAt,string? TaskId,string Status,string RepeatRule,DateTimeOffset Created,DateTimeOffset Updated,DateTimeOffset? SnoozeUntil);
+public enum ProductivityIntentType { CreateNote, SearchNote, CreateTask, ListTodayTasks, CreateReminder }
+public sealed record ProductivityIntent(ProductivityIntentType Type,string? Title=null,string? Content=null,string? Query=null,string? Description=null,string? DueAt=null,string? RemindAt=null,string? Priority=null,IReadOnlyList<string>? Tags=null);
 public sealed record FocusEntry(string Id, string Kind, string Title, DateTimeOffset Started, int TargetSeconds, double ElapsedSeconds, string Result);
 public sealed record ActivitySnapshot(string Id, string Kind, string Title, DateTimeOffset Started, int TargetSeconds, double ElapsedSeconds);
 public sealed record GrowthEvent(string Id, string Type, string Day);
@@ -108,6 +124,9 @@ public sealed class ExportDocument
     public List<ChatMessage>? Messages { get; set; }
     public List<ChatMemory>? Memories { get; set; }
     public List<ChatNote>? Notes { get; set; }
+    public List<UserNote>? UserNotes { get; set; }
+    public List<UserTask>? UserTasks { get; set; }
+    public List<UserReminder>? UserReminders { get; set; }
     public List<MoodEntry>? Moods { get; set; }
     public List<FocusEntry>? Focus { get; set; }
     public RoomExport? Room { get; set; }
@@ -118,6 +137,7 @@ public sealed record GameSlot(string SlotId,string ItemId);
 public sealed record GameExport(int Experience,int Stars,List<GameInventoryItem> Inventory,List<GameTaskRecord> Tasks,List<GameDailyRecord> Daily,List<GameDiscovery> Discoveries,List<GameSlot> Slots,List<GameAchievement> Achievements);
 public sealed record RoomExport(string PetName, string Theme, string Rug, string Ornament, List<GrowthEvent> Events)
 {
+    public CompanionLifeData? CompanionLife {get;init;}
     public LivingWorld? World {get;init;}
     public BoatAlbum? Boats {get;init;}
     public GameExport? Game {get;init;}

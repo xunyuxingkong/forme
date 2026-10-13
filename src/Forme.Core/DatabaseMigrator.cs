@@ -4,7 +4,7 @@ namespace Forme.Core;
 
 internal static class DatabaseMigrator
 {
-    public const int CurrentVersion=4;
+    public const int CurrentVersion=5;
     internal static void Upgrade(SqliteConnection db,string directory,Action<int>? beforeStep=null)
     {
         using var versionCommand=db.CreateCommand();versionCommand.CommandText="PRAGMA user_version";
@@ -34,6 +34,7 @@ internal static class DatabaseMigrator
                 1=>"CREATE INDEX moods_created ON moods(created DESC); CREATE INDEX focus_started ON focus(started DESC);",
                 2=>"CREATE TABLE game_progress(id INTEGER PRIMARY KEY CHECK(id=1),xp INTEGER NOT NULL DEFAULT 0,stars INTEGER NOT NULL DEFAULT 0); INSERT INTO game_progress(id) VALUES(1); CREATE TABLE game_inventory(item_id TEXT PRIMARY KEY,quantity INTEGER NOT NULL CHECK(quantity>=0)); INSERT INTO game_inventory VALUES('ball-yellow',1); CREATE TABLE game_tasks(day TEXT NOT NULL,task_id TEXT NOT NULL,completed INTEGER NOT NULL CHECK(completed IN(0,1)),PRIMARY KEY(day,task_id)); CREATE TABLE game_daily(day TEXT PRIMARY KEY,xp INTEGER NOT NULL DEFAULT 0); CREATE TABLE game_discoveries(item_id TEXT PRIMARY KEY,day TEXT NOT NULL); CREATE TABLE game_slots(slot_id TEXT PRIMARY KEY,item_id TEXT NOT NULL); CREATE TABLE game_achievements(id TEXT PRIMARY KEY,day TEXT NOT NULL);",
                 3=>"CREATE TABLE chat_memories(id TEXT PRIMARY KEY,title TEXT NOT NULL,content TEXT NOT NULL,provider TEXT NOT NULL,enabled INTEGER NOT NULL CHECK(enabled IN(0,1)),created TEXT NOT NULL,updated TEXT NOT NULL); CREATE TABLE chat_notes(session TEXT PRIMARY KEY,content TEXT NOT NULL,provider TEXT NOT NULL); CREATE INDEX memories_provider ON chat_memories(provider,enabled);",
+                4=>"CREATE TABLE user_notes(id TEXT PRIMARY KEY,title TEXT NOT NULL,content TEXT NOT NULL,tags TEXT NOT NULL,pinned INTEGER NOT NULL CHECK(pinned IN(0,1)),archived INTEGER NOT NULL CHECK(archived IN(0,1)),source TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL); CREATE INDEX user_notes_updated ON user_notes(archived,pinned,updated DESC); CREATE TABLE user_tasks(id TEXT PRIMARY KEY,title TEXT NOT NULL,description TEXT NOT NULL,status TEXT NOT NULL,priority TEXT NOT NULL,due_at TEXT,remind_at TEXT,created TEXT NOT NULL,updated TEXT NOT NULL,completed_at TEXT,source TEXT NOT NULL,project TEXT NOT NULL,tags TEXT NOT NULL,sort_order INTEGER NOT NULL); CREATE INDEX user_tasks_due ON user_tasks(status,due_at); CREATE TABLE user_reminders(id TEXT PRIMARY KEY,title TEXT NOT NULL,due_at TEXT NOT NULL,task_id TEXT,status TEXT NOT NULL,repeat_rule TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL,snooze_until TEXT); CREATE INDEX user_reminders_due ON user_reminders(status,due_at);",
                 _=>throw new InvalidDataException("缺少对应的数据升级步骤。")
             };
             step.ExecuteNonQuery();step.CommandText=$"PRAGMA user_version={++version}";step.ExecuteNonQuery();

@@ -36,6 +36,23 @@ public sealed class CoreTests
     {
         MigrationChecks.Run(testRoot,Check,Throws);
     }
+    [TestMethod, TestCategory("Productivity")]
+    public void UserNotesTasksAndRemindersPersistLocally()
+    {
+        using var store=new Store(Path.Combine(testRoot,"productivity"));var now=DateTimeOffset.Now;var tomorrow=now.AddDays(1);
+        store.SaveUserNote(new("note-1","SQL 优化","后续检查查询计划",["工作","数据库"],true,false,"manual",now,now));
+        Check(store.UserNotes(search:"查询计划").Single().Tags.SequenceEqual(new[]{"工作","数据库"}),"note content and tags persist and are searchable");
+        var task=new UserTask("task-1","测试安装包","检查升级覆盖","todo","important",tomorrow,now.AddMinutes(-1),now,now,null,"manual","0.6.1",["发布"],0);
+        store.SaveUserTask(task);var reminder=store.DueReminders(now).Single();Check(reminder.TaskId==task.Id,"task reminder is persisted atomically with the local task");
+        store.SetUserTaskStatus(task.Id,"done",now.AddMinutes(2));Check(store.UserTasks(status:"done").Single().CompletedAt==now.AddMinutes(2),"task completion is persisted separately from game tasks");
+        Check(store.DueReminders(now.AddDays(1)).Count==0,"completing a task dismisses its reminder");
+        var standalone=new UserReminder("reminder-1","休息一下",now.AddMinutes(-1),null,"pending","",now,now,null);store.SaveUserReminder(standalone);
+        store.SnoozeUserReminder(standalone.Id,now.AddHours(1),now);Check(store.DueReminders(now).Count==0,"snoozed reminder is not due early");
+        store.DismissUserReminder(standalone.Id,now);Check(store.DueReminders(now.AddDays(1)).Count==0,"dismissed reminder does not fire again");
+        Throws(()=>store.SaveUserTask(task with{Priority="critical"}),"invalid task priority is rejected");
+        var path=Path.Combine(testRoot,"productivity.json");store.ExportFile(path,false,false,false,false,productivity:true);using var imported=new Store(Path.Combine(testRoot,"productivity-import"));using(var plan=Store.PrepareImport(path))imported.ApplyImport(plan);
+        Check(imported.UserNotes(search:"查询计划").Count==1&&imported.UserTasks(status:"done").Count==1&&imported.DueReminders(now.AddHours(2)).Count==0,"notes and tasks export and import without reactivating dismissed reminders");
+    }
     [TestMethod, TestCategory("Game")]
     public void LocalProgressionRewardsAndBackup()
     {

@@ -14,6 +14,7 @@ internal static class ChatRequests
     }
     public static async Task Send(Controller c)
     {
+        if(c.IsAutomaticActivity)await c.TakeForegroundAsync();
         if(c.Busy){c.TryCancelPendingFromDraft();return;}
         if(await c.TrySendFastPathLocal())return;
         if(!c.Secrets.Exists&&await c.TrySendLocal())return;
@@ -23,14 +24,10 @@ internal static class ChatRequests
             if(!Ui.Confirm("此会话曾发送给另一地址。继续将把当前消息和有限历史发送给新服务："+c.Preferences.Endpoint+"。确认转移？"))return;
             c.Store.RebindSession(session.Id,c.Preferences.Endpoint);c.SelectSession(session with{Endpoint=c.Preferences.Endpoint});
         }
-        if(c.Store.Get<string>("ai-consent-v2-routing")!=c.Preferences.Endpoint)
+        if(c.Store.Get<string>("ai-consent-v3-productivity")!=c.Preferences.Endpoint)
         {
-            // The earlier per-provider consent already covered AI chat with the same bounded history,
-            // role settings, memories and selected attachment. Do not prompt again just because
-            // intent routing now uses that same request context.
-            if(c.Store.Get<string>("ai-consent")!=c.Preferences.Endpoint&&
-                !Ui.Confirm("AI会理解本次消息是普通聊天还是伙伴动作。消息会发送给服务商，并可能包含有限会话上下文、角色设定及已启用的确认记忆；已选择的附件只随本次发送。动作执行仍受本地权限、目标和安全校验限制。服务地址："+c.Preferences.Endpoint+"。调用可能收费；删除本地记录无法删除服务商留存。确认使用此服务？"))return;
-            c.Store.Set("ai-consent-v2-routing",c.Preferences.Endpoint);
+            if(!Ui.Confirm("AI会理解本次消息是普通聊天、伙伴动作还是记事/待办请求。消息发送给服务商，可能包含有限会话上下文、角色设定及已启用的确认记忆；附件只随本次发送。AI可返回结构化结果，用于在本机新建记事、待办或提醒；本地已有记事和待办不会发送给AI。伙伴动作仍受本地权限、安全校验限制。服务地址："+c.Preferences.Endpoint+"。调用可能收费；删除本地记录无法删除服务商留存。确认使用此服务？"))return;
+            c.Store.Set("ai-consent-v3-productivity",c.Preferences.Endpoint);
         }
         await c.Send();
     }

@@ -206,9 +206,8 @@ internal sealed class Pet3DView : Grid
     {
         System.Windows.Automation.AutomationProperties.SetName(this,"Forme 桌面伙伴，可点击互动或拖动移动");
         Width=164;Height=168;Background=null;
-        _viewport.Camera=new PerspectiveCamera(new Point3D(0,1.05,4.5),new Vector3D(0,-.05,-4.5),new Vector3D(0,1,0),31);
         var rig=factory.Create();_animator=new(rig);_character.Children.Add(rig.Root);
-        _character.Transform=new RotateTransform3D(_rotation,new Point3D(0,.75,0));
+        Presentation(rig);
         var group=new Model3DGroup();MeshArt.Lights(group);group.Children.Add(_character);_model.Content=group;
         _viewport.Children.Add(_model);Children.Add(_viewport);
         Loaded+=(_,_)=>Configure();Unloaded+=(_,_)=>_animator.Configure(_state,false,_reduced,_quiet,_suspended);
@@ -221,7 +220,13 @@ internal sealed class Pet3DView : Grid
     }
     public void Economy(bool economy)=>_animator.Economy=economy;
     public void ReplaceModel(IPetModelFactory factory)
-    {var rig=factory.Create();_character.Children.Clear();_animator.Replace(rig);_character.Children.Add(rig.Root);}
+    {var rig=factory.Create();_character.Children.Clear();_animator.Replace(rig);_character.Children.Add(rig.Root);Presentation(rig);}
+    private void Presentation(IPetModel rig)
+    {
+        bool marine=rig is SpaceMarinePetModel;double fit=marine?2:1;_rotation.Angle=marine?0:-12;
+        _viewport.Camera=new PerspectiveCamera(new Point3D(0,1.05*fit,4.5*fit),new Vector3D(0,-.05*fit,-4.5*fit),new Vector3D(0,1,0),31);
+        _character.Transform=new RotateTransform3D(_rotation,new Point3D(0,.75*fit,0));
+    }
     public bool HasMeshAt(Point local)
     {
         bool hit=false;VisualTreeHelper.HitTest(_viewport,null,result=>{if(result is RayMeshGeometry3DHitTestResult){hit=true;return HitTestResultBehavior.Stop;}return HitTestResultBehavior.Continue;},new PointHitTestParameters(local));return hit;
@@ -237,6 +242,17 @@ internal sealed class Pet3DView : Grid
     public void DesktopMotion(Func<double,bool,PetPose?> source,bool active,Func<bool>? moving=null){_animator.ExternalMotion=source;_animator.ExternalActive=active;_animator.ExternalMoving=moving;Configure();}
     public void Drag(bool dragging)=>_animator.Drag(dragging);
     public void Turn(double delta)=>_rotation.Angle=Math.Clamp(_rotation.Angle+delta,-65,65);
+    internal bool CharacterFits()
+    {
+        if(ActualWidth<=0||ActualHeight<=0||_viewport.Camera is not PerspectiveCamera camera)return false;
+        var forward=camera.LookDirection;forward.Normalize();var right=Vector3D.CrossProduct(forward,camera.UpDirection);right.Normalize();var up=Vector3D.CrossProduct(right,forward);double scale=ActualWidth/(2*Math.Tan(camera.FieldOfView*Math.PI/360));var bounds=_character.Bounds;
+        foreach(double x in new[]{bounds.X,bounds.X+bounds.SizeX})foreach(double y in new[]{bounds.Y,bounds.Y+bounds.SizeY})foreach(double z in new[]{bounds.Z,bounds.Z+bounds.SizeZ})
+        {
+            var relative=new Point3D(x,y,z)-camera.Position;double depth=Vector3D.DotProduct(relative,forward);if(depth<=0)return false;double px=ActualWidth/2+Vector3D.DotProduct(relative,right)/depth*scale,py=ActualHeight/2-Vector3D.DotProduct(relative,up)/depth*scale;
+            if(px<0||px>ActualWidth||py<0||py>ActualHeight)return false;
+        }
+        return true;
+    }
     public void Release(){if(_released)return;_released=true;_animator.Dispose();_character.Children.Clear();_model.Content=null;_viewport.Children.Clear();}
 }
 
@@ -264,6 +280,7 @@ internal sealed partial class Room3DView : Grid
     internal bool Outdoors=>_outdoors;
     internal GroundPoint PetPosition=>_travel.Position;
     internal bool PetMoving=>_travel.Moving;
+    internal Rect3D DisplayedPetBounds=>_character.Bounds;
     internal int SceneCacheCount=>_sceneCache.Count;
     private bool _motionVisible=true,_released;
     internal bool AnimationRunning=>_animator.Running;
@@ -347,7 +364,7 @@ internal sealed partial class Room3DView : Grid
     private void ResetTravel()
     {
         _travel=TargetNavigation.Travel(_outdoors?SceneKind.Outdoor:SceneKind.Indoor,_c.Store.World());_travel.Reset(TargetNavigation.Start);
-        _animator.AttachTravel(_travel,(point,heading)=>{_position.OffsetX=point.X;_position.OffsetY=.035;_position.OffsetZ=point.Z;_heading.Angle=heading;});
+        _animator.AttachTravel(_travel,(point,heading)=>{_position.OffsetX=point.X;_position.OffsetY=.035;_position.OffsetZ=point.Z;_heading.Angle=_pet is SpaceMarinePetModel&&!_travel.Moving&&!_boatOpen?_azimuth:heading;});
     }
     internal void SwitchScene(bool outdoors){if(_outdoors==outdoors)return;StopWorld();if(_editing)CloseFurniture();if(_boatOpen)CloseBoats();_pendingInteraction=null;_ballVisual.Content=null;_outdoors=outdoors;_sceneButton.Content=outdoors?"回到小屋":"去户外 · 20m × 20m";_foodButton.Content=outdoors?"看池塘":"喂食";_bookButton.Content=outdoors?"去野餐":"读书";System.Windows.Automation.AutomationProperties.SetName(_foodButton,(string)_foodButton.Content);System.Windows.Automation.AutomationProperties.SetName(_bookButton,(string)_bookButton.Content);ResetTravel();if(!outdoors)RebuildWorldTravel();_appearance=null;_azimuth=30;_elevation=32;_zoom=1;ShowHint(null);Refresh();}
     internal bool TryMove(GroundPoint point)
@@ -412,6 +429,7 @@ internal sealed partial class Room3DView : Grid
     }
     private void Camera()
     {
+        if(_pet is SpaceMarinePetModel&&!_travel.Moving&&!_boatOpen)_heading.Angle=_azimuth;
         if(ActualWidth<=0||ActualHeight<=0)return;
         double a=_azimuth*Math.PI/180,e=_elevation*Math.PI/180;var target=_boatOpen?new Point3D(-3.6,.35,-4.5):new Point3D(0,.8,_outdoors?0:1.4);
         var forward=new Vector3D(-Math.Sin(a)*Math.Cos(e),-Math.Sin(e),-Math.Cos(a)*Math.Cos(e));
@@ -452,6 +470,10 @@ internal sealed partial class Room3DView : Grid
         if(visible&&point is {} position){Canvas.SetLeft(badge,position.X-29);Canvas.SetTop(badge,position.Y-38);}
     }
     internal bool DefaultSceneFits()=>_sceneCorners.Count>0&&_sceneCorners.All(corner=>Project(corner) is {} p&&p.X>=0&&p.X<=ActualWidth&&p.Y>=0&&p.Y<=ActualHeight);
+    private void ApplyPetSize()
+    {
+        double size=(_preview??_c.Preferences).PetScale*(_boatOpen?.72:1);_worldPetScale.ScaleX=_worldPetScale.ScaleY=_worldPetScale.ScaleZ=size;
+    }
     public void Refresh()
     {
         if(_released)return;
@@ -459,7 +481,7 @@ internal sealed partial class Room3DView : Grid
         if(_modelId!=_c.Preferences.PetModel){_modelId=_c.Preferences.PetModel;ReplaceModel(PetModels.For(_modelId));return;}
         string state=_c.Clock.Active?(_c.Clock.Running&&_c.Clock.Activity!.Kind=="focus"?"focus":"rest"):_c.Busy?"thinking":_c.Preferences.PetIdleMode=="sleep"?"sleep":_c.Preferences.Quiet?"quiet":"idle";
         var p=_preview??_c.Preferences;int points=_c.Store.PlantPoints;bool night=p.Theme=="night"||p.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7);
-        _animator.Economy=p.PerformanceMode=="economy";_animator.Configure(state,IsLoaded&&IsVisible&&_motionVisible,p.ReducedMotion,p.Quiet,_c.AnimationSuspended);
+        ApplyPetSize();_animator.Economy=p.PerformanceMode=="economy";_animator.Configure(state,IsLoaded&&IsVisible&&_motionVisible,p.ReducedMotion,p.Quiet,_c.AnimationSuspended);
         string furniture=string.Join("/",_c.Store.GameSlots().OrderBy(x=>x.Key,StringComparer.Ordinal).Select(x=>$"{x.Key}:{x.Value}"));
         var album=_c.Store.Boats();var displayed=album.Entries.FirstOrDefault(b=>b.Id==album.DisplayedId);
         string appearance=$"{System.Text.Json.JsonSerializer.Serialize(CurrentWorld.Items)}/{_outdoors}/{p.Theme}/{p.Rug}/{p.Ornament}/{points}/{night}/{furniture}/{p.Weather}/{p.RoomLamp}/{p.Fireplace}/{album.DisplayedId}/{displayed?.Layout.Shape}/{displayed?.Layout.Color}/{displayed?.PetalFound}";

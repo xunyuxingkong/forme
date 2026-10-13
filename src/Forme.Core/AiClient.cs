@@ -21,6 +21,7 @@ public sealed record AiTurn(string Role, string Content, IReadOnlyList<AiAttachm
     }
 }
 public sealed record AiResult(string Content, bool LengthLimited, bool HistoryTrimmed);
+public enum AiRequestStage { WaitingForResponse, WaitingForContent, Thinking, Responding }
 public sealed record AiLimits(TimeSpan First, TimeSpan Idle, TimeSpan Total)
 {
     public static AiLimits Default { get; } = new(TimeSpan.FromSeconds(60),TimeSpan.FromSeconds(30),TimeSpan.FromSeconds(180));
@@ -64,19 +65,15 @@ public sealed class AiClient : IDisposable
     public static bool IsZhipuEndpoint(string endpoint)=>SameEndpoint(endpoint,ZhipuEndpoint);
     public static bool IsSiliconFlowGlm(string endpoint,string model)=>SameEndpoint(endpoint,"https://api.siliconflow.cn/v1")&&model is "zai-org/GLM-5.3-Flash" or "zai-org/GLM-5.3" or "Pro/zai-org/GLM-5.2";
     public static int SiliconFlowThinkingBudget(string effort)=>effort switch{"low"=>256,"high"=>1024,"max"=>2048,_=>throw new InvalidDataException("GLM思考档位无效。")};
-    public static bool RequiresPdfImages(string endpoint)=>ValidateEndpoint(endpoint).Host.Equals("api.deepseek.com",StringComparison.OrdinalIgnoreCase);
-    private static void ValidateProviderAttachments(string endpoint,IReadOnlyList<AiAttachment> attachments)
-    {
-        if(IsZhipuEndpoint(endpoint)&&attachments.SelectMany(x=>x.IsRenderedPdf?x.Pages:new[]{x}).Any(x=>x.IsImage&&x.MediaType is not ("image/png" or "image/jpeg")))throw new InvalidDataException("智谱官方图片输入请使用PNG或JPEG；WebP请先自行转换后重新添加，未联网。");
-        if(RequiresPdfImages(endpoint)&&attachments.Any(x=>x.MediaType=="application/pdf"&&!x.IsRenderedPdf))throw new InvalidDataException("DeepSeek需将PDF转为页面图片。请移除并重新添加PDF，本地转换后再发送；未联网。");
-    }
+    public static AiProviderCapabilities ProviderCapabilities(string endpoint,string model)=>AiProviderAdapters.Resolve(endpoint,model).Capabilities;
+    public static bool RequiresPdfImages(string endpoint)=>AiProviderAdapters.Resolve(endpoint,"").RequiresRenderedPdf;
     // UTF-8 byte count is deliberately conservative for byte-based text tokenizers.
     // Includes a framing allowance per turn; not an exact provider billing token count.
     public static int Estimate(AiTurn turn) => Encoding.UTF8.GetByteCount(turn.TextContent)+32;
     public static List<AiTurn> BuildContext(Preferences p, IReadOnlyList<ChatMessage> history, string input, out bool trimmed,IReadOnlyList<ChatMemory>? memories=null,ChatNote? note=null,string? scene=null,IReadOnlyList<AiAttachment>? attachments=null,string? additionalSystemInstruction=null)
     {
         AiAttachment.Validate(attachments??[]);
-        ValidateProviderAttachments(p.Endpoint,attachments??[]);
+        AiProviderAdapters.Resolve(p.Endpoint,p.Model).ValidateAttachments(attachments??[]);
         if(string.IsNullOrWhiteSpace(input)&&attachments is {Count:>0})input="请阅读我本次上传的附件。";
         if(input.EnumerateRunes().Count()>2000 || string.IsNullOrWhiteSpace(input)) throw new InvalidDataException("请输入内容，最多 2,000 个字符。");
         p.Validate();
@@ -130,42 +127,36 @@ public sealed class AiClient : IDisposable
         trimmed=memoryTrimmed||kept<pairs.Count || history.Count>pairs.Count*2;
         selected.Insert(0,system); selected.Add(current); return selected;
     }
-    public async Task<AiResult> SendAsync(Preferences settings, string key, List<AiTurn> turns, Action<string> progress, CancellationToken cancellation, bool trimmed=false)
+    public async Task<AiResult> SendAsync(Preferences settings, string key, List<AiTurn> turns, Action<string> progress, CancellationToken cancellation, bool trimmed=false,Action<AiRequestStage>? stageProgress=null)
     {
         if(!await _gate.WaitAsync(0,cancellation).ConfigureAwait(false)) throw new OperationFailureException("已有请求正在处理，请稍后再试。");
         try
         {
             var baseUri=ValidateEndpoint(settings.Endpoint);
-            bool zhipu=IsZhipuEndpoint(settings.Endpoint);
-            bool siliconGlm=IsSiliconFlowGlm(settings.Endpoint,settings.Model);
+            var provider=AiProviderAdapters.Resolve(settings.Endpoint,settings.Model);
+            bool zhipu=provider.IsZhipu;
+            bool siliconGlm=provider.IsSiliconFlowGlm;
             if(string.IsNullOrWhiteSpace(key) || key.Contains('\r') || key.Contains('\n')) throw new InvalidDataException("请先填写有效密钥。");
             settings.Validate();if(turns.Sum(Estimate)>settings.ContextBudget) throw new InvalidDataException("上下文超过预算，未发送。");
             var uri=new Uri(baseUri.AbsoluteUri.TrimEnd('/')+"/chat/completions");
             foreach(var turn in turns){AiAttachment.Validate(turn.Attachments??[]);if(turn.Attachments is {Count:>0}&&turn.Role!="user")throw new InvalidDataException("附件只能随用户消息发送。");}
             AiAttachment.Validate(turns.SelectMany(x=>x.Attachments??[]).ToArray());
-            ValidateProviderAttachments(settings.Endpoint,turns.SelectMany(x=>x.Attachments??[]).ToArray());
+            provider.ValidateAttachments(turns.SelectMany(x=>x.Attachments??[]).ToArray());
             var requestLimits=_limits==AiLimits.Default&&turns.Any(x=>x.Attachments is {Count:>0})?AiLimits.ForAttachments:_limits;
-            var payload=new Dictionary<string,object> { ["model"]=settings.Model,["messages"]=turns.Select(t=>new {role=t.Role,content=t.WireContent(includeImageDetail:!zhipu)}),["stream"]=true,["max_tokens"]=settings.MaxReplyTokens,["temperature"]=settings.Temperature };
-            if(zhipu&&settings.Model is "glm-5.3" or "glm-5.3-flash" or "glm-5.3-flashx")
-            {payload["thinking"]=new {type="enabled",clear_thinking=true};payload["reasoning_effort"]=settings.ZhipuReasoningEffort;}
-            if(siliconGlm)
-            {
-                payload["enable_thinking"]=true;payload["thinking_budget"]=SiliconFlowThinkingBudget(settings.ZhipuReasoningEffort);
-                // SiliconFlow only documents reasoning_effort for this GLM model.
-                if(settings.Model=="Pro/zai-org/GLM-5.2")payload["reasoning_effort"]=settings.ZhipuReasoningEffort=="max"?"max":"high";
-            }
-            if(baseUri.Host.Equals("api.deepseek.com",StringComparison.OrdinalIgnoreCase)) payload["thinking"]=new {type="disabled"};
-            if(baseUri.Host.Equals("api.siliconflow.cn",StringComparison.OrdinalIgnoreCase)&&
-                settings.Model is "deepseek-ai/DeepSeek-V3.2" or "Pro/deepseek-ai/DeepSeek-V3.2")payload["enable_thinking"]=false;
+            var payload=new Dictionary<string,object> { ["model"]=settings.Model,["messages"]=turns.Select(t=>new {role=t.Role,content=t.WireContent(includeImageDetail:provider.IncludeImageDetail)}),["stream"]=true,["max_tokens"]=settings.MaxReplyTokens,["temperature"]=settings.Temperature };
+            provider.ApplyRequestOptions(payload,settings);
             using var request=new HttpRequestMessage(HttpMethod.Post,uri);
             request.Headers.Authorization=new AuthenticationHeaderValue("Bearer",key);
             request.Content=new StringContent(JsonSerializer.Serialize(payload),Encoding.UTF8,"application/json");
             using var total=CancellationTokenSource.CreateLinkedTokenSource(cancellation); total.CancelAfter(requestLimits.Total);
             using var inactivity=CancellationTokenSource.CreateLinkedTokenSource(total.Token); inactivity.CancelAfter(requestLimits.First);
-            bool gotContent=false, gotReasoning=false, length=false, done=false;long reasoningBytes=0;var content=new StringBuilder();
+            bool gotResponse=false,gotContent=false, gotReasoning=false, length=false, done=false;long reasoningBytes=0;var content=new StringBuilder();var elapsed=System.Diagnostics.Stopwatch.StartNew();
+            var lastStage=AiRequestStage.WaitingForResponse;stageProgress?.Invoke(lastStage);
+            void Stage(AiRequestStage stage){if(stage==lastStage)return;lastStage=stage;stageProgress?.Invoke(stage);}
             try
             {
                 using var response=await _http.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,inactivity.Token).ConfigureAwait(false);
+                gotResponse=true;Stage(AiRequestStage.WaitingForContent);
                 if(!response.IsSuccessStatusCode) throw new OperationFailureException(response.StatusCode switch
                 {
                     HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden=>"认证失败，请检查密钥或服务权限。",
@@ -177,8 +168,7 @@ public sealed class AiClient : IDisposable
                 });
                 using var stream=await response.Content.ReadAsStreamAsync(inactivity.Token).ConfigureAwait(false);
                 using var boundedStream=new BoundedReadStream(stream,RawStreamByteLimit);
-                using var reader=new StreamReader(boundedStream,Encoding.UTF8);
-                var events=new BufferedSseReader(reader);
+                var events=new BufferedSseReader(boundedStream);
                 while(await events.Event(inactivity.Token).ConfigureAwait(false) is { } data)
                 {
                     if(data.Trim()=="[DONE]") {done=true;break;} if(data.Length==0) continue;
@@ -189,11 +179,11 @@ public sealed class AiClient : IDisposable
                     // Real reasoning output is progress, but is never displayed, stored, or resent.
                     // The fixed total timeout still bounds requests that only produce reasoning.
                     if(choice.TryGetProperty("delta",out var reasoningDelta)&&reasoningDelta.TryGetProperty("reasoning_content",out var reasoning)&&reasoning.ValueKind==JsonValueKind.String&&!string.IsNullOrEmpty(reasoning.GetString()))
-                    {var fragment=reasoning.GetString()!;reasoningBytes+=Encoding.UTF8.GetByteCount(fragment);if(reasoningBytes>ReasoningByteLimit)throw new InvalidDataException("模型思考内容超过本地64KB上限，已停止接收；请降低思考强度后手动重试。动作未执行。");gotReasoning=true;if(zhipu||siliconGlm)inactivity.CancelAfter(requestLimits.Idle);}
+                    {var fragment=reasoning.GetString()!;reasoningBytes+=Encoding.UTF8.GetByteCount(fragment);if(reasoningBytes>ReasoningByteLimit)throw new InvalidDataException("模型思考内容超过本地64KB上限，已停止接收；请降低思考强度后手动重试。动作未执行。");gotReasoning=true;if(!gotContent)Stage(AiRequestStage.Thinking);inactivity.CancelAfter(requestLimits.Idle);}
                     if(choice.TryGetProperty("delta",out var delta) && delta.TryGetProperty("content",out var c) && c.ValueKind==JsonValueKind.String)
                     {
                         var fragment=c.GetString();
-                        if(!string.IsNullOrEmpty(fragment)) {gotContent=true;content.Append(fragment); if(content.Length>ContentCharLimit) throw new InvalidDataException("模型正文超过本地32,000字符上限，已停止接收；动作未执行。"); progress(fragment); inactivity.CancelAfter(requestLimits.Idle);}
+                        if(!string.IsNullOrEmpty(fragment)) {gotContent=true;Stage(AiRequestStage.Responding);content.Append(fragment); if(content.Length>ContentCharLimit) throw new InvalidDataException("模型正文超过本地32,000字符上限，已停止接收；动作未执行。"); progress(fragment); inactivity.CancelAfter(requestLimits.Idle);}
                     }
                     if(choice.TryGetProperty("finish_reason",out var reason) && reason.ValueKind==JsonValueKind.String)
                     {length=reason.GetString()=="length";done=true;break;}
@@ -203,7 +193,10 @@ public sealed class AiClient : IDisposable
                 return new(content.ToString(),length,trimmed);
             }
             catch(OperationCanceledException) when(!cancellation.IsCancellationRequested)
-            {throw new TimeoutException(gotContent?"回复超时或停滞，已保留部分内容；可手动重试。":"等待服务超时，未自动重试。");}
+            {
+                string duration=$"{Math.Ceiling(elapsed.Elapsed.TotalSeconds):0}秒",limit=total.IsCancellationRequested?"已达到请求总时限":"等待下一段内容超时";
+                throw new TimeoutException(gotContent?$"回复停滞或超时（{duration}，{limit}），已保留部分内容；可手动重试。":gotReasoning?$"模型思考阶段超时（{duration}，{limit}），尚未收到正文；可降低思考强度后手动重试。":gotResponse?$"服务已响应，但等待回复内容超时（{duration}）。未自动重试。":$"等待服务响应超时（{duration}），尚未收到响应。未自动重试。");
+            }
             catch(HttpRequestException) {throw new OperationFailureException("网络或 TLS 连接失败，请检查网络和服务地址。");}
             catch(JsonException) {throw new InvalidDataException("服务返回格式不兼容，已有内容已保留。");}
         }

@@ -34,7 +34,7 @@ internal sealed partial class MainWindow
         var startup=Ui.Check("登录 Windows 时启动",StartupLink.Exists);
         content.Children.Add(Ui.Card(Ui.Stack(Ui.Text("伙伴与显示",17,null,true),Ui.Text("伙伴名字"),name,Ui.Text("你的称呼（可选）"),user,Ui.Text("伙伴大小"),scale,Ui.Text("软件背景色"),backgroundChoice,backgroundHex,backgroundSample,quiet,reduced,top,sound,timerSound,notifications,greetings,new Expander{Header="主动招呼时段（本地时间）",Content=Ui.Stack(Ui.Text("开始小时 0–23"),from,Ui.Text("结束小时 1–24"),until)},startup)));
         content.Children.Add(Ui.Card(Ui.Stack(Ui.Text("专注与休息",17,null,true),Ui.Text("默认专注时长 · 分钟"),focus,Ui.Text("默认休息时长 · 分钟"),rest)));
-        content.Children.Add(Ui.Card(Ui.Stack(Ui.Text("伙伴模型与资源占用",17,null,true),appearance,performance,Ui.Text("4种3D模型共用动作与寻路。平衡待机10FPS，省电待机5FPS；睡眠2FPS。静态网格共享，隐藏窗口和减少动效时停止动画。",12,Ui.Muted))));
+        content.Children.Add(Ui.Card(Ui.Stack(Ui.Text("伙伴模型与资源占用",17,null,true),appearance,performance,Ui.Text("5种3D模型共用基础动作与寻路；星际战士保留原模型的走路、跑步关节动作，桌面与小屋显示均已放大，伙伴大小同时调整两处。平衡待机10FPS，省电待机5FPS；睡眠2FPS。网格与贴图共享，隐藏窗口和减少动效时停止动画。",12,Ui.Muted))));
         content.Children.Add(Ui.Button("保存偏好",()=>
         {
             if(!int.TryParse(from.Text,out int start)||!int.TryParse(until.Text,out int end))throw new OperationFailureException("请输入有效小时。");
@@ -63,7 +63,7 @@ internal sealed partial class MainWindow
             model.Text=provider.SelectedIndex==3?AiClient.ZhipuModel:provider.SelectedIndex==1?siliconModel:defaults.Model;
             key.Clear();connectionStatus.Text="预设已填入，尚未保存。请填写该服务的 API Key；切换预设不会联网。";
         };
-        var advanced=new Expander{Header="高级：服务地址与模型",Content=Ui.Stack(Ui.Text("基础地址（不要包含 /chat/completions 或密钥）",12),endpoint,Ui.Text("模型名称",12),model,Ui.Text("GLM思考档位 · 智谱官方 / 硅基流动"),effort,Ui.Text("智谱GLM-5.3系列使用低/较高/最高强度；硅基GLM-5.3-Flash、5.3和Pro/GLM-5.2对应思考预算256/1024/2048 tokens。平台可能超出思考预算，并非账单硬上限。较高档位可能增加等待与费用；保存后用于聊天，测试使用当前选择，90秒时限保持不变。",11,Ui.Muted)),Margin=new Thickness(0,0,0,14)};
+        var advanced=new Expander{Header="高级：服务地址与模型",Content=Ui.Stack(Ui.Text("基础地址（不要包含 /chat/completions 或密钥）",12),endpoint,Ui.Text("模型名称",12),model,Ui.Text("GLM思考档位 · 智谱官方 / 硅基流动"),effort,Ui.Text("智谱GLM-5.3系列使用低/较高/最高强度；硅基GLM-5.3-Flash、5.3和Pro/GLM-5.2对应思考预算256/1024/2048 tokens。平台可能超出思考预算，并非账单硬上限。较高档位可能增加等待与费用；保存后用于聊天，测试使用当前选择。请求始终有超时限制，可以随时停止。",11,Ui.Muted)),Margin=new Thickness(0,0,0,14)};
         var aiPanel=Ui.Stack(Ui.Text("AI 连接",17,null,true),Ui.Text("自由对话会联网，可能产生费用。房间、专注和放松一直在本地运行。",12,Ui.Muted),Ui.Text("服务预设"),provider,Ui.Text("硅基流动：DeepSeek-V3.2，关闭深度思考。智谱官方：glm-5.3-flash，支持PNG/JPEG与PDF；思考强度可在高级设置选择，默认低强度。输出额度包含思考，可在费用与输出控制中设为1024；智谱连接测试也遵循该输出上限。使用所选平台的API Key，可在高级设置修改模型；智谱预设使用普通API计费入口，Coding Plan不适用于本预设。价格与可用性以平台为准。",11,Ui.Muted),Ui.Text("API Key"),key,connectionStatus,advanced);
         aiPanel.Children.Add(Ui.Row(Ui.AsyncButton("测试连接",async()=>
         {
@@ -94,25 +94,25 @@ internal sealed partial class MainWindow
     }
     private UIElement DataSettings()
     {
-        var chat=Ui.Check("聊天、记忆与摘要",true);var moods=Ui.Check("心情记录",true);var focus=Ui.Check("专注记录",true);var room=Ui.Check("伙伴与房间",true);
-        var panel=Ui.Stack(Ui.Text("隐私与个人数据",17,null,true),Ui.Text("普通记录存于本机，未额外加密；密钥由 Windows 保护。我们不上传日志、不扫描磁盘，也不后台读取剪贴板或屏幕。",12,Ui.Muted),chat,moods,focus,room);
+        var chat=Ui.Check("聊天、记忆与摘要",true);var moods=Ui.Check("心情记录",true);var focus=Ui.Check("专注记录",true);var room=Ui.Check("伙伴与房间",true);var productivity=Ui.Check("记事、今日待办与提醒",true);
+        var panel=Ui.Stack(Ui.Text("隐私与个人数据",17,null,true),Ui.Text("普通记录存于本机，未额外加密；密钥由 Windows 保护。我们不上传日志、不扫描磁盘，也不后台读取剪贴板或屏幕。记事、待办与提醒不会自动加入 AI 请求。",12,Ui.Muted),chat,moods,focus,room,productivity);
         CancellationTokenSource? exportRequest=null;var exportStatus=Ui.Text("",12,Ui.Muted);
         panel.Children.Add(Ui.Row(Ui.AsyncButton("导出所选数据",async()=>
         {
             if(exportRequest is not null)throw new OperationFailureException("请先等待或取消当前数据操作。");
-            if(!(chat.IsChecked==true||moods.IsChecked==true||focus.IsChecked==true||room.IsChecked==true))throw new OperationFailureException("至少选择一类数据。");
+            if(!(chat.IsChecked==true||moods.IsChecked==true||focus.IsChecked==true||room.IsChecked==true||productivity.IsChecked==true))throw new OperationFailureException("至少选择一类数据。");
             if(!Ui.Confirm("导出文件可能包含私人内容，文件不会包含密钥。请选择安全的保存位置。"))return;
             var dialog=new Microsoft.Win32.SaveFileDialog{Filter="Forme 数据 (*.json)|*.json",FileName=$"Forme-{DateTime.Now:yyyyMMdd}.json"};
             if(dialog.ShowDialog(this)==true)
             {
-                bool includeChat=chat.IsChecked==true,includeMood=moods.IsChecked==true,includeFocus=focus.IsChecked==true,includeRoom=room.IsChecked==true;
+                bool includeChat=chat.IsChecked==true,includeMood=moods.IsChecked==true,includeFocus=focus.IsChecked==true,includeRoom=room.IsChecked==true,includeProductivity=productivity.IsChecked==true;
                 var request=new CancellationTokenSource();exportRequest=request;exportStatus.Text="正在导出，可以取消…";string directory=_c.Store.DirectoryPath;
                 try
                 {
                     await Task.Run(()=>
                     {
                         using var reader=new Store(directory,true);
-                        reader.ExportFile(dialog.FileName,includeChat,includeMood,includeFocus,includeRoom,request.Token);
+                        reader.ExportFile(dialog.FileName,includeChat,includeMood,includeFocus,includeRoom,request.Token,includeProductivity);
                     },request.Token);
                     exportStatus.Text="导出完成，不包含密钥。";
                 }
@@ -131,7 +131,7 @@ internal sealed partial class MainWindow
             try
             {
                 using var plan=await Task.Run(()=>Store.PrepareImport(path,request.Token),request.Token);
-                string summary=$"聊天：{(plan.HasChat?$"替换为{plan.Sessions}个会话 / {plan.Messages}条消息":"保留")}\n心情：{(plan.HasMoods?$"替换为{plan.Moods}条":"保留")}\n专注：{(plan.HasFocus?$"替换为{plan.Focus}条":"保留")}\n房间：{(plan.Room is null?"保留":"替换")}\n\n原内容将备份到 {_c.Store.BackupPath}。只替换文件包含的类别，不覆盖密钥。确认导入？";
+                string summary=$"聊天：{(plan.HasChat?$"替换为{plan.Sessions}个会话 / {plan.Messages}条消息":"保留")}\n心情：{(plan.HasMoods?$"替换为{plan.Moods}条":"保留")}\n专注：{(plan.HasFocus?$"替换为{plan.Focus}条":"保留")}\n记事/待办/提醒：{(plan.HasProductivity?"替换":"保留")}\n房间：{(plan.Room is null?"保留":"替换")}\n\n原内容将备份到 {_c.Store.BackupPath}。只替换文件包含的类别，不覆盖密钥。确认导入？";
                 RequireIdle();request.Token.ThrowIfCancellationRequested();
                 if(!Ui.Confirm(summary)){exportStatus.Text="未导入。";return;}
                 _c.Store.ApplyImport(plan);_c.AfterImport();Navigate("settings");Toast("导入完成，原数据恢复备份在数据目录中。");
@@ -146,10 +146,10 @@ internal sealed partial class MainWindow
             await ImportFile(_c.Store.BackupPath);
         }));
         panel.Children.Add(Ui.Button("删除应用恢复备份",()=>{if(Ui.Confirm("删除应用保留的导入与数据库升级备份？")){_c.Store.RemoveBackup();Toast("应用备份已删除。");}}));
-        panel.Children.Add(Ui.Row(Ui.Button("清空聊天",()=>Clear("chat")),Ui.Button("清空心情",()=>Clear("moods")),Ui.Button("清空专注记录",()=>Clear("focus"))));
+        panel.Children.Add(Ui.Row(Ui.Button("清空聊天",()=>Clear("chat")),Ui.Button("清空心情",()=>Clear("moods")),Ui.Button("清空专注记录",()=>Clear("focus")),Ui.Button("清空伙伴经历",()=>{if(Ui.Confirm("清除本机共同经历、示范组合与应用恢复备份？聊天历史和外部服务记录不受影响。")){_c.Store.ClearCompanionLife();Navigate("companion");}})));
         panel.Children.Add(Ui.Button("清除全部个人数据",()=>
         {
-            RequireIdle();if(!Ui.Confirm("清除本机全部聊天、心情、专注、房间、应用备份与密钥？外部导出及服务商留存需自行处理。此操作无法撤销。"))return;
+            RequireIdle();if(!Ui.Confirm("清除本机全部聊天、记事、待办、提醒、心情、专注、房间、应用备份与密钥？外部导出及服务商留存需自行处理。此操作无法撤销。"))return;
             StartupLink.Set(false);_c.ClearAll();Navigate("settings");Toast("本机个人数据已清除。");
         }));
         panel.Children.Add(Ui.Text("删除是应用层清除，不承诺存储介质取证级擦除。卸载保留数据，可先在这里清除。",11,Ui.Muted));return Ui.Card(panel);

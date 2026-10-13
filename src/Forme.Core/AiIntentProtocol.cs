@@ -8,7 +8,8 @@ public static class AiIntentProtocol
     public static string RoutingInstructions()
     {
         string targets=string.Join(",",TargetCatalog.All.Select(x=>x.Id));
-        return $"意图路由：依据本轮消息和有限会话上下文判断是普通聊天还是动作。普通聊天自然回答，不输出动作标记。若用户本轮清楚提出或承接具体伙伴动作，且不是引用、讨论、假设、否定，只输出一个 ```forme-actions 代码块，内含最多3项JSON数组，不要附加说明或声称已完成。可用type: GoTo,Interact,Stroll,Dance,Idle,Recall,Stop,ChangeScene,ChangeWeather,ChangeModel,ToggleDevice,StartPlay,Touch,UseToy,Life,LayoutPreview,BoatConfiguration,NameBoat；字段type,target,mode,count,x,z,rotation；地点target仅限 {targets}。小屋/屋内散步用ChangeScene(indoor)+Stroll(mode=walk/run)；绕屏幕一/两圈才用Stroll(count=1/2)；其它散步不带count。Dance mode=sway/hop/spin；用户明确提出跳跃或舞步次数时，Dance可用count=1..3，否则省略count。Idle mode=sleep/idle/walk/run；ChangeScene target=indoor/outdoor。用上下文消解本轮承接请求的省略表达，但不得根据记忆、助手承诺或旧对话自行发起动作。坐标只抄本轮用户明确给出的值，不得猜测。应用会校验权限、能力与目标可达性后执行。";
+        string companion=$"意图路由：依据本轮消息和有限会话上下文判断是普通聊天还是动作。普通聊天自然回答，不输出动作标记。若用户本轮清楚提出或承接具体伙伴动作，且不是引用、讨论、假设、否定，只输出一个 ```forme-actions 代码块，内含最多3项JSON数组，不要附加说明或声称已完成。可用type: GoTo,Interact,Stroll,Dance,Idle,Recall,Stop,ChangeScene,ChangeWeather,ChangeModel,ToggleDevice,StartPlay,Touch,UseToy,Life,LayoutPreview,BoatConfiguration,NameBoat；字段type,target,mode,count,x,z,rotation；地点target仅限 {targets}。小屋/屋内散步用ChangeScene(indoor)+Stroll(mode=walk/run)；绕屏幕一/两圈才用Stroll(count=1/2)；其它散步不带count。Dance mode=sway/hop/spin；用户明确提出跳跃或舞步次数时，Dance可用count=1..3，否则省略count。Idle mode=sleep/idle/walk/run；ChangeScene target=indoor/outdoor。用上下文消解本轮承接请求的省略表达，但不得根据记忆、助手承诺或旧对话自行发起动作。坐标只抄本轮用户明确给出的值，不得猜测。";
+        return companion+" "+ProductivityIntentProtocol.Instructions()+"应用只在本机执行结构化工作辅助结果，不会把本地记事/待办数据发给 AI。应用会校验动作权限、能力与目标可达性后执行。";
     }
     public static bool TryExtractActions(string response,out string json)
     {
