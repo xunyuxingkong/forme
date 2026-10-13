@@ -76,6 +76,7 @@ internal sealed class PetWindow : Window
         Item("打开小屋",()=>_open("home"));Item("聊一会儿",()=>_open("chat"));Item("开始专注",()=>_open("focus"));Item("安静模式开关",()=>_c.SavePreferences(_c.Preferences with{Quiet=!_c.Preferences.Quiet}));
         var idleMenu=new MenuItem{Header="待机运行模式"};menu.Items.Add(idleMenu);
         for(int index=0;index<IdleModes.Length;index++){int mode=index;var item=new MenuItem{Header=IdleModes[index]};item.Click+=(_,_)=>Ui.Guard(()=>SetIdleMode(IdleIds[mode]));idleMenu.Items.Add(item);}
+        menu.Closed+=(_,_)=>Dispatcher.BeginInvoke(()=>{Update();Clamp();});
         var actionsMenu=new MenuItem{Header="执行动作"};menu.Items.Add(actionsMenu);
         for(int index=0;index<Actions.Length;index++){int action=index;var item=new MenuItem{Header=ActionNames[index]};item.Click+=(_,_)=>Ui.Guard(()=>ExecuteAction(Actions[action]));actionsMenu.Items.Add(item);}
         Item("停止动作",()=>{_pet.StopAction();_wander.Pause();});
@@ -151,7 +152,7 @@ internal sealed class PetWindow : Window
         _c.NotifyActivityInteraction();_allowChatWander=mode is "walk" or "run";_wanderReady=false;_pet.StopAction();
         // The idle selector lives in the bubble panel. Close it immediately so the
         // selected wander mode is not kept paused by the panel's visibility gate.
-        _bubbleTimeout.Stop();_bubble.Visibility=Visibility.Collapsed;_c.SavePreferences(_c.Preferences with{PetIdleMode=mode});Update();Dispatcher.BeginInvoke(Clamp);
+        _bubbleTimeout.Stop();_bubble.Visibility=Visibility.Collapsed;_c.SavePreferences(_c.Preferences with{PetIdleMode=mode});Update();Dispatcher.BeginInvoke(()=>{Update();Clamp();});
     }
     internal void SetAiIdleMode(string mode){StopCommands();_allowChatWander=mode is "walk" or "run";_bubble.Visibility=Visibility.Collapsed;SetIdleMode(mode);}
     internal string ActivitySubject {get;}=Guid.NewGuid().ToString("N");
