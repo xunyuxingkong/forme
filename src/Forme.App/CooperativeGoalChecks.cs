@@ -16,7 +16,7 @@ internal static class CooperativeGoalChecks
     public static async Task Run()
     {
         string[] cases=["hide-feedback","hide-first","hide-decline","hide-exhausted","hide-malformed","hide-truncated","hide-network","hide-hint","hide-cancel","hide-revoke","hide-replace","denied",
-            "boat-confirm","boat-pause","boat-stop","boat-layout","boat-model","boat-service","boat-config","boat-close","boat-manual","boat-replace","boat-decline","boat-network","boat-cancel-launch"];
+            "boat-confirm","boat-feedback","boat-pause","boat-stop","boat-layout","boat-model","boat-service","boat-config","boat-close","boat-manual","boat-replace","boat-decline","boat-network","boat-cancel-launch"];
         foreach(string scenario in cases)
         {
             File.AppendAllText("artifacts/cooperative-goals-progress.txt",scenario+Environment.NewLine);
@@ -37,7 +37,7 @@ internal static class CooperativeGoalChecks
                 if(handler.Calls!=0||c.Store.GoalRuns().Count!=0)throw new Exception("Denied cooperation wrote a run or called model");continue;
             }
             handler.Block=scenario is "hide-hint" or "hide-cancel" or "hide-revoke" or "hide-replace";
-            var pending=boat?c.ProposeBoat("bridge"):c.RunAiHide(scenario=="hide-first"?"book":"lamp","private-local-hint");
+            var pending=boat?c.ProposeBoat(scenario=="boat-feedback"?"willow":"bridge"):c.RunAiHide(scenario=="hide-first"?"book":"lamp","private-local-hint");
             if(handler.Block)
             {
                 await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(6));
@@ -80,6 +80,19 @@ internal static class CooperativeGoalChecks
                     if(room.LastBoat is null||c.Store.Goal(run.Id)?.State!=GoalRunState.Completed||c.SelectedActivityState!=CompanionActivityState.Completed||
                         c.Store.Goal(run.Id)?.Steps[^1].Evidence!="play:boat:"+room.LastBoat.Dock)throw new Exception("Actual boat docking not reconciled");
                 }
+                else if(scenario=="boat-feedback")
+                {
+                    if(run.Steps[0].Evidence is not { } proposal||!proposal.StartsWith("proposed:",StringComparison.Ordinal))throw new Exception("First experiment proposal missing");
+                    string target=proposal[9..].Split(':',2)[0];
+                    c.ConfirmBoatProposal();var first=c.Store.Goal(run.Id)!;
+                    if(first.State!=GoalRunState.Completed||room.LastBoat?.Dock==target||!c.BoatExperimentAvailable)throw new Exception($"Missed voyage did not expose a bounded experiment action: state={first.State}; target={target}; actual={room.LastBoat?.Dock}; status={c.CompanionLifeStatus}; observation={((IGoalPlayWorld)host).ObserveGoalPlay("boat")}");
+                    await c.ProposeBoatExperiment().WaitAsync(TimeSpan.FromSeconds(35));
+                    var runs=c.Store.GoalRuns().Where(x=>x.Origin==GoalOrigin.Cooperative).OrderBy(x=>x.Created).ToArray();
+                    using var requestJson=JsonDocument.Parse(handler.Bodies[1]);string feedback= requestJson.RootElement.GetProperty("messages").EnumerateArray().Last(x=>x.GetProperty("role").GetString()=="user").GetProperty("content").GetString()!;
+                    using var feedbackJson=JsonDocument.Parse(feedback);var previous=feedbackJson.RootElement.GetProperty("previous");
+                    if(runs.Length!=2||runs[1].Requests!=1||runs[1].State!=GoalRunState.WaitingForUser||previous.GetProperty("target").GetString()!=target||previous.GetProperty("actual").GetString()!=room.LastBoat!.Dock)throw new Exception("Second proposal did not use the actual previous voyage as bounded feedback");
+                    if(c.BoatExperimentAvailable)throw new Exception("One actual voyage was reused for another experiment");
+                }
                 else if(scenario is "boat-pause" or "boat-stop")
                 {
                     c.ConfirmBoatProposal();if(c.Store.Goal(run.Id)?.State!=GoalRunState.WaitingForPlay||!room.BoatRunning)throw new Exception("Moving boat not tracked");
@@ -116,12 +129,12 @@ internal static class CooperativeGoalChecks
                 }
                 try{c.ConfirmBoatFromTaskCard("goal:"+run.Id);throw new Exception("Terminal proposal was replayed");}catch(OperationFailureException){}
             }
-            if(boat&&handler.Calls!=(scenario=="boat-replace"?2:1))throw new Exception("Boat reconciliation called model");
+            if(boat&&handler.Calls!=(scenario is "boat-replace" or "boat-feedback"?2:1))throw new Exception("Boat reconciliation called model");
             string ledger=JsonSerializer.Serialize(c.Store.GoalRuns());
             if(ledger.Contains("private-local-hint",StringComparison.Ordinal)||ledger.Contains("revised-public-hint",StringComparison.Ordinal)||ledger.Contains("isolated-test-key",StringComparison.Ordinal))throw new Exception("Ledger contains transient hint or secret");
             if(handler.Bodies.Any(x=>x.Contains(room.ActivitySubject,StringComparison.Ordinal)))throw new Exception("Private scene identity shared");
         }
-        File.WriteAllText("artifacts/cooperative-goals-smoke-result.txt","PASS: "+cases.Length+" isolated native WPF scenarios. Cooperative hide real search/find, feedback replan, two-call bound, hint change, decline, malformed/truncated/network failures, cancellation, sharing withdrawal and replacement ownership; boat suggestion waits explicit confirmation, real reduced-motion docking, pause/stop, default-disabled chat-goal grant independence, stale layout/model/service/house invalidation, proposal replacement, decline, failed call and launch stop; task cards/history with wide/narrow PNGs; durable request count and no fake chat source, private hints/secret excluded from ledger, local identity excluded from requests. In-process mock HTTP only; no external AI requests.\n");
+        File.WriteAllText("artifacts/cooperative-goals-smoke-result.txt","PASS: "+cases.Length+" isolated native WPF scenarios. Cooperative hide real search/find, feedback replan, two-call bound, hint change, decline, malformed/truncated/network failures, cancellation, sharing withdrawal and replacement ownership; boat suggestion waits explicit confirmation, actual-dock feedback enables one user-triggered replanning request, feedback reuse is rejected, real reduced-motion docking, pause/stop, default-disabled chat-goal grant independence, stale layout/model/service/house invalidation, proposal replacement, decline, failed call and launch stop; task cards/history with wide/narrow PNGs; durable request count and no fake chat source, private hints/secret excluded from ledger, local identity excluded from requests. In-process mock HTTP only; no external AI requests.\n");
     }
     private static IEnumerable<DependencyObject> Descendants(DependencyObject node)
     {yield return node;for(int i=0;i<VisualTreeHelper.GetChildrenCount(node);i++)foreach(var child in Descendants(VisualTreeHelper.GetChild(node,i)))yield return child;}
@@ -138,7 +151,22 @@ internal static class CooperativeGoalChecks
             if(Block&&Calls==1){Entered.TrySetResult(true);await Release.Task.WaitAsync(token);}
             if(Scenario.EndsWith("network",StringComparison.Ordinal))return new(HttpStatusCode.ServiceUnavailable);
             string reply;
-            if(Scenario.StartsWith("boat",StringComparison.Ordinal))reply=Scenario=="boat-decline"?"{\"id\":null,\"reason\":\"暂不建议\"}":"{\"id\":\"straight\",\"reason\":\"采用本机候选路线\"}";
+            if(Scenario.StartsWith("boat",StringComparison.Ordinal))
+            {
+                if(Scenario=="boat-decline")reply="{\"id\":null,\"reason\":\"暂不建议\"}";
+                else if(Scenario=="boat-feedback")
+                {
+                    using var json=JsonDocument.Parse(body);var messages=json.RootElement.GetProperty("messages").EnumerateArray().ToArray();string payload=messages.Last(x=>x.GetProperty("role").GetString()=="user").GetProperty("content").GetString()!;
+                    using var state=JsonDocument.Parse(payload);var options=state.RootElement.GetProperty("options").EnumerateArray().ToArray();string goal=state.RootElement.GetProperty("goal").GetString()!;
+                    if(Calls==1)reply=JsonSerializer.Serialize(new{id=options.First(x=>x.GetProperty("dock").GetString()!=goal).GetProperty("id").GetString(),reason="进行一次实际对照"});
+                    else
+                    {
+                        if(!messages[0].GetProperty("content").GetString()!.Contains("上一轮目标",StringComparison.Ordinal)||!state.RootElement.TryGetProperty("previous",out _))throw new Exception("Second boat request omitted actual-result feedback");
+                        reply=JsonSerializer.Serialize(new{id=options[0].GetProperty("id").GetString(),reason="结合实测调整"});
+                    }
+                }
+                else reply="{\"id\":\"straight\",\"reason\":\"采用本机候选路线\"}";
+            }
             else
             {
                 using var json=JsonDocument.Parse(body);string state=json.RootElement.GetProperty("messages").EnumerateArray().Last(x=>x.GetProperty("role").GetString()=="user").GetProperty("content").GetString()!;

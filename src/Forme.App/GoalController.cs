@@ -96,7 +96,7 @@ internal sealed partial class Controller
         if(evidence=="not-found")return " · 本次未找到";
         if(evidence=="no-action")return " · AI选择不行动";
         if(evidence=="no-proposal")return " · 没有可执行建议";
-        if(evidence?.StartsWith("proposed:",StringComparison.Ordinal)==true)return " · 预计抵达"+PaperBoat.DockName(evidence[9..])+"，尚未采用";
+        if(evidence?.StartsWith("proposed:",StringComparison.Ordinal)==true)return " · "+(evidence[9..].Contains(':')?"目标"+PaperBoat.DockName(evidence[9..].Split(':',2)[0])+"，":"")+"预计抵达"+PaperBoat.DockName(evidence[9..].Split(':',2)[^1])+"，尚未采用";
         if(evidence=="play:hide:found")return " · 本局找到小球";
         if(evidence?.StartsWith("play:boat:",StringComparison.Ordinal)==true&&evidence!="play:boat:waiting")return " · 实际抵达"+PaperBoat.DockName(evidence[10..]);
         if(evidence?.StartsWith("found:",StringComparison.Ordinal)==true&&int.TryParse(evidence[6..],out int count))return $" · 找到 {count} 条";

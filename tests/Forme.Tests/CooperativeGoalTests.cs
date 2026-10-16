@@ -67,6 +67,18 @@ public sealed class CooperativeGoalTests
         });
     }
     [TestMethod]
+    public void BoatExperimentFeedbackContainsOnlyTargetAndObservedDock()
+    {
+        var preferences=new Preferences{Endpoint=Endpoint,Model="test-model",SharePlayState=true,ShareGameState=true,GameStateEndpoint=Endpoint};
+        var turns=BoatPartner.Build(preferences,BoatLayout.Default(),"willow",new("willow","bridge"));
+        using var payload=JsonDocument.Parse(turns[1].Content);var root=payload.RootElement;
+        Assert.AreEqual("willow",root.GetProperty("goal").GetString());
+        Assert.AreEqual("willow",root.GetProperty("previous").GetProperty("target").GetString());
+        Assert.AreEqual("bridge",root.GetProperty("previous").GetProperty("actual").GetString());
+        Assert.AreEqual(3,root.GetProperty("options").GetArrayLength());
+        Assert.Throws<InvalidDataException>(()=>BoatPartner.Build(preferences,BoatLayout.Default(),"willow",new("private","bridge")));
+    }
+    [TestMethod]
     public void ChatAndRoomDeletionAndImportRespectIndependentOrigins()
     {
         foreach(string operation in new[]{"clear-chat","clear-room","import-chat","import-room","staged-chat","staged-room"})WithStore(store=>{

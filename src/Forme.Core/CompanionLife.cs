@@ -69,6 +69,7 @@ public static class HideStrategy
     }
 }
 public sealed record BoatPartnerOption(string Id,string Dock,BoatLayout Layout);
+public sealed record BoatExperimentFeedback(string Target,string ActualDock);
 public static class BoatPartner
 {
     public static IReadOnlyList<BoatPartnerOption> Options(BoatLayout original)
@@ -82,12 +83,16 @@ public static class BoatPartner
         }
         return options;
     }
-    public static List<AiTurn> Build(Preferences p,BoatLayout original,string goal)
+    public static List<AiTurn> Build(Preferences p,BoatLayout original,string goal,BoatExperimentFeedback? feedback=null)
     {
         if(!p.SharePlayState||!p.ShareGameState||!AiClient.SameEndpoint(p.GameStateEndpoint,p.Endpoint))throw new InvalidDataException("请开启合作玩法状态分享。");
         if(goal is not ("willow" or "bridge" or "lily"))throw new InvalidDataException("未知码头。");
-        return [new("system","与用户合作纸船：用户决定第1/3片叶子、船形和风向，你只从本机计算的第2片叶子候选中选一个id，争取抵达目标码头。只输出JSON对象{id:候选id或null,reason:简短理由}。只有用户确认才采用并放船。不编造结果，不改变其它设置。"),
-            new("user",JsonSerializer.Serialize(new{goal,options=Options(original).Select(x=>new{id=x.Id,dock=x.Dock})}))];
+        if(feedback is not null&&(feedback.Target is not ("willow" or "bridge" or "lily")||feedback.ActualDock is not ("willow" or "bridge" or "lily")))throw new InvalidDataException("纸船实验反馈无效。");
+        string instruction=feedback is null?
+            "与用户合作纸船：用户决定第1/3片叶子、船形和风向，你只从本机计算的第2片叶子候选中选一个id，争取抵达目标码头。只输出JSON对象{id:候选id或null,reason:简短理由}。只有用户确认才采用并放船。不编造结果，不改变其它设置。":
+            $"与用户合作纸船实验：上一轮目标是{PaperBoat.DockName(feedback.Target)}，实际抵达{PaperBoat.DockName(feedback.ActualDock)}。请把实际结果作为反馈，比较本轮本机模拟候选，选择一个id或返回null；只输出JSON对象{{id:候选id或null,reason:简短理由}}。只有用户确认才采用并放船。不编造结果，不改变其它设置。";
+        return [new("system",instruction),
+            new("user",JsonSerializer.Serialize(new{goal,layout=original.Copy(),previous=feedback is null?null:new{target=feedback.Target,actual=feedback.ActualDock},options=Options(original).Select(x=>new{id=x.Id,dock=x.Dock})}))];
     }
     public static bool Same(BoatLayout a,BoatLayout b)=>a.Shape==b.Shape&&a.Color==b.Color&&a.Wind==b.Wind&&a.Leaves.SequenceEqual(b.Leaves);
 }

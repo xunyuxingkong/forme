@@ -5,7 +5,7 @@
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <FormeVersion>0.6.13</FormeVersion>
+    <FormeVersion>0.6.14</FormeVersion>
     <Version>$(FormeVersion)</Version>
     <InformationalVersion>$(FormeVersion)</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>

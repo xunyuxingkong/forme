@@ -162,7 +162,8 @@ internal sealed partial class Controller
             AiHideRunning=false;_cooperativeRequest=false;_selectionView=null;_request=null;SyncTimer();Changed?.Invoke();
         }
     }
-    internal async Task ProposeBoat(string dock)
+    internal Task ProposeBoat(string dock)=>ProposeBoat(dock,null);
+    private async Task ProposeBoat(string dock,BoatExperimentFeedback? feedback)
     {
         await TakeForegroundAsync();if(Busy)throw new OperationFailureException("请先结束当前操作。");RequirePlaySharing();
         var world=ActivityWorld as ICooperativePlayWorld??throw new OperationFailureException("当前场景不可用。");
@@ -171,11 +172,11 @@ internal sealed partial class Controller
         var before=world.CurrentBoat();var observed=ActivityWorld!.Observe(CompanionView.Room);
         var game=GoalPlayWorld.ObserveGoalPlay("boat");
         if(game.Phase is not (GoalPlayPhase.Ready or GoalPlayPhase.Completed))throw new OperationFailureException("请在显示中的纸船准备页面请求建议。");
-        var issued=Preferences with{};var turns=BoatPartner.Build(issued,before,dock);if(turns.Sum(AiClient.Estimate)>issued.ContextBudget)throw new InvalidDataException("共同纸船方案超过文字预算。");
+        var issued=Preferences with{};var turns=BoatPartner.Build(issued,before,dock,feedback);if(turns.Sum(AiClient.Estimate)>issued.ContextBudget)throw new InvalidDataException("共同纸船方案超过文字预算。");
         CancelBoatProposal();var goal=BeginCooperative("boat");
         using var request=new CancellationTokenSource(TimeSpan.FromSeconds(25));_request=request;_selectionView=CompanionView.Room;
         _cooperativeRequest=true;int epoch=++_epoch;SelectedActivityId=goal.Id;SelectedActivityState=CompanionActivityState.Planning;SyncTimer();
-        CooperativeStatus("AI在比较第二片叶子的导流方案…");
+        CooperativeStatus(feedback is null?"AI在比较第二片叶子的导流方案…":"AI正在结合上次实际到岸结果比较新方案…");
         try
         {
             var options=BoatPartner.Options(before);
@@ -191,7 +192,7 @@ internal sealed partial class Controller
             {
                 if(!BoatPartner.Same(before,world.CurrentBoat())||ActivityWorld.Observe(CompanionView.Room).SubjectId!=observed.SubjectId||GoalPlayWorld.ObserveGoalPlay("boat")!=game)throw new OperationFailureException("纸船布置或本局已改变，建议作废。");
                 var selected=options.Single(x=>x.Id==choice.Id);
-                Store.FinishGoalStep(goal.Id,0,GoalStepState.Completed,"proposed:"+selected.Dock,DateTimeOffset.Now);Store.AwaitGoalConfirmation(goal.Id,DateTimeOffset.Now);
+                Store.FinishGoalStep(goal.Id,0,GoalStepState.Completed,"proposed:"+dock+":"+selected.Dock,DateTimeOffset.Now);Store.AwaitGoalConfirmation(goal.Id,DateTimeOffset.Now);
                 CooperativeBoatBefore=before;CooperativeBoatProposal=options.Single(x=>x.Id==choice.Id).Layout;CooperativeBoatSubject=observed.SubjectId;
                 _boatProposalGoalId=goal.Id;_boatProposalPreferences=issued;_boatProposalObservation=game;
                 SelectedActivityState=CompanionActivityState.WaitingForUser;_boatProposalAt=DateTimeOffset.UtcNow;

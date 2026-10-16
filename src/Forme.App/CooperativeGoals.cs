@@ -9,6 +9,9 @@ internal sealed partial class Controller
     private string _cooperativeStatus="";
     private Preferences? _boatProposalPreferences;
     private GoalPlayObservation? _boatProposalObservation;
+    private sealed record BoatExperiment(string GoalId,GoalPlayObservation Observation,BoatLayout Layout,string Subject,string Target,string ActualDock,DateTimeOffset Finished,Preferences Preferences);
+    private BoatExperiment? _boatExperiment;
+    internal bool BoatExperimentAvailable{get{ReconcileBoatExperiment();return _boatExperiment is not null;}}
     private GoalRun BeginCooperative(string kind)
     {
         if(_goalPlay is not null)throw new OperationFailureException("请先完成或停止正在等待结果的玩法目标。");
@@ -44,6 +47,27 @@ internal sealed partial class Controller
         }
         catch(Exception ex) when(OperationErrors.Expected(ex)){CancelBoatProposal();}
     }
+    private void ReconcileBoatExperiment()
+    {
+        if(_boatExperiment is not {} experiment)return;
+        try
+        {
+            var source=Store.Goal(experiment.GoalId);
+            if(DateTimeOffset.UtcNow-experiment.Finished>TimeSpan.FromMinutes(10)||!CooperativeGrant(Preferences)||
+                Preferences.Endpoint!=experiment.Preferences.Endpoint||Preferences.Model!=experiment.Preferences.Model||Preferences.PetModel!=experiment.Preferences.PetModel||
+                source is null||source.Origin!=GoalOrigin.Cooperative||source.State!=GoalRunState.Completed||source.Steps[^1].Evidence!="play:boat:"+experiment.ActualDock||
+                GoalPlayWorld?.ObserveGoalPlay("boat")!=experiment.Observation||
+                ActivityWorld?.Observe(CompanionView.Room).SubjectId!=experiment.Subject||
+                ActivityWorld is not ICooperativePlayWorld world||!BoatPartner.Same(experiment.Layout,world.CurrentBoat()))_boatExperiment=null;
+        }
+        catch(Exception ex) when(OperationErrors.Expected(ex)){_boatExperiment=null;}
+    }
+    internal Task ProposeBoatExperiment()
+    {
+        ReconcileBoatExperiment();var experiment=_boatExperiment??throw new OperationFailureException("可用的纸船实测结果已变化或过期。");
+        _boatExperiment=null;
+        return ProposeBoat(experiment.Target,new(experiment.Target,experiment.ActualDock));
+    }
     internal void ConfirmBoatFromTaskCard(string key)
     {
         if(_boatProposalGoalId is null||key!="goal:"+_boatProposalGoalId)throw new OperationFailureException("当前建议已变化，请查看最新任务卡。");
@@ -58,7 +82,22 @@ internal sealed partial class Controller
     {
         if(run.Origin!=GoalOrigin.Cooperative||run.Steps[0].Capability!="ProposeBoat")return;
         bool complete=run.State==GoalRunState.Completed;
-        _cooperativeStatus=complete?"共同纸船实际抵达"+PaperBoat.DockName(run.Steps[^1].Evidence?[10..])+"。":"共同纸船已停止或中断，请核对本局。";
+        string? actualEvidence=run.Steps[^1].Evidence;string? targetEvidence=run.Steps[0].Evidence;
+        string? actual=complete&&actualEvidence?.StartsWith("play:boat:",StringComparison.Ordinal)==true?actualEvidence![10..]:null;
+        string? target=null;
+        if(targetEvidence?.StartsWith("proposed:",StringComparison.Ordinal)==true)
+        {
+            target=targetEvidence![9..].Split(':',2)[0];
+        }
+        _boatExperiment=null;
+        if(complete&&(actual is "willow" or "bridge" or "lily")&&(target is "willow" or "bridge" or "lily")&&actual!=target&&
+            ActivityWorld is ICooperativePlayWorld world&&GoalPlayWorld?.ObserveGoalPlay("boat") is {} observation&&observation.Phase==GoalPlayPhase.Completed&&observation.Outcome==actual)
+        {
+            try{_boatExperiment=new(run.Id,observation,world.CurrentBoat(),ActivityWorld.Observe(CompanionView.Room).SubjectId,target,actual,DateTimeOffset.UtcNow,Preferences with{});}
+            catch(Exception ex) when(OperationErrors.Expected(ex)){_boatExperiment=null;}
+        }
+        _cooperativeStatus=complete?"共同纸船实际抵达"+PaperBoat.DockName(actual)+"。"+(_boatExperiment is null?"":"可以让AI结合这次实测结果再比较一轮。"):
+            "共同纸船已停止或中断，请核对本局。";
         if(SelectedActivityId==run.Id){SelectedActivityState=complete?CompanionActivityState.Completed:CompanionActivityState.Cancelled;CompanionLifeStatus=_cooperativeStatus;}
         if(complete)RecordExperience("cooperative-boat","boat",run.Steps[^1].Evidence![10..],SceneKind.Indoor);
     }
