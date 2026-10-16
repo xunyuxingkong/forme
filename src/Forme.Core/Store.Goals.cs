@@ -28,6 +28,12 @@ public sealed partial class Store
         var run=new GoalRun(id,sessionId,GoalRunState.Ready,Array.AsReadOnly(steps),now,now,endpoint,model);WriteGoal(run,tx);
         Exec("UPDATE messages SET status='local' WHERE id=$0",tx,id);tx.Commit();return run;
     }
+    public bool BeginGoalReplan(string id,DateTimeOffset now)
+    {
+        using var tx=_db.BeginTransaction();var run=ReadGoal(id,tx);
+        if(run is null||!GoalProtocol.CanReplan(run))return false;
+        WriteGoal(run with{Replans=1,Updated=now},tx);tx.Commit();return true;
+    }
     public void StartGoalStep(string id,int index,DateTimeOffset now)
     {
         using var tx=_db.BeginTransaction();var run=ReadGoal(id,tx)??throw new InvalidDataException("目标记录不存在。");

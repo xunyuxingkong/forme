@@ -13,12 +13,16 @@ public sealed record GoalRun(string Id,string SessionId,GoalRunState State,IRead
 {
     public GoalOrigin Origin {get;init;}
     public int Requests {get;init;}
+    public int Replans {get;init;}
 }
 
 public static class GoalProtocol
 {
     public const string Marker="```forme-plan";
     private static readonly HashSet<string> FiniteActions=["go","stroll","dance","pat","rub","recall","scene","interact","stop"];
+    public static bool CanReplan(GoalRun run)=>run.Origin==GoalOrigin.Chat&&run.State==GoalRunState.Failed&&run.Replans==0&&
+        run.Steps.Count>0&&run.Steps[0].State==GoalStepState.Failed&&run.Steps[0].Capability is "GoTo" or "Stroll"&&
+        run.Steps[0].Evidence==ActionResultCode.PathBlocked.ToString()&&run.Steps.Skip(1).All(x=>x.State==GoalStepState.Skipped);
     public static bool TryExtract(string response,out string json)
     {
         json="";int start=response.IndexOf(Marker,StringComparison.Ordinal);if(start<0)return false;

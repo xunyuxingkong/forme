@@ -37,6 +37,24 @@ public sealed class GoalTests
         Assert.Throws<InvalidDataException>(()=>GoalProtocol.Parse("[{\"type\":\"Dance\",\"mode\":\"hop\",\"count\":3},{\"intent\":\"ListTodayTasks\"}]","跳三次再查待办",SceneKind.Indoor));
     }
     [TestMethod]
+    public void OnlyAFirstStepBlockedMoveCanBeReplannedOnce()
+    {
+        WithStore(store=>{
+            var source=Source(store);var plan=GoalProtocol.Parse("[{\"type\":\"Stroll\",\"mode\":\"walk\",\"view\":\"desktop\"},{\"intent\":\"CreateTask\",\"title\":\"后续待办\"}]","桌面走几步，再创建待办",SceneKind.Indoor);
+            store.BeginGoal(source.Id,source.Session,plan,DateTimeOffset.Now);store.StartGoalStep(source.Id,0,DateTimeOffset.Now);
+            store.FinishGoalStep(source.Id,0,GoalStepState.Failed,ActionResultCode.PathBlocked.ToString(),DateTimeOffset.Now);
+            var failed=store.Goal(source.Id)!;Assert.IsTrue(GoalProtocol.CanReplan(failed));
+            Assert.IsTrue(store.BeginGoalReplan(source.Id,DateTimeOffset.Now));Assert.AreEqual(1,store.Goal(source.Id)!.Replans);
+            Assert.IsFalse(store.BeginGoalReplan(source.Id,DateTimeOffset.Now));
+
+            var completedEarlier=failed with{Steps=[failed.Steps[0] with{State=GoalStepState.Completed},failed.Steps[1] with{State=GoalStepState.Failed,Evidence=ActionResultCode.PathBlocked.ToString()}]};
+            Assert.IsFalse(GoalProtocol.CanReplan(completedEarlier));
+            Assert.IsFalse(GoalProtocol.CanReplan(failed with{Steps=[failed.Steps[0] with{Evidence=ActionResultCode.TargetUnavailable.ToString()},failed.Steps[1]]}));
+            Assert.IsFalse(GoalProtocol.CanReplan(failed with{Steps=[failed.Steps[0] with{State=GoalStepState.Uncertain},failed.Steps[1]]}));
+            Assert.IsFalse(GoalProtocol.CanReplan(failed with{State=GoalRunState.Cancelled}));
+        });
+    }
+    [TestMethod]
     public void ProtocolAndPartialMarkersStayOutOfTranscriptAndContext()
     {
         string response=GoalProtocol.Marker+"\n"+Mixed+"\n"+new string((char)96,3);

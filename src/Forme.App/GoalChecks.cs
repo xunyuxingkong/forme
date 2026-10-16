@@ -18,7 +18,7 @@ internal static class GoalChecks
     private static string Envelope(string plan)=>GoalProtocol.Marker+"\n"+plan+"\n"+new string((char)96,3);
     public static async Task Run()
     {
-        foreach(string scenario in new[]{"success","off","invalid-late","denied","failed-motion","cancel","revoke","stale","between-steps","delete-session","truncated","mixed-markers","attachments","same-view","query"})
+        foreach(string scenario in new[]{"success","off","invalid-late","denied","failed-motion","replan","cancel","revoke","stale","between-steps","delete-session","truncated","mixed-markers","attachments","same-view","query"})
         {
             var transport=new Handler{Reply=Envelope(Plan),Truncated=scenario=="truncated"};
             string root=Path.GetFullPath(Path.Combine("artifacts","goal-checks",Guid.NewGuid().ToString("N")));
@@ -27,7 +27,7 @@ internal static class GoalChecks
             c.Secrets.Save("isolated-test-key");var world=new World();c.ActivityWorld=world;c.CurrentScene=()=>SceneKind.Desktop;c.ActionPreflight=_=>null;c.StopCommands=()=>{};
             int starts=0;var enteredMotion=new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             c.ActionHandler=command=>{
-                starts++;if(scenario=="failed-motion")return ActionResult.Failure(ActionResultCode.PathBlocked,"模拟路径被阻挡",command);
+                starts++;if(scenario=="failed-motion"||scenario=="replan"&&starts==1)return ActionResult.Failure(ActionResultCode.PathBlocked,"模拟路径被阻挡",command);
                 world.Desktop=world.Desktop with{Revision=world.Desktop.Revision+1};enteredMotion.TrySetResult(true);
                 return new(ActionResultCode.Started,command.Action,command.Value,"模拟动作开始",TimeSpan.Zero);
             };
@@ -35,6 +35,7 @@ internal static class GoalChecks
             if(scenario=="invalid-late")transport.Reply=Envelope(Plan.Replace("\"mode\":\"walk\"","\"mode\":\"bad\""));
             if(scenario=="mixed-markers")transport.Reply+=CompanionCommands.Marker+"\n[]\n"+new string((char)96,3);
             if(scenario=="same-view")transport.Reply=Envelope("[{\"type\":\"Stroll\",\"mode\":\"walk\",\"view\":\"desktop\"},{\"intent\":\"CreateNote\",\"title\":\"会议\",\"content\":\"资料\"},{\"type\":\"Stroll\",\"mode\":\"walk\",\"view\":\"desktop\"}]");
+            if(scenario=="replan")transport.Reply=Envelope("[{\"type\":\"Stroll\",\"mode\":\"walk\",\"view\":\"desktop\"},{\"intent\":\"CreateTask\",\"title\":\"确认会议\"}]");
             if(scenario=="query")transport.Reply=Envelope("[{\"intent\":\"CreateNote\",\"title\":\"会议准备\",\"content\":\"private-goal-body\"},{\"intent\":\"SearchNote\",\"query\":\"会议准备\"},{\"type\":\"Stroll\",\"mode\":\"walk\",\"view\":\"desktop\"}]");
             if(scenario=="attachments")c.AddAttachments([AiAttachment.FromBytes("资料.txt",Encoding.UTF8.GetBytes("附件资料"))]);
             bool changed=false;c.Changed+=()=>
@@ -64,6 +65,16 @@ internal static class GoalChecks
                 if(run?.State!=GoalRunState.Failed||notes!=1||tasks!=0||run.Steps[2].State!=GoalStepState.Skipped)throw new Exception("Partial failure not preserved: "+scenario+" "+c.ChatStatus);
                 if(scenario=="failed-motion"&&c.TaskCard()?.Steps.Any(x=>x.Contains("路径被阻挡"))!=true)throw new Exception("Task card hid failure reason");
             }
+            else if(scenario=="replan")
+            {
+                if(run?.State!=GoalRunState.Failed||run.Steps[0].Capability!="Stroll"||c.Store.UserTasks().Count!=0||!c.CanPrepareGoalReplan(run))throw new Exception("Recoverable first move was not eligible for manual replanning");
+                int calls=transport.Calls;c.PrepareGoalReplan(run.Id);
+                if(transport.Calls!=calls||c.Store.Goal(run.Id)!.Replans!=1||!c.Draft.Contains("路径被阻挡")||!c.Draft.Contains("桌面走几步"))throw new Exception("Replan draft did not preserve consent, quota or failure context");
+                try{c.PrepareGoalReplan(run.Id);throw new Exception("Replan draft quota was reused");}catch(OperationFailureException){}
+                transport.Reply=Envelope("[{\"intent\":\"CreateTask\",\"title\":\"确认会议\"}]");await c.Send();
+                var continuation=c.Store.GoalRuns().Single(x=>x.Id!=run.Id);
+                if(transport.Calls!=calls+1||continuation.State!=GoalRunState.Completed||c.Store.UserTasks().Count!=1||starts!=1)throw new Exception("User-sent replan did not complete only the unexecuted work");
+            }
             else if(scenario is "cancel" or "revoke")
             {if(run?.State!=GoalRunState.Cancelled||notes!=1||tasks!=0||run.Steps[2].State!=GoalStepState.Skipped)throw new Exception("Cancellation ran remaining steps: "+scenario);}
             else if(scenario=="same-view")
@@ -83,7 +94,7 @@ internal static class GoalChecks
                 throw new Exception("Protocol or work body appeared in assistant transcript: "+scenario);
         }
         await Native();
-        File.WriteAllText("artifacts/goal-smoke-result.txt","PASS: 15 isolated fake-service scenarios; mixed note/motion/task, whole-plan rejection, partial failure/cancel/revoke, stale and between-step actor changes, deleted session, truncation, mixed protocols, attachments, own-view continuity, local query receipts, no replay request or later work-data leakage. Native HWND movement plus real note/task persistence; aggregate WPF goal history present and opt-in defaults off. No external AI requests.\n");
+        File.WriteAllText("artifacts/goal-smoke-result.txt","PASS: 16 isolated fake-service scenarios; mixed note/motion/task, whole-plan rejection, partial failure/cancel/revoke, one user-triggered first-step movement replan, stale and between-step actor changes, deleted session, truncation, mixed protocols, attachments, own-view continuity, local query receipts, no replay request or later work-data leakage. Native HWND movement plus real note/task persistence; aggregate WPF goal history present and opt-in defaults off. No external AI requests.\n");
     }
     private static async Task<bool> WaitForCancel(CancellationToken token){await Task.Delay(Timeout.Infinite,token);return false;}
     private static async Task Native()

@@ -23,6 +23,7 @@ internal sealed partial class MainWindow
             if(cooperative)text.Children.Add(Ui.Text("AI请求 "+run.Requests+" 次 · "+run.Model,11,Ui.Muted));
             foreach(var step in run.Steps.Where(x=>x.ArtifactId is not null))
                 text.Children.Add(Ui.Text(GoalProtocol.Label(step.Capability)+"："+(_c.Store.GoalArtifactExists(step)?"本机产物仍存在":"本机产物尚未生成或已删除"),11,Ui.Muted));
+            if(!cooperative&&_c.CanPrepareGoalReplan(run))text.Children.Add(Ui.Button("准备AI重规划草稿",()=>_c.PrepareGoalReplan(run.Id)));
             var delete=Ui.Button("删除执行记录，保留产物",()=>{if(Ui.Confirm(cooperative?"删除本条合作执行记录？游戏作品保留，不会重新执行。":"删除本条执行记录？已生成的记事和待办保留；原消息不会重新执行。")){_c.Store.DeleteGoal(run.Id);_c.Refresh();}});
             delete.IsEnabled=!_c.Busy&&run.State is not (GoalRunState.Ready or GoalRunState.Running or GoalRunState.WaitingForPlay or GoalRunState.WaitingForUser);text.Children.Add(delete);entries.Children.Add(Ui.Card(text));
           }
