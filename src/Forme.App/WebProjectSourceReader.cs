@@ -14,10 +14,23 @@ internal static class WebProjectSourceReader
 
     internal static async Task<ProjectSource> ReadAsync(string address,CancellationToken cancellationToken)
     {
+        using var handler=new SocketsHttpHandler{AllowAutoRedirect=false,UseProxy=false,UseCookies=false,AutomaticDecompression=DecompressionMethods.All,ConnectCallback=ConnectPublicHostAsync,ConnectTimeout=TimeSpan.FromSeconds(8),PooledConnectionLifetime=TimeSpan.Zero};
+        using var client=new HttpClient(handler){Timeout=Timeout};
+        return await ReadAsync(address,client,cancellationToken).ConfigureAwait(false);
+    }
+
+    // Only the transport is replaceable for offline checks; target/redirect validation remains shared.
+    internal static async Task<ProjectSource> ReadAsync(string address,HttpClient client,CancellationToken cancellationToken)
+    {
+        try{return await ReadPageAsync(address,client,cancellationToken).ConfigureAwait(false);}
+        catch(HttpRequestException){throw new OperationFailureException("网页连接失败，请检查网络、地址或证书后重试；没有自动重试或发送给AI。");}
+        catch(IOException){throw new OperationFailureException("网页传输中断，没有自动重试或发送给AI；请稍后重试。");}
+    }
+
+    private static async Task<ProjectSource> ReadPageAsync(string address,HttpClient client,CancellationToken cancellationToken)
+    {
         if(!Uri.TryCreate(address.Trim(),UriKind.Absolute,out var current))throw new InvalidDataException("请输入完整网页地址（http:// 或 https://）。");
         using var deadline=CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);deadline.CancelAfter(Timeout);
-        using var handler=new SocketsHttpHandler{AllowAutoRedirect=false,UseProxy=false,AutomaticDecompression=DecompressionMethods.All,ConnectCallback=ConnectPublicHostAsync,ConnectTimeout=TimeSpan.FromSeconds(8),PooledConnectionLifetime=TimeSpan.Zero};
-        using var client=new HttpClient(handler){Timeout=Timeout};
         for(int redirects=0;redirects<=4;redirects++)
         {
             ValidateAddress(current);
@@ -31,7 +44,7 @@ internal static class WebProjectSourceReader
                 catch(UriFormatException ex){throw new InvalidDataException("网页重定向目标无效。",ex);}
                 continue;
             }
-            response.EnsureSuccessStatusCode();
+            if(!response.IsSuccessStatusCode)throw new OperationFailureException($"网页服务返回 HTTP {(int)response.StatusCode}，未读取正文，没有自动重试或发送给AI。");
             string mediaType=response.Content.Headers.ContentType?.MediaType??"";
             if(!mediaType.Equals("text/html",StringComparison.OrdinalIgnoreCase)&&!mediaType.Equals("application/xhtml+xml",StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("指定网页没有返回 HTML 正文。");
             if(response.Content.Headers.ContentLength>MaximumBytes)throw new InvalidDataException("网页超过 1 MB 读取上限。");
@@ -102,7 +115,7 @@ internal static class WebProjectSourceReader
         throw new HttpRequestException("无法连接网页主机。",last);
     }
 
-    private static bool IsPublicAddress(IPAddress address)
+    internal static bool IsPublicAddress(IPAddress address)
     {
         if(address.IsIPv4MappedToIPv6)address=address.MapToIPv4();
         var bytes=address.GetAddressBytes();

@@ -233,6 +233,8 @@ internal static class Smoke
         try
         {
             Directory.CreateDirectory("artifacts/screenshots");
+            if(Environment.GetCommandLineArgs().Contains("--web-sources-only")){await WebProjectSourceChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
+            if(Environment.GetCommandLineArgs().Contains("--travel-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);await CheckTravel(host,Descendants(host.House!).OfType<Room3DView>().Single(),c);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--cooperative-goals-only")){await CooperativeGoalChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--goal-play-only")){await GoalPlayChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--task-cards-only")){await TaskCardChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
@@ -248,6 +250,7 @@ internal static class Smoke
             if(Environment.GetCommandLineArgs().Contains("--living-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);var living=Descendants(host.House!).OfType<Room3DView>().Single();await LivingChecks.Run(host,c,living);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--companion-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);var companion=Descendants(host.House!).OfType<Room3DView>().Single();await CompanionChecks.Run(host,c,companion);Environment.ExitCode=0;await host.Exit();return;}
             await PetAnimationChecks.Run();
+            await WebProjectSourceChecks.Run();
             foreach(double scale in new[]{1d,1.25,1.5,2d})
             {int px=ScreenCoordinateService.DipToPhysical(-123.5,scale);double dip=ScreenCoordinateService.PhysicalToDip(px,scale);if(Math.Abs(dip+123.5)>1/scale)throw new Exception("DPI coordinate conversion drifted");}
             var clamped=ScreenCoordinateService.Clamp(new System.Drawing.Rectangle(-2200,-100,300,300),new System.Drawing.Rectangle(-1920,0,1920,1080));
@@ -433,7 +436,9 @@ internal static class Smoke
         if(room.PetMoving||room.AnimationRunning||room.PetPosition!=position)throw new Exception("Minimized travel did not stop");
         host.House.WindowState=WindowState.Normal;await Task.Delay(80);
         c.SavePreferences(c.Preferences with{ReducedMotion=true});
-        if(!room.TryMove(new(3,3))||room.PetMoving||room.PetPosition!=new GroundPoint(3,3))throw new Exception("Reduced motion travel failed");
+        await host.House.Dispatcher.InvokeAsync(()=>host.House.UpdateLayout(),System.Windows.Threading.DispatcherPriority.ContextIdle);
+        bool moved=room.TryMove(new(3,3));
+        if(!moved||room.PetMoving||room.PetPosition!=new GroundPoint(3,3))throw new Exception($"Reduced motion travel failed: accepted={moved}, moving={room.PetMoving}, position={room.PetPosition}, visible={room.IsVisible}, motionVisible={room.MotionVisible}, suspended={c.AnimationSuspended}, window={host.House.WindowState}");
         c.SavePreferences(c.Preferences with{ReducedMotion=false});
         Click(host.House,"回到小屋");await Task.Delay(80);
         if(room.Outdoors||room.PetMoving||room.PetPosition!=new GroundPoint(.15,1.25))throw new Exception("Scene switch retained previous route");
