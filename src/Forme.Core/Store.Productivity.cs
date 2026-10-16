@@ -62,7 +62,12 @@ public sealed partial class Store
     public void DeleteUserTask(string id){Exec("DELETE FROM user_reminders WHERE task_id=$0; DELETE FROM user_tasks WHERE id=$0",null,id);RemoveBackup();}
 
     public List<UserReminder> DueReminders(DateTimeOffset now,int limit=50)=>Query("SELECT * FROM user_reminders WHERE status='pending' AND COALESCE(snooze_until,due_at)<=$0 ORDER BY COALESCE(snooze_until,due_at) LIMIT $1",r=>new UserReminder(r.GetString(0),r.GetString(1),ReadDate(r,2),r.IsDBNull(3)?null:r.GetString(3),r.GetString(4),r.GetString(5),ReadDate(r,6),ReadDate(r,7),ReadOptionalDate(r,8)),Date(now),Math.Clamp(limit,1,100));
-    public DateTimeOffset? NextReminderTime()=>Scalar("SELECT min(COALESCE(snooze_until,due_at)) FROM user_reminders WHERE status='pending'") is string value?DateTimeOffset.Parse(value):null;
+    public DateTimeOffset? NextReminderTime(IReadOnlyCollection<string>? excludeIds=null)
+    {
+        var ids=(excludeIds??[]).Distinct(StringComparer.Ordinal).ToArray();
+        string excluded=ids.Length==0?"":" AND id NOT IN("+string.Join(',',ids.Select((_,i)=>"$"+i))+")";
+        return Scalar("SELECT min(COALESCE(snooze_until,due_at)) FROM user_reminders WHERE status='pending'"+excluded,ids.Cast<object?>().ToArray()) is string value?DateTimeOffset.Parse(value):null;
+    }
     public void SaveUserReminder(UserReminder reminder)
     {
         ValidateUserReminder(reminder);InsertReminder(reminder);

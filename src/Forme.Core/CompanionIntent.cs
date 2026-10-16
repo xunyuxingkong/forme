@@ -1,7 +1,7 @@
 namespace Forme.Core;
 
 public enum CompanionIntentType { GoTo, Interact, Stroll, Dance, Idle, Recall, Stop, ChangeScene, ChangeWeather, UseToy, StartPlay, ChangeModel, ToggleDevice, Touch, Life, LayoutPreview, BoatConfiguration, NameBoat, Shortcut }
-public sealed record CompanionIntent(CompanionIntentType Type, string? Target = null, string? Mode = null, int? Count = null, double Confidence = 1, string Source = "local", CompanionCommand? Shortcut = null, double? X = null, double? Z = null, int? Rotation = null);
+public sealed record CompanionIntent(CompanionIntentType Type, string? Target = null, string? Mode = null, int? Count = null, double Confidence = 1, string Source = "local", CompanionCommand? Shortcut = null, double? X = null, double? Z = null, int? Rotation = null, CompanionView? View = null);
 public enum ActionResultCode { Started, Completed, NotRecognized, Unauthorized, TargetUnavailable, SceneUnavailable, PathBlocked, Interrupted, Cancelled, Timeout, Failed }
 public sealed record ActionResult(ActionResultCode Code, string Action, string? Target, string UserMessage, TimeSpan Elapsed)
 {

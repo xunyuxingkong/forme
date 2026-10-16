@@ -477,7 +477,7 @@ internal sealed partial class Room3DView : Grid
     public void Refresh()
     {
         if(_released)return;
-        SyncBoatTimer();if(!IsVisible||!_motionVisible||_c.AnimationSuspended){_toyTimer.Stop();_ballVisual.Content=null;_pendingInteraction=null;_pendingLife=null;_moveTarget=null;if(_hideMode!="")_hideStatus="窗口收起或暂停，本局已结束。";_hideMode="";}
+        SyncBoatTimer();if(!IsVisible||!_motionVisible||_c.AnimationSuspended){_toyTimer.Stop();_ballVisual.Content=null;_pendingInteraction=null;_pendingLife=null;_moveTarget=null;bool endedHide=_hideMode!="";if(endedHide)_hideStatus="窗口收起或暂停，本局已结束。";_hideMode="";if(endedHide)_c.ReconcileGoalPlay();}
         if(_modelId!=_c.Preferences.PetModel){_modelId=_c.Preferences.PetModel;ReplaceModel(PetModels.For(_modelId));return;}
         string state=_c.Clock.Active?(_c.Clock.Running&&_c.Clock.Activity!.Kind=="focus"?"focus":"rest"):_c.Busy?"thinking":_c.Preferences.PetIdleMode=="sleep"?"sleep":_c.Preferences.Quiet?"quiet":"idle";
         var p=_preview??_c.Preferences;int points=_c.Store.PlantPoints;bool night=p.Theme=="night"||p.Theme=="auto"&&(DateTime.Now.Hour>=19||DateTime.Now.Hour<7);
@@ -563,5 +563,5 @@ internal sealed partial class Room3DView : Grid
         bool frozen=model is not Model3DGroup group||group.Children.Select(FreezeStatic).ToArray().All(x=>x);
         if(frozen&&model.CanFreeze)model.Freeze();return frozen;
     }
-    public void Release(){if(_released)return;_released=true;_toyTimer.Stop();_toyTimer.Tick-=ToyTick;WorldChanged=null;_worldMarks.Children.Clear();_boatTimer.Stop();_boatTimer.Tick-=BoatTick;_boatView.Content=null;_boatLeafHits.Clear();BoatChanged=null;_animator.Dispose();_dayChange.Stop();_sceneCache.Clear();_model.Content=null;_viewport.Children.Clear();_hits.Clear();_sceneCorners.Clear();_appearance=null;}
+    public void Release(){if(_released)return;_released=true;_c.ReconcileGoalPlay();_c.ReconcileCooperativeProposal();_toyTimer.Stop();_toyTimer.Tick-=ToyTick;WorldChanged=null;_worldMarks.Children.Clear();_boatTimer.Stop();_boatTimer.Tick-=BoatTick;_boatView.Content=null;_boatLeafHits.Clear();BoatChanged=null;_animator.Dispose();_dayChange.Stop();_sceneCache.Clear();_model.Content=null;_viewport.Children.Clear();_hits.Clear();_sceneCorners.Clear();_appearance=null;}
 }

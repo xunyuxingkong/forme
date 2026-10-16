@@ -4,6 +4,7 @@ Forme bundles the following components in its Windows self-contained distributio
 
 - .NET / WPF runtime: Microsoft, MIT and bundled third-party licenses. [dotnet runtime license](https://github.com/dotnet/runtime/blob/main/LICENSE.TXT), [runtime third-party notices](https://github.com/dotnet/runtime/blob/main/THIRD-PARTY-NOTICES.TXT), [WPF license](https://github.com/dotnet/wpf/blob/main/LICENSE.TXT).
 - Microsoft.Data.Sqlite 10.0.9: Microsoft, MIT. [license](https://github.com/dotnet/efcore/blob/main/LICENSE.txt).
+- HtmlAgilityPack 1.13.1: ZZZ Projects, MIT. [license](https://github.com/zzzprojects/html-agility-pack/blob/master/LICENSE), included as `licenses/HtmlAgilityPack.txt`.
 - Windows SDK .NET projection 10.0.19041.57: Microsoft. [Windows SDK license](https://aka.ms/WinSDKLicenseURL), included as `licenses/Windows.SDK.rtf`. Used for local Windows PDF rendering; the PDF renderer itself is part of Windows and is not redistributed.
 - WinRT.Runtime (bundled by the Windows SDK projection): Microsoft C#/WinRT, MIT. [license](https://github.com/microsoft/CsWinRT/blob/master/LICENSE), included as `licenses/WinRT.Runtime.txt`.
 - SQLitePCLRaw 3.0.5: Eric Sink / SourceGear, Apache-2.0. [license](https://github.com/ericsink/SQLitePCL.raw/blob/master/LICENSE.TXT).

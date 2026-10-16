@@ -8,36 +8,7 @@ namespace Forme.App;
 
 internal sealed partial class MainWindow
 {
-    private readonly DispatcherTimer _reminderTimer=new(){Interval=TimeSpan.FromSeconds(20)};
-    private readonly HashSet<string> _activeReminderIds=new(StringComparer.Ordinal);
-    private void StartReminderScheduler(){_reminderTimer.Tick+=CheckDueReminders;CheckDueReminders(this,EventArgs.Empty);}
-    private void StopReminderScheduler(){_reminderTimer.Stop();_reminderTimer.Tick-=CheckDueReminders;}
-    private void CheckDueReminders(object? sender,EventArgs e)
-    {
-        _reminderTimer.Stop();
-        foreach(var reminder in _c.Store.DueReminders(DateTimeOffset.Now,10))
-            if(_activeReminderIds.Add(reminder.Id))ShowReminder(reminder);
-        ScheduleReminderCheck();
-    }
-    private void ScheduleReminderCheck()
-    {
-        _reminderTimer.Stop();var next=_c.Store.NextReminderTime();if(next is null)return;
-        var remaining=next.Value-DateTimeOffset.Now;
-        _reminderTimer.Interval=remaining<=TimeSpan.Zero?TimeSpan.FromMinutes(15):remaining>TimeSpan.FromMinutes(15)?TimeSpan.FromMinutes(15):remaining;
-        if(remaining<=TimeSpan.Zero&&_activeReminderIds.Count>0)return;
-        _reminderTimer.Start();
-    }
-    private void ShowReminder(UserReminder reminder)
-    {
-        var window=new Window{Title="Forme 提醒",Width=380,SizeToContent=SizeToContent.Height,ResizeMode=ResizeMode.NoResize,WindowStartupLocation=WindowStartupLocation.CenterOwner,Owner=this,ShowActivated=false,ShowInTaskbar=true};
-        bool handled=false;var content=Ui.Stack(Ui.Text("到时间了",12,Ui.Muted),Ui.Text(reminder.Title,19,null,true),Ui.Text(reminder.DueAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"),12,Ui.Muted));
-        var buttons=Ui.Row(
-            Ui.Button("稍后 10 分钟",()=>{handled=true;_c.Store.SnoozeUserReminder(reminder.Id,DateTimeOffset.Now.AddMinutes(10),DateTimeOffset.Now);window.Close();}),
-            Ui.Button("完成",()=>{handled=true;if(reminder.TaskId is {} taskId)_c.CompleteUserTask(taskId,"done");_c.Store.DismissUserReminder(reminder.Id,DateTimeOffset.Now);window.Close();},true),
-            Ui.Button("关闭",()=>{handled=true;_c.Store.DismissUserReminder(reminder.Id,DateTimeOffset.Now);window.Close();}));
-        content.Children.Add(buttons);window.Content=Ui.Card(content);window.Padding=new Thickness(8);
-        window.Closed+=(_,_)=>{if(!handled)_c.Store.SnoozeUserReminder(reminder.Id,DateTimeOffset.Now.AddMinutes(10),DateTimeOffset.Now);_activeReminderIds.Remove(reminder.Id);ScheduleReminderCheck();};window.Show();
-    }
+    private void ScheduleReminderCheck()=>_c.Refresh();
     private UIElement NotesPage()
     {
         string? editingId=null;DateTimeOffset created=DateTimeOffset.Now;bool pinned=false,archived=false;

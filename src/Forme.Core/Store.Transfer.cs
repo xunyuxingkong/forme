@@ -78,12 +78,13 @@ public sealed partial class Store
         {
             using var tx=_db.BeginTransaction();
             if(plan.HasChat){prefs=prefs with{MemoryEnabled=false};Exec("INSERT INTO settings VALUES('preferences',$0) ON CONFLICT(k) DO UPDATE SET v=excluded.v",tx,JsonSerializer.Serialize(prefs));}
-            if(plan.HasChat)Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_memories; DELETE FROM chat_notes; INSERT INTO sessions SELECT * FROM staged.sessions; INSERT INTO messages SELECT * FROM staged.messages; INSERT INTO chat_memories SELECT * FROM staged.chat_memories; INSERT INTO chat_notes SELECT * FROM staged.chat_notes;",tx);
+            if(plan.HasChat){DeleteGoalOrigin(GoalOrigin.Chat,tx);Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_memories; DELETE FROM chat_notes; INSERT INTO sessions SELECT * FROM staged.sessions; INSERT INTO messages SELECT * FROM staged.messages; INSERT INTO chat_memories SELECT * FROM staged.chat_memories; INSERT INTO chat_notes SELECT * FROM staged.chat_notes;",tx);}
             if(plan.HasMoods)Exec("DELETE FROM moods; INSERT INTO moods SELECT * FROM staged.moods;",tx);
             if(plan.HasFocus)Exec("DELETE FROM focus; INSERT INTO focus SELECT * FROM staged.focus;",tx);
             if(plan.HasProductivity)Exec("DELETE FROM user_reminders; DELETE FROM user_tasks; DELETE FROM user_notes; INSERT INTO user_notes SELECT * FROM staged.user_notes; INSERT INTO user_tasks SELECT * FROM staged.user_tasks; INSERT INTO user_reminders SELECT * FROM staged.user_reminders;",tx);
             if(plan.Room is {} room)
             {
+                DeleteGoalOrigin(GoalOrigin.Cooperative,tx);
                 prefs=prefs with{PetName=room.PetName,Theme=room.Theme,Rug=room.Rug,Ornament=room.Ornament,PetModel=room.PetModel,Weather=room.Weather,RoomLamp=room.RoomLamp,Fireplace=room.Fireplace};
                 Exec("INSERT INTO settings VALUES('preferences',$0) ON CONFLICT(k) DO UPDATE SET v=excluded.v",tx,JsonSerializer.Serialize(prefs));
                 Exec("DELETE FROM growth; INSERT INTO growth SELECT * FROM staged.growth;",tx);

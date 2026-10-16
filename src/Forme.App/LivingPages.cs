@@ -48,7 +48,7 @@ internal sealed partial class MainWindow
         return Ui.Stack(Ui.Text("伙伴藏物",24,null,true),Ui.Text("家具位置决定线索与搜索路线。"+PetBehaviors.For(_c.Preferences.PetModel).Personality+"伙伴会先检查自己偏好的家具；有通道才能找过去。可以随时结束，无次数限制。",13,Ui.Muted),Ui.Card(Ui.Stack(status,select,Ui.Row(Ui.Button("我藏，伙伴找",()=>_room.StartHide(false,chosen()),true),Ui.Button("伙伴藏，我来找",()=>_room.StartHide(true,null)),Ui.Button("检查选中家具",()=>{if(chosen() is {} id)_room.GuessHidden(id);})),
             Ui.Text("AI合作藏物（仅在点击时发送）",16,null,true),Ui.Text("需在伙伴生活设置开启“合作玩法状态分享”和“玩法权限”。点击后仅发送家具候选区域、已检查项和你填写的线索到当前AI服务；藏球答案留在本机。AI给出顺序后，伙伴会在小屋里实际逐项检查。",12,Ui.Muted),hint,
             Ui.AsyncButton("开始AI合作藏物",()=>_c.RunAiHide(chosen()??throw new OperationFailureException("请先选择藏物家具。"),hint.Text),true),
-            Ui.Text("本局可补充一次线索，AI会据此调整尚未检查的位置。",12,Ui.Muted),revisedHint,Ui.Button("发送一次新线索",()=>{_c.GiveHideHint(revisedHint.Text);revisedHint.Text="";}),aiStatus,
+            Ui.Text("每局最多2次AI请求；首轮未找到且仍有候选时，会据已检查项再规划一次。也可补充一次线索，沿用本局额度；网络或格式失败不自动重试。",12,Ui.Muted),revisedHint,Ui.Button("发送一次新线索",()=>{_c.GiveHideHint(revisedHint.Text);revisedHint.Text="";}),aiStatus,GoalHistory(true),
             Ui.Row(Ui.Button("结束藏物",()=>{if(_c.Busy)_c.StopReply();_room.EndHide();}),Ui.Button("叫回伙伴",_room.RecallFromUser)))),Ui.Button("调整家具再玩",()=>Navigate("furniture")));
     }
 }

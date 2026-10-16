@@ -6,13 +6,13 @@ public sealed class DesktopWander(Random? random=null)
     private readonly Random _random=random??new Random();
     private GroundPoint? _target;
     private Queue<GroundPoint>? _route;
-    private double _minX,_maxX,_minY,_maxY,_wait=2,_phase,_locomotionSeconds;
+    private double _minX,_maxX,_minY,_maxY,_wait,_phase,_locomotionSeconds;
     public GroundPoint Position {get;private set;}
     public bool Moving=>_target is not null;
     public void Reset(GroundPoint position,double minX,double maxX,double minY,double maxY)
     {
         _minX=minX;_maxX=Math.Max(minX,maxX);_minY=minY;_maxY=Math.Max(minY,maxY);
-        Position=new(Math.Clamp(position.X,_minX,_maxX),Math.Clamp(position.Z,_minY,_maxY));_target=null;_route=null;_wait=2;_phase=0;_locomotionSeconds=0;
+        Position=new(Math.Clamp(position.X,_minX,_maxX),Math.Clamp(position.Z,_minY,_maxY));_target=null;_route=null;_wait=0;_phase=0;_locomotionSeconds=0;
     }
     public void Pause(){_target=null;_route=null;_wait=2;_locomotionSeconds=0;}
     public bool BeginStep(double distance)
@@ -41,7 +41,15 @@ public sealed class DesktopWander(Random? random=null)
         if(_target is null)
         {
             _wait-=Math.Min(seconds,1);if(_wait>0)return null;
-            _target=new(_minX+_random.NextDouble()*(_maxX-_minX),_minY+_random.NextDouble()*(_maxY-_minY));
+            var origin=Position;GroundPoint candidate=origin;double farthest=0;
+            for(int attempt=0;attempt<8;attempt++)
+            {
+                var next=new GroundPoint(_minX+_random.NextDouble()*(_maxX-_minX),_minY+_random.NextDouble()*(_maxY-_minY));
+                double targetDistance=Math.Sqrt(Math.Pow(next.X-origin.X,2)+Math.Pow(next.Z-origin.Z,2));
+                if(targetDistance>farthest){candidate=next;farthest=targetDistance;}
+                if(targetDistance>=80)break;
+            }
+            _target=candidate;
         }
         var target=_target.Value;double dx=target.X-Position.X,dy=target.Z-Position.Z,distance=Math.Sqrt(dx*dx+dy*dy),step=dt*(running?170:65)*scale*speedMultiplier;
         if(distance<=Math.Max(step,1))

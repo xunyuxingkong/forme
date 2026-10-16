@@ -49,6 +49,7 @@ internal sealed partial class Room3DView
     {
         if(_boatOpen)return;
         SwitchScene(true);_boatOpen=true;_pendingInteraction=null;_ballVisual.Content=null;
+        _boatGoalRound=Guid.NewGuid().ToString("N");_boatGoalStarted=false;_boatGoalCancelled=false;
         ApplyPetSize();
         _roomInteractions.Visibility=Visibility.Collapsed;_sceneCaption.Text="拖动绿叶改变水流 · 拖空地旋转 · 滚轮缩放";
         _azimuth=15;_elevation=44;_zoom=1;BuildBoatWorld();Camera();_animator.MoveTo(new(-5.0,-2.85));BoatChanged?.Invoke();
@@ -64,6 +65,7 @@ internal sealed partial class Room3DView
     {
         if(BoatRunning)throw new OperationFailureException("先捞回纸船，再修改路线。");layout.Validate();
         if(remember)RememberBoatLayout(_boatLayout);
+        ResetBoatGoalLayout();
         _boatLayout=layout.Copy();_boatGame=null;if(_boatOpen)BuildBoatWorld();BoatChanged?.Invoke();
     }
     public void UndoBoat(){if(BoatRunning)throw new OperationFailureException("先捞回纸船，再撤销布置。");if(_boatUndo.TryPop(out var layout))ConfigureBoat(layout,false);}
@@ -76,6 +78,7 @@ internal sealed partial class Room3DView
     {
         if(!_boatOpen||!IsVisible||!_motionVisible||_c.AnimationSuspended)throw new OperationFailureException("请先显示纸船场景。");
         if(BoatRunning)return;
+        if(_boatGoalStarted||_boatGoalCancelled)_boatGoalRound=Guid.NewGuid().ToString("N");_boatGoalStarted=true;_boatGoalCancelled=false;
         _pendingInteraction=null;_boatLast=null;_boatPaused=false;_boatFollowTime=0;_boatGame=new(_boatLayout);
         _boatWaiting=_animator.MoveTo(new(-5.0,-2.85))&&_travel.Moving;BuildBoatWorld();
         if(_c.Preferences.ReducedMotion){_boatWaiting=false;for(int i=0;i<500&&!_boatGame.Complete;i++)_boatGame.Advance(.05);FinishBoat();}
@@ -83,7 +86,7 @@ internal sealed partial class Room3DView
         BoatChanged?.Invoke();
     }
     public void PauseBoat(){if(!BoatRunning)return;_boatPaused=!_boatPaused;if(_boatPaused){_travel.Stop();_boatWaiting=false;}SyncBoatTimer();BoatChanged?.Invoke();}
-    public void RetrieveBoat(){_boatTimer.Stop();_boatGame=null;_boatPaused=false;_boatWaiting=false;_travel.Stop();_animator.StopAction();if(_boatOpen)BuildBoatWorld();BoatChanged?.Invoke();}
+    public void RetrieveBoat(){_boatGoalCancelled=true;_boatTimer.Stop();_boatGame=null;_boatPaused=false;_boatWaiting=false;_travel.Stop();_animator.StopAction();if(_boatOpen)BuildBoatWorld();BoatChanged?.Invoke();}
     private void SyncBoatTimer()
     {
         if(!_boatOpen||!BoatRunning||_released){_boatTimer.Stop();return;}
@@ -108,7 +111,7 @@ internal sealed partial class Room3DView
         _boatTimer.Stop();if(_boatGame is not {Complete:true} game)return;
         PositionShip(game.Position,game.Heading,0);_travel.Stop();_heading.Angle=0;_animator.Play(PetAction.Cheer);
         _boatLast=new(Guid.NewGuid().ToString("N"),PaperBoat.DockName(game.Dock)+"的小旅行",game.Layout.Copy(),game.Dock!,game.PetalFound,_c.Preferences.PetModel,DateTimeOffset.Now);
-        _hint.Text=game.PetalFound?"船带回了一片小花瓣，伙伴开心地拍了拍手。":"到岸啦！伙伴为你的小船欢呼。";_c.Store.RecordBoatCompleted(DateOnly.FromDateTime(DateTime.Now));_c.CompleteCooperativeBoat(game.Dock!);_c.Refresh();BoatChanged?.Invoke();
+        _hint.Text=game.PetalFound?"船带回了一片小花瓣，伙伴开心地拍了拍手。":"到岸啦！伙伴为你的小船欢呼。";_c.Store.RecordBoatCompleted(DateOnly.FromDateTime(DateTime.Now));_c.Refresh();BoatChanged?.Invoke();
     }
     private void PositionShip(GroundPoint p,double heading,double elapsed)
     {var world=BoatPoint(p);_shipPosition.OffsetX=world.X;_shipPosition.OffsetY=world.Y+(elapsed==0?0:.009*Math.Sin(elapsed*4));_shipPosition.OffsetZ=world.Z;_shipHeading.Angle=heading;}
@@ -136,7 +139,7 @@ internal sealed partial class Room3DView
         double scale=2*Math.Tan(_camera.FieldOfView*Math.PI/360)/ActualWidth;var ray=forward+right*((point.X-ActualWidth/2)*scale)+up*((ActualHeight/2-point.Y)*scale);
         if(ray.Y>=-.001)return;var world=_camera.Position+ray*((.14-_camera.Position.Y)/ray.Y);
         var leaves=_boatLayout.Leaves.ToList();leaves[_boatDragging]=leaves[_boatDragging] with{X=Math.Clamp((world.X+3.6)/.65,-2,2),Z=Math.Clamp((world.Z+5)/.60,-1.35,1.35)};
-        _boatLayout=_boatLayout with{Leaves=leaves};_boatGame=null;BuildBoatWorld();BoatChanged?.Invoke();
+        ResetBoatGoalLayout();_boatLayout=_boatLayout with{Leaves=leaves};_boatGame=null;BuildBoatWorld();BoatChanged?.Invoke();
     }
     private void EndBoatDrag(bool cancel=false)
     {

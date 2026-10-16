@@ -62,12 +62,8 @@ public sealed class IntentTests
         string phrase="在小屋走一圈，然后去书架旁边";
         Assert.IsFalse(IntentResolver.LooksLikeRequest(phrase),"The local phrase gate should not be expanded to handle this request.");
         string instructions=AiIntentProtocol.RoutingInstructions();
-        StringAssert.Contains(instructions,"意图路由：依据本轮消息和有限会话上下文判断");
-        StringAssert.Contains(instructions,"消解本轮承接请求的省略表达");
-        StringAssert.Contains(instructions,"小屋/屋内散步用ChangeScene(indoor)+Stroll(mode=walk/run)");
-        StringAssert.Contains(instructions,"绕屏幕一/两圈才用Stroll(count=1/2)");
-        StringAssert.Contains(instructions,"Dance可用count=1..3");
-        StringAssert.Contains(instructions,"GoTo,Interact,Stroll");
+        StringAssert.Contains(instructions,CompanionCommands.Marker);
+        StringAssert.Contains(instructions,"view=room/desktop");
         var routedContext=AiClient.BuildContext(new(),Array.Empty<ChatMessage>(),phrase,out _,additionalSystemInstruction:instructions);
         Assert.IsTrue(routedContext.Sum(AiClient.Estimate)<=new Preferences().ContextBudget);
         StringAssert.Contains(routedContext[0].Content,"forme-actions");

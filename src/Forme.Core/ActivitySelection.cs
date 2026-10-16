@@ -6,7 +6,10 @@ public enum CompanionView { Room, Desktop }
 public enum CompanionActivityState { Planning, Executing, WaitingForUser, Completed, Cancelled, Failed, NoAction }
 public sealed record ActivityOption(string Id,string Title,string Description,IReadOnlyList<CompanionCommand> Steps);
 public sealed record ActivityObservation(CompanionView View,string SubjectId,int Revision,SceneKind Scene,string Model,
-    string Weather,bool LampOn,bool Available,string State,IReadOnlyList<ActivityOption> Options,string LifeContext="");
+    string Weather,bool LampOn,bool Available,string State,IReadOnlyList<ActivityOption> Options,string LifeContext="")
+{
+    public bool Visible {get;init;}
+}
 public sealed record ActivityChoice(string? Id,string Reason);
 public interface ICompanionActivityWorld
 {

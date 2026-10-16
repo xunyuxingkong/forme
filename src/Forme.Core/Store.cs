@@ -62,7 +62,7 @@ public sealed partial class Store : IDisposable
     public void SaveMessage(ChatMessage m) { if (!HasSession(m.SessionId)) return; Exec("INSERT INTO messages VALUES($0,$1,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET content=excluded.content,status=excluded.status",null,m.Id,m.SessionId,m.Role,m.Content,m.Status,Date(m.Created)); }
     public void DeleteSession(string id)
     {
-        using var tx = _db.BeginTransaction(); Exec("DELETE FROM messages WHERE session=$0",tx,id);Exec("DELETE FROM chat_notes WHERE session=$0",tx,id); Exec("DELETE FROM sessions WHERE id=$0",tx,id); tx.Commit(); RemoveBackup();
+        var goalRuns=GoalRuns(id);using var tx = _db.BeginTransaction(); Exec("DELETE FROM messages WHERE session=$0",tx,id);Exec("DELETE FROM chat_notes WHERE session=$0",tx,id); Exec("DELETE FROM sessions WHERE id=$0",tx,id);foreach(var goal in goalRuns)Exec("DELETE FROM settings WHERE k=$0",tx,GoalPrefix+goal.Id); tx.Commit(); RemoveBackup();
     }
     public List<FocusEntry> Focus(int offset = 0, int limit = 20) => Query("SELECT * FROM focus ORDER BY started DESC LIMIT $0 OFFSET $1",r => new FocusEntry(r.GetString(0),r.GetString(1),r.GetString(2),ReadDate(r,3),r.GetInt32(4),r.GetDouble(5),r.GetString(6)),limit,offset);
     public void FinishFocus(FocusEntry f)
@@ -160,7 +160,7 @@ public sealed partial class Store : IDisposable
         {
             existingPreferences=existingPreferences with{MemoryEnabled=false};
             Exec("INSERT INTO settings VALUES('preferences',$0) ON CONFLICT(k) DO UPDATE SET v=excluded.v",tx,JsonSerializer.Serialize(existingPreferences));
-            Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_memories; DELETE FROM chat_notes;",tx);
+            DeleteGoalOrigin(GoalOrigin.Chat,tx);Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_memories; DELETE FROM chat_notes;",tx);
             foreach(var s in d.Sessions) Exec("INSERT INTO sessions VALUES($0,$1,$2,$3)",tx,s.Id,s.Title,Date(s.Created),s.Endpoint);
             foreach(var m in d.Messages!) Exec("INSERT INTO messages VALUES($0,$1,$2,$3,$4,$5)",tx,m.Id,m.SessionId,m.Role,m.Content,m.Status=="streaming"?"stopped":m.Status,Date(m.Created));
             foreach(var memory in d.Memories??[])Exec("INSERT INTO chat_memories VALUES($0,$1,$2,$3,$4,$5,$6)",tx,memory.Id,memory.Title,memory.Content,memory.Provider,memory.Enabled?1:0,Date(memory.Created),Date(memory.Updated));
@@ -172,6 +172,7 @@ public sealed partial class Store : IDisposable
         if(d.UserTasks is not null){Exec("DELETE FROM user_reminders; DELETE FROM user_tasks",tx);foreach(var t in d.UserTasks)Exec("INSERT INTO user_tasks VALUES($0,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",tx,t.Id,t.Title,t.Description,t.Status,t.Priority,t.DueAt is null?null:Date(t.DueAt.Value),t.RemindAt is null?null:Date(t.RemindAt.Value),Date(t.Created),Date(t.Updated),t.CompletedAt is null?null:Date(t.CompletedAt.Value),t.Source,t.Project,JsonSerializer.Serialize(t.Tags),t.SortOrder);foreach(var r in d.UserReminders!)InsertReminder(r,tx);}
         if(d.Room is not null)
         {
+            DeleteGoalOrigin(GoalOrigin.Cooperative,tx);
             var p=existingPreferences with {}; p.PetName=d.Room.PetName; p.Theme=d.Room.Theme; p.Rug=d.Room.Rug; p.Ornament=d.Room.Ornament;p.PetModel=d.Room.PetModel;p.Weather=d.Room.Weather;p.RoomLamp=d.Room.RoomLamp;p.Fireplace=d.Room.Fireplace;
             if(d.Room.CompanionLife is not null)p=p with{AutonomyEnabled=false,ShareExperiences=false,SharePlayState=false,ShareGameState=false,GameStateEndpoint=""};
             Exec("INSERT INTO settings VALUES('preferences',$0) ON CONFLICT(k) DO UPDATE SET v=excluded.v",tx,JsonSerializer.Serialize(p));
@@ -185,10 +186,11 @@ public sealed partial class Store : IDisposable
     public void ClearCategory(string category)
     {
         if(category is not ("chat" or "moods" or "focus" or "room")) throw new ArgumentException("类别无效。");
-        if(category=="room")Exec("DELETE FROM growth; DELETE FROM settings WHERE k='companion-life-v1';");
-        else Exec(category=="chat"?"DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_notes; DELETE FROM chat_memories;":$"DELETE FROM {category}"); RemoveBackup();
+        if(category=="room"){DeleteGoalOrigin(GoalOrigin.Cooperative);Exec("DELETE FROM growth; DELETE FROM settings WHERE k='companion-life-v1';");}
+        else if(category=="chat"){DeleteGoalOrigin(GoalOrigin.Chat);Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_notes; DELETE FROM chat_memories;");}
+        else Exec($"DELETE FROM {category}");RemoveBackup();
     }
-    public void ResetAll() { Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_memories; DELETE FROM chat_notes; DELETE FROM moods; DELETE FROM focus; DELETE FROM user_notes; DELETE FROM user_tasks; DELETE FROM user_reminders; DELETE FROM growth; DELETE FROM settings; DELETE FROM game_progress; INSERT INTO game_progress(id,xp,stars) VALUES(1,0,0); DELETE FROM game_inventory; INSERT INTO game_inventory VALUES('ball-yellow',1); DELETE FROM game_tasks; DELETE FROM game_daily; DELETE FROM game_discoveries; DELETE FROM game_slots; DELETE FROM game_achievements;"); RemoveBackup(); Exec("VACUUM"); }
+    public void ResetAll() { Exec("DELETE FROM messages; DELETE FROM sessions; DELETE FROM chat_memories; DELETE FROM chat_notes; DELETE FROM settings WHERE k LIKE 'goal-run:%'; DELETE FROM moods; DELETE FROM focus; DELETE FROM user_notes; DELETE FROM user_tasks; DELETE FROM user_reminders; DELETE FROM growth; DELETE FROM settings; DELETE FROM game_progress; INSERT INTO game_progress(id,xp,stars) VALUES(1,0,0); DELETE FROM game_inventory; INSERT INTO game_inventory VALUES('ball-yellow',1); DELETE FROM game_tasks; DELETE FROM game_daily; DELETE FROM game_discoveries; DELETE FROM game_slots; DELETE FROM game_achievements;"); RemoveBackup(); Exec("VACUUM"); }
     public void RemoveBackup()
     {
         if(File.Exists(BackupPath))File.Delete(BackupPath);

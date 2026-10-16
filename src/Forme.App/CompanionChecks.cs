@@ -184,10 +184,10 @@ internal static class CompanionChecks
             handler.Reply="```forme-actions\n[{\"type\":\"GoTo\",\"target\":\"pond\"}]\n```";protocol.Draft="去有水的地方待会吧";await protocol.Send();if(executed!=2||handler.Calls!=2)throw new Exception("AI intent fallback was not one request and one bounded plan");
             protocol.SavePreferences(protocol.Preferences with{LocalActionRules=false});handler.Reply="```forme-actions\n[{\"type\":\"ChangeScene\",\"target\":\"indoor\"},{\"type\":\"Stroll\",\"mode\":\"walk\"},{\"type\":\"GoTo\",\"target\":\"book\"}]\n```";protocol.Draft="在小屋走一圈，然后去书架旁边";await protocol.Send();
             using var routedRequest=JsonDocument.Parse(handler.LastRequest);string routedText=string.Join("\n",routedRequest.RootElement.GetProperty("messages").EnumerateArray().Select(x=>x.GetProperty("content").GetString()));
-            if(handler.Calls!=3||executed!=5||protocol.ActionResults.Count!=3||protocol.ActionResults.Any(x=>!x.Success)||!routedText.Contains("在小屋走一圈，然后去书架旁边",StringComparison.Ordinal)||!routedText.Contains("意图路由：依据本轮消息和有限会话上下文判断",StringComparison.Ordinal))
+            if(handler.Calls!=3||executed!=5||protocol.ActionResults.Count!=3||protocol.ActionResults.Any(x=>!x.Success)||!routedText.Contains("在小屋走一圈，然后去书架旁边",StringComparison.Ordinal)||!routedText.Contains("view=room/desktop",StringComparison.Ordinal))
             {
                 string actionResults=string.Join(" | ",protocol.ActionResults.Select(x=>$"{x.Code}: {x.UserMessage}"));
-                throw new Exception($"AI routing did not infer and execute the house walk plus book target: calls={handler.Calls}, executed={executed}, results={protocol.ActionResults.Count} [{actionResults}], requestInput={routedText.Contains("在小屋走一圈，然后去书架旁边",StringComparison.Ordinal)}, requestPrompt={routedText.Contains("意图路由：依据本轮消息和有限会话上下文判断",StringComparison.Ordinal)}");
+                throw new Exception($"AI routing did not infer and execute the house walk plus book target: calls={handler.Calls}, executed={executed}, results={protocol.ActionResults.Count} [{actionResults}], requestInput={routedText.Contains("在小屋走一圈，然后去书架旁边",StringComparison.Ordinal)}, requestPrompt={routedText.Contains("view=room/desktop",StringComparison.Ordinal)}");
             }
             handler.Reply="我们可以聊聊你今天的感受。";protocol.Store.Set("ai-consent-v3-productivity",protocol.Preferences.Endpoint);protocol.Draft="谢谢你";await ChatRequests.Send(protocol);
             if(handler.Calls!=4||executed!=5||!protocol.Store.Messages(protocol.Session!.Id).Last().Content.Contains("我们可以聊聊",StringComparison.Ordinal)||protocol.Store.Get<string>("ai-consent-v3-productivity")!=protocol.Preferences.Endpoint)throw new Exception("Productivity consent did not preserve ordinary chat");
@@ -327,6 +327,7 @@ internal static class CompanionChecks
             protocol.CommandHandler=_=>throw new OperationFailureException("被家具遮挡");protocol.Draft="请跳舞试试被挡的动作";await protocol.Send();if(!protocol.ChatStatus.Contains("被家具遮挡"))throw new Exception("Local failure missing");
             handler.Reply="```forme-actions\n[{\"type\":\"Stroll\",\"mode\":\"walk\"},{\"type\":\"Dance\",\"mode\":\"sway\"}]\n```";
             var beforeWalk=room.PetPosition;
+            protocol.CurrentScene=()=>house.CompanionScene;
             protocol.CommandHandler=cmd=>{if(cmd.Action=="dance"&&(room.PetMoving||room.PetPosition==beforeWalk))throw new Exception("Pat began before arrival");return host.ExecuteCompanionCommand(cmd);};
             protocol.CommandWaiter=house.WaitCreation;protocol.Draft="走两步再跳舞";await protocol.Send();if(!protocol.ChatStatus.Contains("伙伴动作"))throw new Exception("Actual sequential action failed: "+protocol.ChatStatus);
         }

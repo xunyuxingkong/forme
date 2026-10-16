@@ -18,6 +18,8 @@ internal sealed class FloatingChatWindow : Window
     private readonly Button _pick;
     private readonly Button _send,_stop,_new,_choose;
     private readonly Expander _historyActions;
+    private readonly ContentControl _taskCard=new();
+    private bool _taskCardExpanded;
     private TextBlock? _live;
     private bool _transfer,_composing,_probeStreaming;
     public FloatingChatWindow(Controller c,PetWindow pet,Action<string> openHouse)
@@ -25,18 +27,20 @@ internal sealed class FloatingChatWindow : Window
         _c=c;_openHouse=openHouse;Title="Forme · 聊一会儿";Width=380;Height=500;MinWidth=300;MinHeight=360;
         WindowStyle=WindowStyle.ToolWindow;ShowInTaskbar=false;Topmost=c.Preferences.Topmost;Background=Ui.Cream;Owner=pet;
         var grid=new Grid{Margin=new Thickness(14)};
-        foreach(var height in new[]{GridLength.Auto,GridLength.Auto,GridLength.Auto,new GridLength(1,GridUnitType.Star),GridLength.Auto,GridLength.Auto,GridLength.Auto})grid.RowDefinitions.Add(new(){Height=height});
+        foreach(var height in new[]{GridLength.Auto,GridLength.Auto,GridLength.Auto,GridLength.Auto,new GridLength(1,GridUnitType.Star),GridLength.Auto,GridLength.Auto,GridLength.Auto})grid.RowDefinitions.Add(new(){Height=height});
         void Row(UIElement child,int row){Grid.SetRow(child,row);grid.Children.Add(child);}
         Row(_target,0);
         _new=Ui.Button("新对话",c.NewSession);
         Row(Ui.Row(_new,Ui.Button("完整聊天",()=>openHouse("chat")),Ui.Button("角色设置",()=>openHouse("settings")),Ui.Button("记忆",()=>openHouse("memory"))),1);
-        _historyActions=new(){Header="聊天记录管理",Margin=new Thickness(0,0,0,8)};System.Windows.Automation.AutomationProperties.SetName(_historyActions,"聊天记录管理");Row(_historyActions,2);
-        _scroll=new(){Name="聊天记录滚动区",Content=_messages,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};var transcriptFrame=ChatTranscript.Frame(_scroll);transcriptFrame.Margin=new Thickness(0,0,0,8);Row(transcriptFrame,3);
-        Row(_status,4);
-        _input=Ui.Input(c.Draft,true);_input.MinHeight=70;_input.MaxHeight=110;_input.TextChanged+=(_,_)=>c.Draft=_input.Text;Row(Ui.Stack(_attachments,_input),5);
+        Row(_taskCard,2);
+        _historyActions=new(){Header="聊天记录管理",Margin=new Thickness(0,0,0,8)};System.Windows.Automation.AutomationProperties.SetName(_historyActions,"聊天记录管理");Row(_historyActions,3);
+        _scroll=new(){Name="聊天记录滚动区",Content=_messages,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};var transcriptFrame=ChatTranscript.Frame(_scroll);transcriptFrame.Margin=new Thickness(0,0,0,8);Row(transcriptFrame,4);
+        _scroll.SizeChanged+=(_,_)=>UpdateTaskCardSize();
+        Row(_status,5);
+        _input=Ui.Input(c.Draft,true);_input.MinHeight=70;_input.MaxHeight=110;_input.TextChanged+=(_,_)=>c.Draft=_input.Text;Row(Ui.Stack(_attachments,_input),6);
         _send=Ui.AsyncButton("发送",()=>ChatRequests.Send(c),true);_stop=Ui.Button("停止",c.StopReply);
         _pick=AttachmentControls.PickButton(c,this);_choose=ActivitySelectionUi.Button(c,this,Forme.Core.CompanionView.Desktop);
-        Row(Ui.Stack(Ui.Row(_send,_stop,_pick,Ui.Button("发送预览",()=>ChatRequests.Preview(c,this)),_choose),Ui.Text("附件仅本次上传 · 图片/PDF用量另计 · 不执行动作",10,Ui.Muted)),6);
+        Row(Ui.Stack(Ui.Row(_send,_stop,_pick,Ui.Button("发送预览",()=>ChatRequests.Preview(c,this)),_choose),Ui.Text("附件仅本次上传 · 图片/PDF用量另计 · 不执行动作",10,Ui.Muted)),7);
         Content=new Border{Background=Ui.Cream,Child=grid};
         _input.PreviewTextInput+=(_,_)=>_c.NotifyActivityInteraction();
         _input.PreviewKeyDown+=(_,e)=>{if(e.Key is Key.Back or Key.Delete)_c.NotifyActivityInteraction();};
@@ -74,6 +78,8 @@ internal sealed class FloatingChatWindow : Window
     private void Render()
     {
         Topmost=_c.Preferences.Topmost;
+        UpdateTaskCardSize();
+        _taskCard.Content=TaskCardUi.Create(_c,_openHouse,_taskCardExpanded,value=>{_taskCardExpanded=value;UpdateTaskCardSize();},true);
         _target.Text="“小屋里走走”控制3D小屋伙伴；“桌面／屏幕上走一圈”控制桌面伙伴。停止/取消/召回与自定义快捷规则本地执行\nAI理解与聊天 · "+_c.Preferences.Endpoint+"\n"+_c.Preferences.Model+(_c.Preferences.MemoryEnabled?" · 记忆开启":" · 记忆关闭");
         _messages.Children.Clear();_live=null;
         var history=_c.Session is null?[]:_c.Store.Messages(_c.Session.Id,0,20);
@@ -99,5 +105,12 @@ internal sealed class FloatingChatWindow : Window
     {
         if(_live is not null&&(_probeStreaming||_c.Busy)&&IsVisible&&WindowState!=WindowState.Minimized){_live.Text=_probeStreaming?"模拟生成中的回复 · 本机测试，不发送网络请求":_c.LiveReply.Length==0?"…":ChatDisplay.Message(_c.LiveReply);_scroll.ScrollToEnd();}
         _status.Text=ChatDisplay.Status(_c.ChatStatus);if(_c.Waiting&&_status.Text.Length>0)_status.Text+=" 可随时停止。";
+    }
+    private void UpdateTaskCardSize()
+    {
+        double available=SystemParameters.WorkArea.Height;
+        double needed=_c.TaskCard() is null?360:Math.Max(600,_scroll.IsLoaded?ActualHeight-_scroll.ActualHeight+100:600);
+        double minimum=Math.Min(needed,available);
+        if(Math.Abs(MinHeight-minimum)>.5)MinHeight=minimum;
     }
 }

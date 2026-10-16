@@ -4,13 +4,14 @@ public static class ActionPlanner
 {
     public static CompanionIntent FromCommand(CompanionCommand command) => command.Action switch
     {
-        "go" => new(CompanionIntentType.GoTo, command.Value, command.Motion, Source:"rule"),
-        "interact" => new(CompanionIntentType.Interact, command.Value, Source:"rule"),
+        "go" => new(CompanionIntentType.GoTo, command.Value, command.Motion, Source:"rule",View:command.View),
+        "interact" => new(CompanionIntentType.Interact, command.Value, Source:"rule",View:command.View),
         _ => new(CompanionIntentType.Shortcut, Source:"rule", Shortcut:command)
     };
     public static ActionPlan Build(IReadOnlyList<CompanionIntent> intents, SceneKind scene)
     {
         if(intents.Count is <1 or >3) throw new ActionFailureException(ActionResultCode.NotRecognized,"没有识别到完整动作，或动作超过三步。");
+        var initialScene=scene;
         var steps = new List<CompanionCommand>();
         foreach(var intent in intents)
         {
@@ -43,6 +44,7 @@ public static class ActionPlanner
                 CompanionIntentType.Shortcut when intent.Source == "rule" && intent.Shortcut is {} shortcut => shortcut,
                 _ => throw new ActionFailureException(ActionResultCode.NotRecognized,"此动作尚不支持。")
             };
+            if(intent.View is {} view)command=command with{View=view};
             if(command.Action is "go" or "interact")
             {
                 var target = TargetCatalog.Find(command.Value) ?? throw new ActionFailureException(ActionResultCode.TargetUnavailable,"没有找到这个目标。");
@@ -61,7 +63,7 @@ public static class ActionPlanner
                 if(steps.Count > 3) throw new ActionFailureException(ActionResultCode.NotRecognized,"包含重复动作后超过三步，请分开请求。");
             }
         }
-        return new(steps);
+        return ActionSurface.Bind(new(steps),initialScene);
     }
     public static ActionResult? Preflight(ActionPlan plan, Preferences preferences, Func<ActionPlan,ActionResult?>? availability = null)
     {

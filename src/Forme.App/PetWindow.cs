@@ -133,13 +133,14 @@ internal sealed class PetWindow : Window
     public void ExpandFromEdge(){_edge=false;Content=_normalContent;_c.SavePreferences(_c.Preferences with{DisplayMode="pet"});Update();Dispatcher.BeginInvoke(Clamp);}
     private void Update()
     {
-        if(_modelId!=_c.Preferences.PetModel){_modelId=_c.Preferences.PetModel;_pet.ReplaceModel(PetModels.For(_modelId));}
+        if(_modelId!=_c.Preferences.PetModel){_commandGeneration++;_stepActive=false;_stepLap=false;_wanderReady=false;_modelId=_c.Preferences.PetModel;_pet.ReplaceModel(PetModels.For(_modelId));}
         _pet.Economy(_c.Preferences.PerformanceMode=="economy");
         Topmost=_c.Preferences.Topmost;
         if(_c.Clock.Active){_bubble.Visibility=Visibility.Visible;UpdateTimer();}else if(_timerText.Text.StartsWith("专注")||_timerText.Text.StartsWith("休息")){_timerText.Text="";_bubble.Visibility=Visibility.Collapsed;}
         // A finite route uses the current native window bounds. Defer bubble resizing until it finishes.
         if(!_edge&&!_stepActive){bool expanded=_bubble.Visibility==Visibility.Visible;double modelScale=_modelId=="space-marine"?2:1;Width=(expanded?240:190)*modelScale*_c.Preferences.PetScale;Height=((expanded?435:260)+175*(modelScale-1))*_c.Preferences.PetScale;_normalContent.RowDefinitions[0].Height=new GridLength(expanded?260:85);}
-        var mode=_c.Preferences.PetIdleMode;if(_lastIdle!=mode){_lastIdle=mode;_wanderReady=false;_pet.StopAction();}_idleChoice.SelectedIndex=Array.IndexOf(IdleIds,mode);
+        var mode=_c.Preferences.PetIdleMode;if(_lastIdle!=mode){_lastIdle=mode;_allowChatWander=mode is "walk" or "run";_wanderReady=false;_pet.StopAction();}_idleChoice.SelectedIndex=Array.IndexOf(IdleIds,mode);
+        _idleChoice.ToolTip="已保存的桌面待机模式："+IdleModes[_idleChoice.SelectedIndex]+"；"+WanderStatus;
         bool roaming=CanWander||CanStep;
         if(!roaming){_wanderReady=false;_wander.Pause();}
         _pet.State=_c.Clock.Active?(_c.Clock.Running&&_c.Clock.Activity!.Kind=="focus"?"focus":"rest"):_c.Busy?"thinking":mode=="sleep"?"sleep":_c.Preferences.Quiet?"quiet":"idle";
@@ -147,9 +148,14 @@ internal sealed class PetWindow : Window
         _pet.DesktopMotion(WanderFrame,roaming,()=>_wander.Moving);
     }
     private bool CanWander=>IsVisible&&(!_chatOpen||_allowChatWander)&&!_edge&&!_dragging&&!_pet.IsMouseCaptured&&!_menu.IsOpen&&_bubble.Visibility!=Visibility.Visible&&!_c.Clock.Active&&!_c.Busy&&!_c.Preferences.Quiet&&!_c.Preferences.ReducedMotion&&!_c.AnimationSuspended&&_c.Preferences.PetIdleMode is "walk" or "run";
+    internal string WanderStatus=>!IsVisible?"伙伴未显示":_edge?"伙伴已收起":_c.AnimationSuspended?"系统暂停中":
+        _c.Preferences.ReducedMotion?"减少动效已开启，随机走动暂停":_c.Preferences.Quiet?"安静模式已开启，随机走动暂停":
+        _c.Clock.Active?"计时活动期间暂停走动":_c.Busy?"正在处理请求，待完成后继续":
+        _dragging||_pet.IsMouseCaptured?"拖动或点击期间暂停":_menu.IsOpen||_bubble.Visibility==Visibility.Visible?"控制面板打开，关闭后继续":
+        _chatOpen&&!_allowChatWander?"聊天期间暂停":_c.Preferences.PetIdleMode is "walk" or "run"?"随机走动已启用":"当前为原地待机或睡觉";
     internal void SetIdleMode(string mode)
     {
-        _c.NotifyActivityInteraction();_allowChatWander=mode is "walk" or "run";_wanderReady=false;_pet.StopAction();
+        StopCommands();_allowChatWander=mode is "walk" or "run";_wanderReady=false;
         // The idle selector lives in the bubble panel. Close it immediately so the
         // selected wander mode is not kept paused by the panel's visibility gate.
         _bubbleTimeout.Stop();_bubble.Visibility=Visibility.Collapsed;_c.SavePreferences(_c.Preferences with{PetIdleMode=mode});Update();Dispatcher.BeginInvoke(()=>{Update();Clamp();});

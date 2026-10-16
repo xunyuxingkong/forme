@@ -45,6 +45,9 @@ public sealed record Preferences
     public bool AllowLayoutPreview { get; set; }
     public bool ShareGameState { get; set; }
     public string GameStateEndpoint { get; set; } = "";
+    public bool ShareChatState { get; set; }
+    public bool AllowGoalPlans { get; set; }
+    public string ChatStateEndpoint { get; set; } = "";
     public bool SharePlayState { get; set; }
     public bool RememberPlayExperiences { get; set; }
     public bool ShareExperiences { get; set; }
@@ -80,6 +83,8 @@ public sealed record Preferences
             throw new InvalidDataException("房间选项无效。");
         if(GameStateEndpoint is null || GameStateEndpoint.Length>500||!Enum.IsDefined(AutonomyView)||AutonomyDailyLimit is <1 or >100)throw new InvalidDataException("游戏状态分享地址或自主设置无效。");
         if(GameStateEndpoint.Length>0)AiClient.ValidateEndpoint(GameStateEndpoint);
+        if(ChatStateEndpoint is null||ChatStateEndpoint.Length>500)throw new InvalidDataException("聊天状态分享地址无效。");
+        if(ChatStateEndpoint.Length>0)AiClient.ValidateEndpoint(ChatStateEndpoint);
         AiClient.ValidateEndpoint(Endpoint);
         if (string.IsNullOrWhiteSpace(Model) || Model.Length > 100)
             throw new InvalidDataException("模型名称无效。");

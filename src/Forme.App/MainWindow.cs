@@ -42,7 +42,9 @@ internal sealed partial class MainWindow : Window
     {
         _showDesktopPet=showDesktopPet;_hideDesktopPet=hideDesktopPet;
         _c=c;_settingsChanged=settingsChanged;Title="Forme · 陪伴小屋";Width=Math.Min(1280,SystemParameters.WorkArea.Width-24);Height=Math.Min(850,SystemParameters.WorkArea.Height-24);MinWidth=Math.Min(650,SystemParameters.WorkArea.Width-24);MinHeight=Math.Min(480,SystemParameters.WorkArea.Height-24);WindowStartupLocation=WindowStartupLocation.CenterScreen;Background=Ui.Cream;
-        var shell=new Grid();shell.RowDefinitions.Add(new(){Height=GridLength.Auto});shell.RowDefinitions.Add(new());shell.RowDefinitions.Add(new(){Height=GridLength.Auto});
+        var shell=new Grid();shell.RowDefinitions.Add(new(){Height=GridLength.Auto});shell.RowDefinitions.Add(new(){Height=GridLength.Auto});shell.RowDefinitions.Add(new());shell.RowDefinitions.Add(new(){Height=GridLength.Auto});
+        Grid.SetRow(_taskCard,1);shell.Children.Add(_taskCard);
+        _taskCard.SizeChanged+=(_,_)=>ApplyLayout();
         var header=new Grid{Margin=new Thickness(0,0,0,20)};header.ColumnDefinitions.Add(new());header.ColumnDefinitions.Add(new(){Width=GridLength.Auto});
         header.Children.Add(Ui.Stack(Ui.Text("FORME   /   陪伴小屋",11,Ui.Muted,true),_petName));
         var quiet=Ui.Button("安静模式",()=>c.SavePreferences(c.Preferences with{Quiet=!c.Preferences.Quiet}));quiet.ToolTip="关闭声音、主动招呼和自动动作；点击仍会回应";
@@ -56,17 +58,17 @@ internal sealed partial class MainWindow : Window
         });
         var right=Ui.Stack(Ui.Row(_roomVisibility,_sidebarToggle,_petControls,quiet,Ui.Button("设置",()=>Navigate("settings")),_sceneToggle),_status);Grid.SetColumn(right,1);header.Children.Add(right);shell.Children.Add(header);
         _body.ColumnDefinitions.Add(new(){Width=new GridLength(0.56,GridUnitType.Star)});_body.ColumnDefinitions.Add(new(){Width=new GridLength(24)});_body.ColumnDefinitions.Add(new(){Width=new GridLength(0.44,GridUnitType.Star)});
-        _room=new(c,Navigate){MaxHeight=560,HorizontalAlignment=HorizontalAlignment.Stretch};_left.Children.Add(_room);_left.Children.Add(Ui.Text("你的节奏，就是这里的节奏。",13,Ui.Muted));_left.Children.Add(_toast);
-        _body.Children.Add(_left);Grid.SetColumn(_panel,2);_body.Children.Add(_panel);Grid.SetRow(_body,1);shell.Children.Add(_body);
+        _room=new(c,Navigate){MaxHeight=560,HorizontalAlignment=HorizontalAlignment.Stretch};_room.WorldChanged+=c.ReconcileGoalPlay;_room.BoatChanged+=c.ReconcileGoalPlay;_room.WorldChanged+=c.ReconcileCooperativeProposal;_room.BoatChanged+=c.ReconcileCooperativeProposal;_left.Children.Add(_room);_left.Children.Add(Ui.Text("你的节奏，就是这里的节奏。",13,Ui.Muted));_left.Children.Add(_toast);
+        _body.Children.Add(_left);Grid.SetColumn(_panel,2);_body.Children.Add(_panel);Grid.SetRow(_body,2);shell.Children.Add(_body);
         var footer=new WrapPanel{Margin=new Thickness(0,16,0,0)};
-        foreach(var (id,label) in new[]{("home","⌂  小屋"),("boat","玩纸船"),("living","玩耍与生活"),("play","成长"),("today","今日"),("notes","记事"),("chat","聊一会儿"),("focus","专注"),("relax","放松"),("mood","心情"),("room","布置"),("companion","伙伴生活")})
+        foreach(var (id,label) in new[]{("home","⌂  小屋"),("boat","玩纸船"),("living","玩耍与生活"),("play","成长"),("today","今日"),("notes","记事"),("project","项目协作"),("chat","聊一会儿"),("focus","专注"),("relax","放松"),("mood","心情"),("room","布置"),("companion","伙伴生活")})
         {var b=Ui.Button(label,()=>Navigate(id));_navigation[id]=b;footer.Children.Add(b);}
-        Grid.SetRow(footer,2);shell.Children.Add(footer);_root.Background=Ui.Brush(c.Preferences.AppBackground);_root.Padding=new Thickness(26);_root.Child=shell;Content=_root;ApplyColors();
-        SizeChanged+=(_,_)=>ApplyLayout();
+        Grid.SetRow(footer,3);shell.Children.Add(footer);_root.Background=Ui.Brush(c.Preferences.AppBackground);_root.Padding=new Thickness(26);_root.Child=shell;Content=_root;ApplyColors();
+        SizeChanged+=(_,_)=>{if(_taskCardCompact!=(ActualWidth>0&&ActualWidth<940))UpdateTaskCard();ApplyLayout();};
         StateChanged+=(_,_)=>UpdateMotion();
-        c.Changed+=OnChanged;c.Tick+=OnTick;c.Notice+=Toast;StartReminderScheduler();
+        c.Changed+=OnChanged;c.Tick+=OnTick;c.Notice+=Toast;
         _toastTimer.Tick+=(_,_)=>{_toastTimer.Stop();_toast.Text="";};
-        Closed+=(_,_)=>{c.Changed-=OnChanged;c.Tick-=OnTick;c.Notice-=Toast;_toastTimer.Stop();StopReminderScheduler();StopRelax();DetachBoatPage();DetachWorldPage();DetachCompanionLifePage();_room.Release();};
+        Closed+=(_,_)=>{c.Changed-=OnChanged;c.Tick-=OnTick;c.Notice-=Toast;_toastTimer.Stop();StopRelax();DetachBoatPage();DetachWorldPage();DetachCompanionLifePage();DetachProjectPage();_room.Release();};
         Navigate(c.Preferences.Onboarded?"home":"welcome");
     }
     public void Toast(string text){_toast.Text=text;_toastTimer.Stop();_toastTimer.Start();}
@@ -81,7 +83,8 @@ internal sealed partial class MainWindow : Window
         =>RenderPage(page,false);
     private void RenderPage(string page,bool preserveView)
     {
-        DetachWorldPage();DetachCompanionLifePage();if(_page=="furniture"&&page!="furniture")_room.CloseFurniture();if(_page=="hide"&&page!="hide")_room.EndHide();
+        _cooperativeHistoryRefresh=null;
+        DetachWorldPage();DetachCompanionLifePage();DetachProjectPage();if(_page=="furniture"&&page!="furniture")_room.CloseFurniture();if(_page=="hide"&&page!="hide")_room.EndHide();
         DetachBoatPage();if(_page=="boat"&&page!="boat")_room.CloseBoats();
         if(_page=="relax" && page!="relax")StopRelax();
         if(_page=="room" && page!="room")_room.Preview=null;
@@ -90,13 +93,14 @@ internal sealed partial class MainWindow : Window
         UpdateHeader();foreach(var (id,b) in _navigation)b.Background=id==page?Ui.Brush("#DDE8D7"):Ui.Brush("#EFF2EB");
         var content=page switch
         {
-            "furniture"=>FurniturePage(),"living"=>LivingPage(),"hide"=>HidePage(),"welcome"=>Welcome(),"boat"=>BoatPage(),"chat"=>Chat(),"memory"=>MemorySettings(),"focus"=>FocusPage(),"relax"=>Relax(),"mood"=>Mood(),"plant"=>Plant(),"room"=>Room(),"play"=>Play(),"settings"=>Settings(),"today"=>TodayPage(),"notes"=>NotesPage(),"companion"=>CompanionLifePage(),_=>Home()
+            "furniture"=>FurniturePage(),"living"=>LivingPage(),"hide"=>HidePage(),"welcome"=>Welcome(),"boat"=>BoatPage(),"chat"=>Chat(),"memory"=>MemorySettings(),"focus"=>FocusPage(),"relax"=>Relax(),"mood"=>Mood(),"plant"=>Plant(),"room"=>Room(),"play"=>Play(),"settings"=>Settings(),"today"=>TodayPage(),"notes"=>NotesPage(),"companion"=>CompanionLifePage(),"project"=>ProjectPage(),_=>Home()
         };
         _panel.Content=page=="chat"?content:new ScrollViewer{Content=content,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled,Padding=new Thickness(0,0,8,0)};
+        UpdateTaskCard();
     }
     private void ApplyLayout()
     {
-        if(ActualHeight>0)_room.Height=Math.Clamp(ActualHeight-320,120,560);
+        if(ActualHeight>0)_room.Height=Math.Clamp(ActualHeight-320-_taskCard.ActualHeight,120,560);
         bool narrow=ActualWidth>0&&ActualWidth<940;bool showScene=(!narrow||_compactScene)&&_c.Preferences.ShowHome3D;
         _sidebarToggle.Content=_sidebarCollapsed?"展开侧栏":"收起侧栏";System.Windows.Automation.AutomationProperties.SetName(_sidebarToggle,(string)_sidebarToggle.Content);
         if(_sidebarCollapsed&&!_c.Preferences.ShowHome3D)_sidebarCollapsed=false;
@@ -106,7 +110,7 @@ internal sealed partial class MainWindow : Window
             _sceneToggle.Visibility=Visibility.Collapsed;_left.Visibility=_panel.Visibility=Visibility.Visible;
             _body.ColumnDefinitions[0].Width=new GridLength(1,GridUnitType.Star);_body.ColumnDefinitions[1].Width=_body.ColumnDefinitions[2].Width=new GridLength(0);
             _body.RowDefinitions.Clear();_body.RowDefinitions.Add(new(){Height=GridLength.Auto});_body.RowDefinitions.Add(new());
-            _room.Height=Math.Clamp((ActualHeight-260)*.6,100,320);Grid.SetColumn(_panel,0);Grid.SetRow(_panel,1);return;
+            _room.Height=Math.Clamp((ActualHeight-260-_taskCard.ActualHeight)*.6,100,320);Grid.SetColumn(_panel,0);Grid.SetRow(_panel,1);return;
         }
         _body.RowDefinitions.Clear();Grid.SetRow(_panel,0);Grid.SetColumn(_panel,2);
         _sceneToggle.Visibility=narrow?Visibility.Visible:Visibility.Collapsed;_sceneToggle.Content=_compactScene?"返回活动":"查看3D小屋";
@@ -119,6 +123,8 @@ internal sealed partial class MainWindow : Window
         UpdateHeader();ApplyColors();_room.Refresh();
         UpdateMotion();
         if(_page is "home" or "chat" or "focus" or "plant" or "play" or "living" or "today" or "notes")RenderPage(_page,true);
+        else UpdateTaskCard();
+        _cooperativeHistoryRefresh?.Invoke();
         _settingsChanged();
     }
     private void ApplyColors()
@@ -379,6 +385,7 @@ internal sealed partial class MainWindow : Window
         if(!_c.Secrets.Exists)optionActions.Children.Add(Ui.Button("连接 AI",()=>Navigate("settings")));
         else optionActions.Children.Add(Ui.Button("给我一点鼓励（本地）",()=>Toast("今天不用做得完美。先照顾自己，再开始一件小事。")));
         var optionItems=Ui.Stack(ChatTranscript.Actions(RecordText,draft=>{_c.MemoryDraft=draft;Navigate("memory");Toast("已放入记忆编辑框，确认内容和标题后再保存。");},RecordText().Length>0),optionActions,Ui.Text(_c.Preferences.MemoryEnabled?$"记忆分享已开启 · 当前服务可用 {memories} 条 · 只发送预算内的已确认内容":"记忆分享已关闭 · 历史仍保存在本机",11,Ui.Muted));
+        optionItems.Children.Add(GoalHistory());
         if(_c.Session is {} current)
         {
             var savedNote=_c.Store.Note(current.Id);

@@ -2,7 +2,8 @@ using System.Text.Json;
 
 namespace Forme.Core;
 
-public sealed record CompanionCommand(string Action,string? Value=null,double? X=null,double? Z=null,int? Rotation=null,string? Motion=null);
+public sealed record CompanionCommand(string Action,string? Value=null,double? X=null,double? Z=null,int? Rotation=null,string? Motion=null,
+    [property:System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] CompanionView? View=null);
 public sealed record CompanionReply(string Text,IReadOnlyList<CompanionCommand> Commands,int Rejected);
 
 // This is a narrow presentation protocol, never code, files, URLs or OS commands.
@@ -12,14 +13,16 @@ public static class CompanionCommands
     public const string ReportMarker="[Forme 本地动作]";
     public static string VisibleText(string text)
     {
-        int start;
-        while((start=text.IndexOf(Marker,StringComparison.Ordinal))>=0)
+        foreach(string marker in new[]{Marker,ProductivityIntentProtocol.Marker,GoalProtocol.Marker})
         {
-            int end=text.IndexOf("```",start+Marker.Length,StringComparison.Ordinal);
-            text=end<0?text[..start]:text.Remove(start,end+3-start);
+            int start;
+            while((start=text.IndexOf(marker,StringComparison.Ordinal))>=0)
+            {
+                int end=text.IndexOf("```",start+marker.Length,StringComparison.Ordinal);
+                text=end<0?text[..start]:text.Remove(start,end+3-start);
+            }
+            for(int length=marker.Length-1;length>=3;length--)if(text.EndsWith(marker[..length],StringComparison.Ordinal)){text=text[..^length];break;}
         }
-        // Keep a partial opening marker out of the streamed transcript.
-        for(int length=Marker.Length-1;length>=3;length--)if(text.EndsWith(Marker[..length],StringComparison.Ordinal)){text=text[..^length];break;}
         return text.TrimEnd();
     }
     public static string ContextText(string text)
@@ -48,6 +51,11 @@ public static class CompanionCommands
         return new(VisibleText(text).Trim(),commands,rejected);
     }
     public static bool Allowed(CompanionCommand command,Preferences preferences)=>
+        (command.View is null||Enum.IsDefined(command.View.Value))&&
+        (command.View is null||ActionSurface.IsRoomAction(command)||ActionSurface.IsBodyAction(command)||command.Action=="idle")&&
+        (command.View!=CompanionView.Desktop||command.Action is "stroll" or "dance" or "pat" or "rub" or "recall" or "idle")&&
+        (command.View!=CompanionView.Room||command.Action!="idle")&&
+        (command.View!=CompanionView.Room||command.Action!="stroll"||command.Value is not ("lap1" or "lap2"))&&
         (command.Action is "furniture" or "boat-leaf"||command.Rotation is null)&&(command.Action=="go"?command.Motion is null or "walk" or "run":command.Motion is null)&&command.Action switch
     {
         "dance"=>preferences.AllowPetControl&&command.Value is "sway" or "hop" or "spin"&&command.X is null&&command.Z is null,

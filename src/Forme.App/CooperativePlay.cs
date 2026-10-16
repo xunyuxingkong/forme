@@ -87,31 +87,42 @@ internal sealed partial class Controller
     {
         await TakeForegroundAsync();if(Busy)throw new OperationFailureException("请先结束当前操作。");
         RequirePlaySharing();if(hint.Length>300)throw new InvalidDataException("提示最多300字。");
+        if(_boatProposalGoalId is not null)throw new OperationFailureException("请先确认或停止当前纸船建议。");
         var world=ActivityWorld as ICooperativePlayWorld??throw new OperationFailureException("当前场景不支持合作藏物。");
+        if(GoalPlayWorld is null)throw new OperationFailureException("当前场景不支持合作结果核对。");
+        var issued=Preferences with{};var goal=BeginCooperative("hide");
         using var request=new CancellationTokenSource(TimeSpan.FromSeconds(120));
-        _request=request;_selectionView=CompanionView.Room;SelectedActivityId=Guid.NewGuid().ToString("N");SelectedActivityState=CompanionActivityState.Planning;
+        _request=request;_cooperativeRequest=true;_selectionView=CompanionView.Room;SelectedActivityId=goal.Id;SelectedActivityState=CompanionActivityState.Planning;
         AiHideRunning=true;_hidePublicHint=hint.Trim();_hideHintRevision=0;_hideHintUsed=false;int epoch=++_epoch;SyncTimer();Changed?.Invoke();
-        bool found=false;
+        bool found=false,declined=false;GoalPlayObservation? owned=null;
         try
         {
+            request.Token.ThrowIfCancellationRequested();
             _applyingSelection=true;try{world.BeginHide(hiddenId);}finally{_applyingSelection=false;}
             var initial=world.ObserveHide(_hidePublicHint);
+            owned=GoalPlayWorld.ObserveGoalPlay("hide");
             int requests=0;
             while(requests<2)
             {
                 request.Token.ThrowIfCancellationRequested();RequirePlaySharing();
+                if(Preferences.Endpoint!=issued.Endpoint||Preferences.Model!=issued.Model)throw new OperationCanceledException(request.Token);
                 int hintVersion=_hideHintRevision;
                 var observation=world.ObserveHide(_hidePublicHint);
                 if(observation.Subject!=initial.Subject||observation.Revision!=initial.Revision)throw new OperationFailureException("藏物场景已变化，本局停止。");
                 using var planning=CancellationTokenSource.CreateLinkedTokenSource(request.Token);planning.CancelAfter(TimeSpan.FromSeconds(25));
-                CompanionLifeStatus=requests==0?"AI正在安排搜索顺序…":"AI正在根据提示调整路线…";Tick?.Invoke();
-                requests++;
-                var reply=await Ai.SendAsync(Preferences with{},Secrets.Read()!,HideStrategy.Build(Preferences,observation),_=>{},planning.Token);
+                CooperativeStatus(requests==0?"AI正在安排搜索顺序…":"AI根据已检查项与当前线索再规划一次…");
+                var turns=HideStrategy.Build(issued,observation);requests=Store.ReserveCooperativeRequest(goal.Id,issued.Endpoint,issued.Model,DateTimeOffset.Now);Changed?.Invoke();
+                var reply=await Ai.SendAsync(issued,Secrets.Read()!,turns,_=>{},planning.Token);
                 request.Token.ThrowIfCancellationRequested();if(epoch!=_epoch)throw new OperationCanceledException(request.Token);
                 if(reply.LengthLimited)throw new InvalidDataException("搜索策略被截断，没有执行。");
+                var current=world.ObserveHide(_hidePublicHint);if(current.Subject!=initial.Subject||current.Revision!=initial.Revision)throw new OperationFailureException("本局已变化，旧搜索方案作废。");
                 var strategy=HideStrategy.Parse(reply.Content,observation);
                 if(hintVersion!=_hideHintRevision)continue;
+                if(Store.Goal(goal.Id)!.Steps[0].State==GoalStepState.Running)
+                {Store.FinishGoalStep(goal.Id,0,GoalStepState.Completed,"plan-ready",DateTimeOffset.Now);Store.StartGoalStep(goal.Id,1,DateTimeOffset.Now);}
+                if(strategy.Count==0){declined=true;break;}
                 SelectedActivityState=CompanionActivityState.Executing;
+                CooperativeStatus("伙伴按AI方案实际检查，等待本机结果。");
                 foreach(string id in strategy)
                 {
                     request.Token.ThrowIfCancellationRequested();RequirePlaySharing();
@@ -119,68 +130,96 @@ internal sealed partial class Controller
                     Task<HideCheckResult> checking;
                     _applyingSelection=true;try{checking=world.CheckHide(id,request.Token);}finally{_applyingSelection=false;}
                     var result=await checking;
-                    if(result==HideCheckResult.Found){found=true;break;}
+                    if(result==HideCheckResult.Found)
+                    {
+                        var actual=GoalPlayWorld.ObserveGoalPlay("hide");
+                        if(!GoalPlay.SameRound(owned,actual)||actual.Phase!=GoalPlayPhase.Completed||actual.Outcome!="found")throw new OperationFailureException("没有取得本局找到小球的真实结果。");
+                        found=true;break;
+                    }
                     if(result==HideCheckResult.Cancelled)throw new OperationCanceledException(request.Token);
                     CompanionLifeStatus=result==HideCheckResult.Unreachable?"该位置不可达，继续检查其它候选。":"这里没有，继续按AI路线寻找。";Tick?.Invoke();
                 }
-                if(found||hintVersion==_hideHintRevision)break;
+                if(found)break;
+                var remaining=world.ObserveHide(_hidePublicHint);
+                if(!remaining.Candidates.Any(x=>x.Reachable&&!remaining.Checked.Contains(x.Id)))break;
             }
+            request.Token.ThrowIfCancellationRequested();
+            var active=Store.Goal(goal.Id)!.Steps.First(x=>x.State==GoalStepState.Running);
+            Store.FinishGoalStep(goal.Id,active.Index,found?GoalStepState.Completed:GoalStepState.Failed,found?"play:hide:found":declined?"no-action":"not-found",DateTimeOffset.Now);
             SelectedActivityState=found?CompanionActivityState.Completed:CompanionActivityState.NoAction;
-            CompanionLifeStatus=found?"伙伴找到小球了，AI合作藏物完成。":"本次策略检查完毕，尚未找到；可以结束并换提示重玩。";
+            CooperativeStatus(found?"伙伴找到小球了，AI合作藏物完成。":declined?"AI选择不继续检查，本局没有找到。":"本局规划额度已用完或没有可达候选，尚未找到。可结束后换提示重玩。");
             RecordExperience("hide","hide",found?"found":"not-found",SceneKind.Indoor);
         }
         catch(Exception ex) when(OperationErrors.Expected(ex))
         {
+            FailCooperative(goal.Id,ex);
             SelectedActivityState=ex is OperationCanceledException?CompanionActivityState.Cancelled:CompanionActivityState.Failed;
             CompanionLifeStatus=ex is OperationCanceledException?"合作藏物已停止。":OperationErrors.Message(ex);
         }
         finally
         {
-            if(epoch==_epoch&&ReferenceEquals(_request,request)){request.Cancel();_applyingSelection=true;try{ActivityWorld?.Stop(CompanionView.Room);}finally{_applyingSelection=false;}}
-            AiHideRunning=false;_selectionView=null;_request=null;SyncTimer();Changed?.Invoke();
+            if(!found&&owned is not null){request.Cancel();_applyingSelection=true;try{GoalPlayWorld?.StopGoalPlay(owned);}finally{_applyingSelection=false;}}
+            AiHideRunning=false;_cooperativeRequest=false;_selectionView=null;_request=null;SyncTimer();Changed?.Invoke();
         }
     }
     internal async Task ProposeBoat(string dock)
     {
         await TakeForegroundAsync();if(Busy)throw new OperationFailureException("请先结束当前操作。");RequirePlaySharing();
         var world=ActivityWorld as ICooperativePlayWorld??throw new OperationFailureException("当前场景不可用。");
+        if(GoalPlayWorld is null)throw new OperationFailureException("当前场景不支持本局结果核对。");
+        if(_goalPlay is not null)throw new OperationFailureException("请先完成或停止正在等待结果的玩法目标。");
         var before=world.CurrentBoat();var observed=ActivityWorld!.Observe(CompanionView.Room);
+        var game=GoalPlayWorld.ObserveGoalPlay("boat");
+        if(game.Phase is not (GoalPlayPhase.Ready or GoalPlayPhase.Completed))throw new OperationFailureException("请在显示中的纸船准备页面请求建议。");
+        var issued=Preferences with{};var turns=BoatPartner.Build(issued,before,dock);if(turns.Sum(AiClient.Estimate)>issued.ContextBudget)throw new InvalidDataException("共同纸船方案超过文字预算。");
+        CancelBoatProposal();var goal=BeginCooperative("boat");
         using var request=new CancellationTokenSource(TimeSpan.FromSeconds(25));_request=request;_selectionView=CompanionView.Room;
-        int epoch=++_epoch;SelectedActivityId=Guid.NewGuid().ToString("N");SelectedActivityState=CompanionActivityState.Planning;SyncTimer();
-        CompanionLifeStatus="AI在比较第二片叶子的导流方案…";Tick?.Invoke();
+        _cooperativeRequest=true;int epoch=++_epoch;SelectedActivityId=goal.Id;SelectedActivityState=CompanionActivityState.Planning;SyncTimer();
+        CooperativeStatus("AI在比较第二片叶子的导流方案…");
         try
         {
             var options=BoatPartner.Options(before);
             var fake=observed with{Options=options.Select(x=>new ActivityOption(x.Id,PaperBoat.DockName(x.Dock),"模拟结果",[])).ToArray()};
-            var turns=BoatPartner.Build(Preferences,before,dock);if(turns.Sum(AiClient.Estimate)>Preferences.ContextBudget)throw new InvalidDataException("共同纸船方案超过文字预算。");
-            var reply=await Ai.SendAsync(Preferences with{},Secrets.Read()!,turns,_=>{},request.Token);
+            Store.ReserveCooperativeRequest(goal.Id,issued.Endpoint,issued.Model,DateTimeOffset.Now);Changed?.Invoke();
+            var reply=await Ai.SendAsync(issued,Secrets.Read()!,turns,_=>{},request.Token);
             request.Token.ThrowIfCancellationRequested();if(epoch!=_epoch)throw new OperationCanceledException(request.Token);
+            RequirePlaySharing();if(Preferences.Endpoint!=issued.Endpoint||Preferences.Model!=issued.Model)throw new OperationCanceledException(request.Token);
             if(reply.LengthLimited)throw new InvalidDataException("共同纸船方案被截断。");
             var choice=ActivitySelection.Parse(reply.Content,fake);
-            if(choice.Id is null){SelectedActivityState=CompanionActivityState.NoAction;CompanionLifeStatus=choice.Reason;}
+            if(choice.Id is null){Store.FinishGoalStep(goal.Id,0,GoalStepState.Failed,"no-proposal",DateTimeOffset.Now);SelectedActivityState=CompanionActivityState.NoAction;CooperativeStatus("AI没有提出可执行建议，未修改路线或放船。");}
             else
             {
-                if(!BoatPartner.Same(before,world.CurrentBoat())||ActivityWorld.Observe(CompanionView.Room).SubjectId!=observed.SubjectId)throw new OperationFailureException("纸船布置已改变，建议作废。");
+                if(!BoatPartner.Same(before,world.CurrentBoat())||ActivityWorld.Observe(CompanionView.Room).SubjectId!=observed.SubjectId||GoalPlayWorld.ObserveGoalPlay("boat")!=game)throw new OperationFailureException("纸船布置或本局已改变，建议作废。");
+                var selected=options.Single(x=>x.Id==choice.Id);
+                Store.FinishGoalStep(goal.Id,0,GoalStepState.Completed,"proposed:"+selected.Dock,DateTimeOffset.Now);Store.AwaitGoalConfirmation(goal.Id,DateTimeOffset.Now);
                 CooperativeBoatBefore=before;CooperativeBoatProposal=options.Single(x=>x.Id==choice.Id).Layout;CooperativeBoatSubject=observed.SubjectId;
+                _boatProposalGoalId=goal.Id;_boatProposalPreferences=issued;_boatProposalObservation=game;
                 SelectedActivityState=CompanionActivityState.WaitingForUser;_boatProposalAt=DateTimeOffset.UtcNow;
-                CompanionLifeStatus="AI建议已生成，预估抵达"+PaperBoat.DockName(options.Single(x=>x.Id==choice.Id).Dock)+"。"+choice.Reason+" 点击确认后才采用并放船。";
+                CooperativeStatus("AI建议已生成，预估抵达"+PaperBoat.DockName(options.Single(x=>x.Id==choice.Id).Dock)+"。"+choice.Reason+" 点击确认后才采用并放船。");
             }
         }
-        catch(Exception ex) when(OperationErrors.Expected(ex)){CooperativeBoatProposal=null;SelectedActivityState=CompanionActivityState.Failed;CompanionLifeStatus=OperationErrors.Message(ex);}
-        finally{_selectionView=null;_request=null;SyncTimer();Changed?.Invoke();}
+        catch(Exception ex) when(OperationErrors.Expected(ex)){ClearBoatProposal();FailCooperative(goal.Id,ex);SelectedActivityState=ex is OperationCanceledException?CompanionActivityState.Cancelled:CompanionActivityState.Failed;CooperativeStatus(OperationErrors.Message(ex));}
+        finally{_cooperativeRequest=false;_selectionView=null;_request=null;SyncTimer();Changed?.Invoke();}
     }
     private DateTimeOffset _boatProposalAt;
     internal void ConfirmBoatProposal()
     {
+        if(Busy)throw new OperationFailureException("请先等待当前请求结束。");
         RequirePlaySharing();
-        if(CooperativeBoatBefore is null||CooperativeBoatProposal is null||DateTimeOffset.UtcNow-_boatProposalAt>TimeSpan.FromMinutes(10)||
-            ActivityWorld?.Observe(CompanionView.Room).SubjectId!=CooperativeBoatSubject)throw new OperationFailureException("共同纸船建议已失效。");
-        (ActivityWorld as ICooperativePlayWorld)!.ConfirmBoat(CooperativeBoatBefore,CooperativeBoatProposal);
-        CooperativeBoatProposal=null;SelectedActivityState=CompanionActivityState.Executing;CompanionLifeStatus="共同纸船已出发，等待真实到达结果。";Changed?.Invoke();
-    }
-    internal void CompleteCooperativeBoat(string dock)
-    {
-        if(SelectedActivityState!=CompanionActivityState.Executing)return;
-        SelectedActivityState=CompanionActivityState.Completed;CompanionLifeStatus="共同纸船实际抵达"+PaperBoat.DockName(dock)+"。";RecordExperience("cooperative-boat","boat",dock,SceneKind.Indoor);Changed?.Invoke();
+        ReconcileCooperativeProposal();
+        string id=_boatProposalGoalId??throw new OperationFailureException("共同纸船建议已失效。");
+        var before=CooperativeBoatBefore!;var proposed=CooperativeBoatProposal!;
+        if(Store.Goal(id)?.State!=GoalRunState.WaitingForUser)throw new OperationFailureException("建议状态已变化，没有重复放船。");
+        Store.StartGoalStep(id,1,DateTimeOffset.Now);ClearBoatProposal();
+        using var launch=new CancellationTokenSource();_request=launch;_cooperativeRequest=true;
+        try
+        {
+            (ActivityWorld as ICooperativePlayWorld)!.ConfirmBoat(before,proposed);
+            SelectedActivityId=id;SelectedActivityState=CompanionActivityState.Executing;
+            AwaitGoalPlay(id,1,new("boat","start",View:CompanionView.Room),launch.Token);
+            if(Store.Goal(id)?.State==GoalRunState.WaitingForPlay)CooperativeStatus("共同纸船已出发，等待真实到达结果。");
+        }
+        catch(Exception ex) when(OperationErrors.Expected(ex)){FailCooperative(id,ex);CooperativeStatus("放船结果未能确认，请核对本局；不会自动重放。");throw;}
+        finally{_request=null;_cooperativeRequest=false;SyncTimer();Changed?.Invoke();}
     }
 }

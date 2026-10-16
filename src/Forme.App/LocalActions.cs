@@ -85,17 +85,34 @@ internal sealed partial class Controller
         return true;
     }
     private static string ResultText(IReadOnlyList<ActionResult> results)=>string.Join("\n",results.Select(x=>x.UserMessage));
-    private async Task<IReadOnlyList<ActionResult>> ExecuteIntents(IReadOnlyList<CompanionIntent> intents,CancellationToken token)
+    private async Task<IReadOnlyList<ActionResult>> ExecuteIntents(IReadOnlyList<CompanionIntent> intents,CancellationToken token,ChatCapabilitySnapshot? issued=null)
     {
         try
         {
-            var scene=CurrentScene?.Invoke()??SceneKind.Desktop;
+            var scene=issued?.InitialScene??CurrentScene?.Invoke()??SceneKind.Desktop;
             if(intents.Count>1&&((intents[0] is {Type:CompanionIntentType.ChangeScene,Target:"indoor"}&&scene==SceneKind.Indoor)||(intents[0] is {Type:CompanionIntentType.ChangeScene,Target:"outdoor"}&&scene==SceneKind.Outdoor)))intents=intents.Skip(1).ToArray();
             var plan=ActionPlanner.Build(intents,scene);
-            return await ActionExecutor.Execute(plan,()=>Preferences,ActionPreflight,
-                command=>ActionHandler?.Invoke(command)??(CommandHandler is {} handler
+            if(issued is not null&&ChatCapabilitySnapshot.Validate(issued,CaptureChatCapabilities(),plan) is {} stale)return [stale];
+            var usedViews=new HashSet<CompanionView>();var expected=issued;
+            ActionResult Start(CompanionCommand command)
+            {
+                if(expected is not null)
+                {
+                    bool first=command.View is {} view&&!usedViews.Contains(view)&&(ActionSurface.IsRoomAction(command)||ActionSurface.IsBodyAction(command));
+                    if(ChatCapabilitySnapshot.Validate(expected,CaptureChatCapabilities(),new(first?[command]:[])) is {} changed)return changed;
+                }
+                var result=ActionHandler?.Invoke(command)??(CommandHandler is {} handler
                     ?new ActionResult(ActionResultCode.Started,command.Action,command.Value,handler(command),TimeSpan.Zero)
-                    :ActionResult.Failure(ActionResultCode.SceneUnavailable,"当前没有可控制的场景。",command)),
+                    :ActionResult.Failure(ActionResultCode.SceneUnavailable,"当前没有可控制的场景。",command));
+                if(result.Success)
+                {
+                    if(command.View is {} used&&(ActionSurface.IsRoomAction(command)||ActionSurface.IsBodyAction(command)))usedViews.Add(used);
+                    if(expected is not null&&command.Action=="model")expected=expected with{Actors=CaptureChatCapabilities().Actors};
+                }
+                return result;
+            }
+            return await ActionExecutor.Execute(plan,()=>Preferences,ActionPreflight,
+                Start,
                 CommandWaiter,()=>StopCommands?.Invoke(),token,result=>{LiveReply=result.UserMessage;ChatStatus=result.UserMessage;Tick?.Invoke();});
         }
         catch(ActionFailureException ex){return [ActionResult.Failure(ex.Code,ex.Message)];}

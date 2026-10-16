@@ -92,10 +92,10 @@ internal sealed partial class DesktopHost : IDisposable
     private readonly bool _smoke;
     public DesktopHost(Application app,Controller c,string pipeName,bool smoke)
     {
-        _app=app;_c=c;_smoke=smoke;InitializeActivitySelection();c.InitializeCompanionLife();_c.BlockAutonomy=()=>House is {IsActive:true}&&House.CurrentPage=="chat";
-        c.CommandHandler=ExecuteCompanionCommand;c.SceneContext=()=>House?.SceneDescription??"桌面悬浮伙伴；房间坐标移动暂不可用";
+        _app=app;_c=c;_smoke=smoke;InitializeActivitySelection();c.InitializeCompanionLife();_c.BlockAutonomy=()=>House is {IsActive:true}&&House.CurrentPage is "chat" or "project";
+        c.CommandHandler=command=>ExecuteAction(command).UserMessage;c.SceneContext=()=>House?.SceneDescription??"桌面悬浮伙伴；房间坐标移动暂不可用";
         c.ActionHandler=ExecuteAction;c.ActionPreflight=PreflightActions;c.CurrentScene=()=>House?.CompanionScene??(_pet is {IsVisible:true}?SceneKind.Desktop:SceneKind.Tray);
-        c.CommandWaiter=(command,token)=>command.Action=="stroll"&&command.Value is "lap1" or "lap2"?_pet?.WaitCommand(command,token)??Task.FromResult(true):House?.WaitCreation(command,token)??_pet?.WaitCommand(command,token)??Task.FromResult(true);
+        c.CommandWaiter=WaitAction;
         c.StopCommands=()=>{House?.StopCompanion();_pet?.StopCommands();};
         _petWanted=c.Preferences.DisplayMode!="tray";
         using(var iconStream=System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("Forme.Icon"))if(iconStream is not null)_icon=new System.Drawing.Icon(iconStream);
@@ -104,7 +104,7 @@ internal sealed partial class DesktopHost : IDisposable
         menu.Items.Add("打开小屋",null,(_,_)=>ShowHouse("home"));menu.Items.Add("显示伙伴",null,(_,_)=>ShowPet());menu.Items.Add("仅保留托盘",null,(_,_)=>HidePet());menu.Items.Add("安静模式开关",null,(_,_)=>Ui.Guard(()=>c.SavePreferences(c.Preferences with{Quiet=!c.Preferences.Quiet})));menu.Items.Add("退出",null,async(_,_)=>await Exit());_tray.ContextMenuStrip=menu;
         _tray.DoubleClick+=(_,_)=>ShowHouse("home");c.Finished+=Finished;c.Changed+=Changed;c.Tick+=TrayTick;c.Notice+=Notice;
         SystemEvents.PowerModeChanged+=Power;SystemEvents.SessionSwitch+=Session;SystemEvents.DisplaySettingsChanged+=Displays;
-        _greetings.Tick+=(_,_)=>Greeting();
+        _greetings.Tick+=(_,_)=>Greeting();InitializeReminders();
         if(!smoke){_ =ObserveListener(pipeName);if(!c.Preferences.Onboarded)ShowHouse("welcome");else if(_petWanted)ShowPet(false);Changed();}
     }
     public void ShowHouse(string page)
@@ -147,6 +147,7 @@ internal sealed partial class DesktopHost : IDisposable
     }
     private void Changed()
     {
+        ScheduleReminderCheck();
         if(!_smoke && !_locked && (_pet is not null||House is not null) && _c.Preferences.Greetings&&!_c.Preferences.Quiet)_greetings.Start();else _greetings.Stop();
         TrayTick();
     }
@@ -219,7 +220,7 @@ internal sealed partial class DesktopHost : IDisposable
         _c.CommandHandler=null;_c.SceneContext=null;_c.ActivityWorld=null;_c.BlockAutonomy=null;
         _c.ActionHandler=null;_c.ActionPreflight=null;_c.CurrentScene=null;
         _c.CommandWaiter=null;_c.StopCommands=null;
-        _exit=true;_pipeCancel.Cancel();_greetings.Stop();SystemEvents.PowerModeChanged-=Power;SystemEvents.SessionSwitch-=Session;SystemEvents.DisplaySettingsChanged-=Displays;
+        _exit=true;DisposeReminders();_pipeCancel.Cancel();_greetings.Stop();SystemEvents.PowerModeChanged-=Power;SystemEvents.SessionSwitch-=Session;SystemEvents.DisplaySettingsChanged-=Displays;
         _c.Finished-=Finished;_c.Changed-=Changed;_c.Tick-=TrayTick;_c.Notice-=Notice;_tray.Dispose();_icon?.Dispose();_pet?.Close();House?.Close();_pipeCancel.Dispose();
     }
 }
@@ -232,6 +233,13 @@ internal static class Smoke
         try
         {
             Directory.CreateDirectory("artifacts/screenshots");
+            if(Environment.GetCommandLineArgs().Contains("--cooperative-goals-only")){await CooperativeGoalChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
+            if(Environment.GetCommandLineArgs().Contains("--goal-play-only")){await GoalPlayChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
+            if(Environment.GetCommandLineArgs().Contains("--task-cards-only")){await TaskCardChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
+            if(Environment.GetCommandLineArgs().Contains("--goals-only")){await GoalChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
+            if(Environment.GetCommandLineArgs().Contains("--chat-capabilities-only")){await ChatCapabilityChecks.Run(host,c);Environment.ExitCode=0;await host.Exit();return;}
+            if(Environment.GetCommandLineArgs().Contains("--projects-only")){await ProjectChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
+            if(Environment.GetCommandLineArgs().Contains("--foundation-only")){await FoundationChecks.Run(host,c);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--activities-only")){c.SavePreferences(new Preferences{Onboarded=true});await ActivitySelectionChecks.Run(host,c);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--rules-only")){c.SavePreferences(new Preferences{Onboarded=true});await CompanionChecks.DesktopRules(host,c);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--attachments-only")){c.SavePreferences(new Preferences{Onboarded=true});await CompanionChecks.Attachments(host,c);Environment.ExitCode=0;await host.Exit();return;}

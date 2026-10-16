@@ -9,7 +9,7 @@ public static class ProductivityIntentProtocol
     public static string Instructions()
     {
         var now=DateTimeOffset.Now;
-        return $"若用户明确要求记事、查询本地记事、创建工作待办、列出今日待办或设置提醒，且不是闲聊/举例/提问/否定，只输出一个 ```forme-productivity 代码块，内容为JSON数组，最多3项，不附带解释。仅识别本轮用户明确给出的内容，不读取或假设本地已有数据。当前本机时间为 {now:O}，相对日期据此转换为含时区的 ISO 8601。支持 intent: CreateNote(title,content,tags), SearchNote(query), CreateTask(title,description,dueAt,remindAt,priority), ListTodayTasks(), CreateReminder(title,dueAt)。字段名严格按括号内；时间使用完整 ISO 8601 或 null；priority 为 normal/important/urgent。仅创建用户明确要求保存的内容；不确定时间或标题时输出空数组。删除、修改、完成操作不在当前支持范围内。绝不要输出记事内容、待办标题等用户数据。";
+        return $"工作块 ```forme-productivity：项含intent和目录参数，intent目录：{CapabilityCatalog.ModelSignatures(CapabilityDomain.Productivity)}。当前本机时间{now:O}；相对时间据此转为带时区ISO 8601或null，priority=normal/important/urgent。仅保存本轮明确要求的内容；标题或必要时间不明返回[]。删除/修改/完成不支持；既有记录不发送给模型，查询只在本机执行。";
     }
     public static bool TryExtract(string response,out string json)
     {
@@ -35,7 +35,7 @@ public static class ProductivityIntentProtocol
                     if(!element.TryGetProperty(name,out var value)||value.ValueKind==JsonValueKind.Null)return required?throw new JsonException():null;
                     if(value.ValueKind!=JsonValueKind.String)throw new JsonException();var text=value.GetString();if(text is null||text.Length>max||required&&string.IsNullOrWhiteSpace(text))throw new JsonException();return text;
                 }
-                string kind=Text("intent",40,true)!;ProductivityIntent intent;
+                string kind=Text("intent",40,true)!;if(!CapabilityCatalog.AllowsModel(CapabilityDomain.Productivity,kind))throw new JsonException();ProductivityIntent intent;
                 switch(kind)
                 {
                     case "CreateNote":

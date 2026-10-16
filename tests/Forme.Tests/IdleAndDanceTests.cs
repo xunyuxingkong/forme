@@ -33,7 +33,10 @@ public class IdleAndDanceTests
     [TestMethod,TestCategory("Motion")]
     public void RandomMovementRespectsWorkAreaAndPause()
     {
-        var wander=new DesktopWander(new Random(42));wander.Reset(new(-400,200),-500,300,50,500);bool moved=false;
+        var wander=new DesktopWander(new Random(42));wander.Reset(new(-400,200),-500,300,50,500);var start=wander.Position;
+        var firstFrame=wander.Advance(.05,false);
+        Assert.IsNotNull(firstFrame);Assert.AreEqual("walk",firstFrame.Value.Locomotion);Assert.AreNotEqual(start,wander.Position);
+        wander.Reset(start,-500,300,50,500);bool moved=false;
         for(int frame=0;frame<10000;frame++)
         {
             var pose=wander.Advance(1d/30,frame>5000,1.5);moved|=pose is not null;

@@ -20,6 +20,7 @@
     <Compile Remove="Probe.cs;PetAnimationChecks.cs;CompanionChecks.cs;BoatChecks.cs;LivingChecks.cs;ActivitySelectionChecks.cs" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="HtmlAgilityPack" Version="1.13.1" />
     <ProjectReference Include="../Forme.Core/Forme.Core.csproj" />
   </ItemGroup>
   <ItemGroup>

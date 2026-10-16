@@ -9,23 +9,25 @@ internal sealed partial class DesktopHost : ICompanionActivityWorld
     ActivityObservation ICompanionActivityWorld.Observe(CompanionView view)
     {
         var p=_c.Preferences;
-        bool available=!_exit&&!_c.AnimationSuspended;
+        bool available=!_exit&&!_c.AnimationSuspended,visible;
         string subject;int revision;SceneKind scene;string state;
         if(view==CompanionView.Room)
         {
             var room=House;
             subject=room?.ActivitySubject??"";revision=room?.ActivityRevision??-1;scene=room?.CompanionScene??SceneKind.Indoor;
-            available&=room is {IsVisible:true}&&room.WindowState!=WindowState.Minimized&&room.ActivityAvailable&&p.ShowHome3D;
+            visible=room is {IsVisible:true}&&room.WindowState!=WindowState.Minimized&&room.ActivityVisible&&p.ShowHome3D;
+            available&=visible&&room!.ActivityAvailable;
             state=room?.ActivityMode??"hidden";
         }
         else
         {
             subject=_pet?.ActivitySubject??"";revision=_pet?.ActivityRevision??-1;scene=SceneKind.Desktop;
-            available&=_pet is {IsVisible:true}&&_pet.ActivityAvailable&&p.DisplayMode=="pet";
-            state=available?"idle":"unavailable";
+            visible=_pet is {IsVisible:true}&&_pet.ActivityVisible&&p.DisplayMode=="pet";
+            available&=visible&&_pet!.ActivityAvailable;
+            state=!visible?"hidden":available?"idle":"acting";
         }
         var options=available?ActivitySelection.Options(view,scene,p.PetModel,p,plan=>SelectionPreflight(view,plan),view==CompanionView.Room?House?.AvailableLife():null):Array.Empty<ActivityOption>();
-        return new(view,subject,revision,scene,p.PetModel,p.Weather,p.RoomLamp,available,state,options);
+        return new ActivityObservation(view,subject,revision,scene,p.PetModel,p.Weather,p.RoomLamp,available,state,options){Visible=visible};
     }
     private ActionResult? SelectionPreflight(CompanionView view,ActionPlan plan)
     {
