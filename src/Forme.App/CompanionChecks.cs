@@ -310,7 +310,8 @@ internal static class CompanionChecks
         var waiting=house.WaitCreation(new("move",X:1,Z:1),CancellationToken.None);room.StopWorld();if(await waiting)throw new Exception("Manual stop did not cancel waiter");
         room.SwitchScene(false);c.SavePreferences(c.Preferences with{ReducedMotion=true});var naturalStart=room.PetPosition;
         host.ExecuteCompanionCommand(new("stroll","walk"));if(room.PetPosition==naturalStart)throw new Exception("Natural walking did not move");
-        host.ExecuteCompanionCommand(new("go","book"));if(room.PetPosition==naturalStart||!room.CurrentWorld.Travel().Walkable(room.PetPosition))throw new Exception("Natural furniture target unreachable");
+        try{host.ExecuteCompanionCommand(new("go","book"));}catch(ActionFailureException ex){var probe=room.CurrentWorld.Travel();probe.Reset(room.PetPosition);var book=room.CurrentWorld.Items.FirstOrDefault(x=>x.Kind=="book");throw new Exception($"Natural book target failed: position={room.PetPosition}; world={string.Join(";",room.CurrentWorld.Items.Select(x=>$"{x.Kind}@{x.X:0.0},{x.Z:0.0}"))}; bookApproach={(book is null?"missing":LivingWorld.Approach(book,probe)?.ToString()??"unreachable")}; {ex.Message}",ex);}
+        if(room.PetPosition==naturalStart||!room.CurrentWorld.Travel().Walkable(room.PetPosition))throw new Exception("Natural furniture target unreachable");
         c.SavePreferences(c.Preferences with{ReducedMotion=false});
         c.SavePreferences(c.Preferences with{AllowLayoutPreview=false,AllowPlayControl=false});
         if(house.SceneDescription.Contains("furniture")||house.SceneDescription.Contains("events"))throw new Exception("Disabled creation grants leaked world data");
