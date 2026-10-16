@@ -16,6 +16,7 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if(args.FirstOrDefault()=="--mcp-web-source")return Task.Run(()=>McpWebSource.Worker(args)).GetAwaiter().GetResult();
         if(args.FirstOrDefault()=="--render-pdf")
         {
 #if FORME_DEVELOPMENT_TOOLS
@@ -233,6 +234,7 @@ internal static class Smoke
         try
         {
             Directory.CreateDirectory("artifacts/screenshots");
+            if(Environment.GetCommandLineArgs().Contains("--mcp-web-only")){await McpWebSourceChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--web-sources-only")){await WebProjectSourceChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--travel-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);await CheckTravel(host,Descendants(host.House!).OfType<Room3DView>().Single(),c);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--cooperative-goals-only")){await CooperativeGoalChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
@@ -250,6 +252,7 @@ internal static class Smoke
             if(Environment.GetCommandLineArgs().Contains("--living-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);var living=Descendants(host.House!).OfType<Room3DView>().Single();await LivingChecks.Run(host,c,living);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--companion-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);var companion=Descendants(host.House!).OfType<Room3DView>().Single();await CompanionChecks.Run(host,c,companion);Environment.ExitCode=0;await host.Exit();return;}
             await PetAnimationChecks.Run();
+            await McpWebSourceChecks.Run();
             await WebProjectSourceChecks.Run();
             foreach(double scale in new[]{1d,1.25,1.5,2d})
             {int px=ScreenCoordinateService.DipToPhysical(-123.5,scale);double dip=ScreenCoordinateService.PhysicalToDip(px,scale);if(Math.Abs(dip+123.5)>1/scale)throw new Exception("DPI coordinate conversion drifted");}

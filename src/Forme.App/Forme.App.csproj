@@ -21,6 +21,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="HtmlAgilityPack" Version="1.13.1" />
+    <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
     <ProjectReference Include="../Forme.Core/Forme.Core.csproj" />
   </ItemGroup>
   <ItemGroup>

@@ -65,10 +65,10 @@ internal sealed partial class Controller
         var previous=CurrentProject;
         if(previous is {State:ProjectRunState.Closed or ProjectRunState.Cancelled})previous=null;
         if(_projectSources.Count>=4)throw new InvalidDataException("每个项目最多选择4份资料；请先结束当前项目。");
-        using var request=new CancellationTokenSource();_projectRequest=request;ProjectStatus="正在本机读取指定网页；正文尚未发送给AI。";ProjectRefresh();
+        using var request=new CancellationTokenSource();_projectRequest=request;ProjectStatus="正在启动本机只读网页工具；正文尚未发送给AI，可结束并停止。";ProjectRefresh();
         try
         {
-            var source=await WebProjectSourceReader.ReadAsync(address,request.Token);
+            var source=await McpWebSource.ReadAsync(address,request.Token);
             request.Token.ThrowIfCancellationRequested();
             var sources=_projectSources.Append(source).ToArray();
             if(sources.Select(x=>x.Reference.Id).Distinct().Count()!=sources.Length)throw new InvalidDataException("该网页正文与当前项目资料重复。");

@@ -92,7 +92,7 @@ internal static class WebProjectSourceReader
 
     private static bool IsRedirect(HttpStatusCode code)=>code is HttpStatusCode.Moved or HttpStatusCode.Redirect or HttpStatusCode.RedirectMethod or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect;
 
-    private static void ValidateAddress(Uri address)
+    internal static void ValidateAddress(Uri address)
     {
         if(address.Scheme is not ("http" or "https")||!string.IsNullOrEmpty(address.UserInfo)||string.IsNullOrWhiteSpace(address.Host)||address.IsLoopback)throw new InvalidDataException("仅支持无账号信息的公网 HTTP(S) 网页。");
         if(IPAddress.TryParse(address.Host,out var literal)&&!IsPublicAddress(literal))throw new InvalidDataException("网页地址指向本机、内网或保留网络，已拒绝读取。");
