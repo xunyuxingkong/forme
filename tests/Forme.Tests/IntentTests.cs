@@ -123,6 +123,10 @@ public sealed class IntentTests
         Assert.IsFalse(ConversationText.Visible("我已经到了池塘边。").Contains("我已经"));
         Assert.IsFalse(ConversationText.Visible("我来执行。```forme-actions\n[]```").Contains("我来"));
         Assert.AreEqual("你好，我们聊聊吧。",ConversationText.Visible("你好，我们聊聊吧。"));
+        const string legacyAction="```json\n[{\"type\":\"action\",\"actions\":[{\"command\":\"Dance\",\"params\":{\"mode\":\"spin\",\"count\":1}}]}]\n```";
+        Assert.AreEqual("好呀，我在原地转一圈给你看～",ConversationText.Visible(legacyAction+"\n好呀，我在原地转一圈给你看～"));
+        Assert.AreEqual("普通 JSON：```json\n{\"type\":\"example\"}\n```",ConversationText.Visible("普通 JSON：```json\n{\"type\":\"example\"}\n```\n"));
+        Assert.IsFalse(CompanionCommands.ContextText(legacyAction+"\n好呀").Contains("\"command\""));
     }
     [TestMethod]
     public void CreationIntentsRetainCapabilitiesWithoutInventingCoordinates()

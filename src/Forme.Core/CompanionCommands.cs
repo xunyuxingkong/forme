@@ -13,6 +13,7 @@ public static class CompanionCommands
     public const string ReportMarker="[Forme 本地动作]";
     public static string VisibleText(string text)
     {
+        text=HideLegacyActionJson(text);
         foreach(string marker in new[]{Marker,ProductivityIntentProtocol.Marker,GoalProtocol.Marker})
         {
             int start;
@@ -21,9 +22,58 @@ public static class CompanionCommands
                 int end=text.IndexOf("```",start+marker.Length,StringComparison.Ordinal);
                 text=end<0?text[..start]:text.Remove(start,end+3-start);
             }
-            for(int length=marker.Length-1;length>=3;length--)if(text.EndsWith(marker[..length],StringComparison.Ordinal)){text=text[..^length];break;}
+            for(int length=marker.Length-1;length>=3;length--)
+            {
+                if(length==3&&text.Length!=3)continue;
+                if(text.EndsWith(marker[..length],StringComparison.Ordinal)){text=text[..^length];break;}
+            }
         }
         return text.TrimEnd();
+    }
+    private static string HideLegacyActionJson(string text)
+    {
+        const string fence="```";
+        int offset=0;
+        while((offset=text.IndexOf(fence,offset,StringComparison.Ordinal))>=0)
+        {
+            int headerStart=offset+fence.Length;
+            int headerEnd=text.IndexOf('\n',headerStart);
+            if(headerEnd<0)break;
+            string language=text[headerStart..headerEnd].Trim();
+            int bodyEnd=text.IndexOf(fence,headerEnd+1,StringComparison.Ordinal);
+            if(bodyEnd<0)break;
+            int after=bodyEnd+fence.Length;
+            if(language.Equals("json",StringComparison.OrdinalIgnoreCase)&&IsLegacyActionPayload(text[(headerEnd+1)..bodyEnd]))
+            {
+                while(after<text.Length&&text[after] is '\r' or '\n')after++;
+                text=text.Remove(offset,after-offset);
+            }
+            else offset=after;
+        }
+        return text;
+    }
+    private static bool IsLegacyActionPayload(string body)
+    {
+        try
+        {
+            if(body.Length>8192)return false;
+            using var document=JsonDocument.Parse(body,new(){MaxDepth=8});
+            var root=document.RootElement;
+            if(root.ValueKind==JsonValueKind.Array)return root.EnumerateArray().Any(IsLegacyActionObject);
+            return IsLegacyActionObject(root);
+        }
+        catch(JsonException){return false;}
+    }
+    private static bool IsLegacyActionObject(JsonElement root)
+    {
+        if(root.ValueKind!=JsonValueKind.Object)return false;
+        bool isAction=false,hasActions=false;
+        foreach(var property in root.EnumerateObject())
+        {
+            if(property.Name.Equals("type",StringComparison.OrdinalIgnoreCase))isAction=property.Value.ValueKind==JsonValueKind.String&&property.Value.GetString()?.Equals("action",StringComparison.OrdinalIgnoreCase)==true;
+            else if(property.Name.Equals("actions",StringComparison.OrdinalIgnoreCase))hasActions=property.Value.ValueKind==JsonValueKind.Array;
+        }
+        return isAction&&hasActions;
     }
     public static string ContextText(string text)
     {int report=text.IndexOf(ReportMarker,StringComparison.Ordinal);return VisibleText(report>=0?text[..report]:text);}
