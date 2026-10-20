@@ -79,6 +79,16 @@ public sealed class IntentTests
         var providerIntent=AiIntentProtocol.Parse(providerJson,"转2圈看看").Single();
         Assert.AreEqual(CompanionIntentType.Dance,providerIntent.Type);Assert.AreEqual("spin",providerIntent.Mode);Assert.AreEqual(2,providerIntent.Count);
         Assert.AreEqual("",ConversationText.Visible(providerFormat));
+        const string providerCommands="```json\n{\"type\":\"forme-actions\",\"commands\":[{\"action\":\"Stroll\",\"mode\":\"run\",\"count\":2}]}\n```";
+        Assert.IsTrue(AiIntentProtocol.TryExtractActions(providerCommands,out var commandJson));
+        var commandIntent=AiIntentProtocol.Parse(commandJson,"在屏幕上跑2圈看看").Single();
+        Assert.AreEqual(CompanionIntentType.Stroll,commandIntent.Type);Assert.AreEqual("run",commandIntent.Mode);Assert.AreEqual(2,commandIntent.Count);
+        Assert.AreEqual("",ConversationText.Visible(providerCommands));
+        const string oldProviderFormat="```json\n[{\"type\":\"action\",\"actions\":[{\"command\":\"Dance\",\"params\":{\"mode\":\"spin\",\"count\":1}}]}]\n```";
+        Assert.IsTrue(AiIntentProtocol.TryExtractActions(oldProviderFormat,out var oldProviderJson));
+        var oldProviderIntent=AiIntentProtocol.Parse(oldProviderJson,"转一圈看看").Single();
+        Assert.AreEqual(CompanionIntentType.Dance,oldProviderIntent.Type);Assert.AreEqual("spin",oldProviderIntent.Mode);Assert.AreEqual(1,oldProviderIntent.Count);
+        Assert.ThrowsExactly<ActionFailureException>(()=>AiIntentProtocol.TryExtractActions(oldProviderFormat.Replace("\"count\":1","\"script\":\"bad\"",StringComparison.Ordinal),out _));
         Assert.ThrowsExactly<ActionFailureException>(()=>AiIntentProtocol.TryExtractActions("```json\n{\"type\":\"forme-actions\",\"action\":\"Dance\",\"script\":\"bad\"}\n```",out _));
     }
     [TestMethod]
@@ -107,6 +117,7 @@ public sealed class IntentTests
         async Task<bool> wait(CompanionCommand c,CancellationToken token){waiting=true;await Task.Delay(5,token);waiting=false;return true;}
         var results=await ActionExecutor.Execute(plan,()=>prefs,null,start,wait,()=>{},CancellationToken.None);
         Assert.AreEqual(2,started);Assert.IsTrue(results.All(x=>x.Code==ActionResultCode.Completed));
+        Assert.IsTrue(results.Any(x=>x.UserMessage.Contains("我",StringComparison.Ordinal)));Assert.IsFalse(results.Any(x=>x.UserMessage.Contains("伙伴动作已完成",StringComparison.Ordinal)));
         results=await ActionExecutor.Execute(plan,()=>prefs,null,Started,(_,_)=>Task.FromResult(false),()=>{},CancellationToken.None);
         Assert.AreEqual(ActionResultCode.Interrupted,results.Single().Code);
         results=await ActionExecutor.Execute(plan,()=>prefs,null,Started,async(_,token)=>{await Task.Delay(1000,token);return true;},()=>{},CancellationToken.None,timeout:TimeSpan.FromMilliseconds(10));

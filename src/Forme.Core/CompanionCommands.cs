@@ -67,7 +67,7 @@ public static class CompanionCommands
     private static bool IsLegacyActionObject(JsonElement root)
     {
         if(root.ValueKind!=JsonValueKind.Object)return false;
-        bool isAction=false,hasActions=false,isFormeActions=false,hasAction=false;
+        bool isAction=false,hasActions=false,isFormeActions=false,hasAction=false,hasCommands=false;
         foreach(var property in root.EnumerateObject())
         {
             if(property.Name.Equals("type",StringComparison.OrdinalIgnoreCase))
@@ -77,8 +77,9 @@ public static class CompanionCommands
             }
             else if(property.Name.Equals("actions",StringComparison.OrdinalIgnoreCase))hasActions=property.Value.ValueKind==JsonValueKind.Array;
             else if(property.Name.Equals("action",StringComparison.OrdinalIgnoreCase))hasAction=property.Value.ValueKind==JsonValueKind.String;
+            else if(property.Name.Equals("commands",StringComparison.OrdinalIgnoreCase))hasCommands=property.Value.ValueKind==JsonValueKind.Array;
         }
-        return isAction&&hasActions||isFormeActions&&hasAction;
+        return isAction&&hasActions||isFormeActions&&(hasAction||hasCommands);
     }
     public static bool TryExtractLegacyActionPlan(string response,out string json)
     {
@@ -101,21 +102,71 @@ public static class CompanionCommands
         try
         {
             if(body.Length>8192)return false;
-            using var document=JsonDocument.Parse(body,new(){MaxDepth=4});var root=document.RootElement;
-            return root.ValueKind==JsonValueKind.Object&&root.TryGetProperty("type",out var type)&&type.ValueKind==JsonValueKind.String&&type.GetString()?.Equals("forme-actions",StringComparison.OrdinalIgnoreCase)==true;
+            using var document=JsonDocument.Parse(body,new(){MaxDepth=8});var root=document.RootElement;
+            if(root.ValueKind==JsonValueKind.Array)return root.EnumerateArray().Any(IsLegacyActionObject);
+            return IsLegacyActionObject(root);
         }
         catch(JsonException){return false;}
     }
     private static string NormalizeLegacyFormeAction(string body)
     {
-        using var document=JsonDocument.Parse(body,new(){MaxDepth=4});var root=document.RootElement;
-        var fields=root.EnumerateObject().ToArray();
-        if(fields.Any(x=>x.Name is not ("type" or "action" or "target" or "mode" or "count" or "view"))||fields.Select(x=>x.Name).Distinct().Count()!=fields.Length||
-            !root.TryGetProperty("action",out var action)||action.ValueKind!=JsonValueKind.String)
+        using var document=JsonDocument.Parse(body,new(){MaxDepth=8});var root=document.RootElement;
+        var commands=new List<Dictionary<string,object?>>();
+        var envelopes=root.ValueKind==JsonValueKind.Array?root.EnumerateArray().ToArray():[root];
+        foreach(var envelope in envelopes)
+        {
+            if(envelope.ValueKind!=JsonValueKind.Object||!envelope.TryGetProperty("type",out var type)||type.ValueKind!=JsonValueKind.String)throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
+            if(type.GetString()?.Equals("forme-actions",StringComparison.OrdinalIgnoreCase)==true)
+            {
+                var fields=envelope.EnumerateObject().ToArray();
+                if(fields.Any(x=>x.Name is not ("type" or "action" or "commands" or "target" or "mode" or "count" or "view" or "x" or "z" or "rotation"))||fields.Select(x=>x.Name).Distinct().Count()!=fields.Length||
+                    envelope.TryGetProperty("action",out _)==envelope.TryGetProperty("commands",out _))throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
+                if(envelope.TryGetProperty("action",out var action))commands.Add(NormalizeLegacyAction(envelope,action,true));
+                else if(envelope.TryGetProperty("commands",out var commandList)&&commandList.ValueKind==JsonValueKind.Array&&commandList.GetArrayLength() is >=1 and <=3)
+                    foreach(var command in commandList.EnumerateArray())commands.Add(NormalizeLegacyAction(command));
+                else throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
+            }
+            else if(type.GetString()?.Equals("action",StringComparison.OrdinalIgnoreCase)==true&&envelope.TryGetProperty("actions",out var legacyActions)&&legacyActions.ValueKind==JsonValueKind.Array&&legacyActions.GetArrayLength() is >=1 and <=3)
+            {
+                var envelopeFields=envelope.EnumerateObject().ToArray();
+                if(envelopeFields.Any(x=>x.Name is not ("type" or "actions"))||envelopeFields.Select(x=>x.Name).Distinct().Count()!=envelopeFields.Length)
+                    throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
+                foreach(var legacy in legacyActions.EnumerateArray())
+                {
+                    var fields=legacy.ValueKind==JsonValueKind.Object?legacy.EnumerateObject().ToArray():[];
+                    if(fields.Any(x=>x.Name is not ("command" or "params"))||fields.Select(x=>x.Name).Distinct().Count()!=fields.Length||!legacy.TryGetProperty("command",out var name)||name.ValueKind!=JsonValueKind.String)
+                        throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
+                    var normalized=new Dictionary<string,object?>{{"action",name.GetString()}};
+                    if(legacy.TryGetProperty("params",out var parameters))
+                    {
+                        if(parameters.ValueKind!=JsonValueKind.Object)throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
+                        var parameterFields=parameters.EnumerateObject().ToArray();
+                        if(parameterFields.Any(x=>x.Name is not ("target" or "mode" or "count" or "view" or "x" or "z" or "rotation"))||parameterFields.Select(x=>x.Name).Distinct().Count()!=parameterFields.Length)
+                            throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
+                        foreach(var property in parameterFields)normalized[property.Name]=property.Value.Clone();
+                    }
+                    commands.Add(NormalizeLegacyAction(JsonSerializer.SerializeToElement(normalized)));
+                }
+            }
+            else throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
+            if(commands.Count>3)throw new ActionFailureException(ActionResultCode.NotRecognized,"动作计划超过三步，没有执行。");
+        }
+        if(commands.Count==0)throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
+        return JsonSerializer.Serialize(commands);
+    }
+    private static Dictionary<string,object?> NormalizeLegacyAction(JsonElement command,JsonElement? actionOverride=null,bool wrapper=false)
+    {
+        if(command.ValueKind!=JsonValueKind.Object)throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
+        var fields=command.EnumerateObject().ToArray();
+        if(fields.Any(x=>x.Name is not ("action" or "target" or "mode" or "count" or "view" or "x" or "z" or "rotation" or "type"))||fields.Select(x=>x.Name).Distinct().Count()!=fields.Length||!wrapper&&fields.Any(x=>x.Name=="type"))
             throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
-        var normalized=new Dictionary<string,object?>{{"type",action.GetString()}};
-        foreach(string key in new[]{"target","mode","count","view"})if(root.TryGetProperty(key,out var value))normalized[key]=value.Clone();
-        return JsonSerializer.Serialize(new[]{normalized});
+        var action=actionOverride??(command.TryGetProperty("action",out var value)?value:default);
+        if(action.ValueKind!=JsonValueKind.String)throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
+        string typeName=action.GetString()!;
+        if(Enum.TryParse<CompanionIntentType>(typeName,true,out var parsed)&&Enum.IsDefined(parsed))typeName=parsed.ToString();
+        var normalized=new Dictionary<string,object?>{{"type",typeName}};
+        foreach(string key in new[]{"target","mode","count","view","x","z","rotation"})if(command.TryGetProperty(key,out var field))normalized[key]=field.Clone();
+        return normalized;
     }
     public static string ContextText(string text)
     {int report=text.IndexOf(ReportMarker,StringComparison.Ordinal);return VisibleText(report>=0?text[..report]:text);}

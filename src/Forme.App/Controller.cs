@@ -198,7 +198,7 @@ internal sealed partial class Controller : IDisposable
                     {
                         var intents=AiIntentProtocol.Parse(actionJson,input);
                         ActionResults=intents.Count==0?[ActionResult.Failure(ActionResultCode.NotRecognized,"没有识别到明确动作，没有执行；请换一种说法。")]:await ExecuteIntents(intents,request.Token,capabilitySnapshot);
-                        text=ResultText(ActionResults);ChatStatus=ActionResults.LastOrDefault()?.UserMessage??text;
+                        text=ResultText(ActionResults);ChatStatus=text;
                     }
                     else if(ProductivityIntentProtocol.TryExtract(completedReply,out string productivityJson))
                     {

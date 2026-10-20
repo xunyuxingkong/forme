@@ -189,12 +189,21 @@ internal static class CompanionChecks
                 string actionResults=string.Join(" | ",protocol.ActionResults.Select(x=>$"{x.Code}: {x.UserMessage}"));
                 throw new Exception($"AI routing did not infer and execute the house walk plus book target: calls={handler.Calls}, executed={executed}, results={protocol.ActionResults.Count} [{actionResults}], requestInput={routedText.Contains("在小屋走一圈，然后去书架旁边",StringComparison.Ordinal)}, requestPrompt={routedText.Contains("view=room/desktop",StringComparison.Ordinal)}");
             }
+            handler.Reply="```json\n{\"type\":\"forme-actions\",\"commands\":[{\"action\":\"Stroll\",\"mode\":\"run\",\"count\":2}]}\n```";
+            protocol.ActionHandler=cmd=>{executed++;return new(ActionResultCode.Started,cmd.Action,cmd.Value,"动作已开始",TimeSpan.Zero);};protocol.CommandWaiter=(_,_)=>Task.FromResult(true);
+            protocol.Draft="在屏幕上跑2圈看看";await protocol.Send();
+            if(handler.Calls!=4||executed!=6||protocol.ActionResults.Single().Code!=ActionResultCode.Completed||protocol.Store.Messages(protocol.Session!.Id).Last().Content!="好呀～我在屏幕上绕了两圈，回来啦！")
+                throw new Exception("Alternate provider action format did not execute or return an in-character completion reply");
+            handler.Reply="```json\n{\"type\":\"forme-actions\",\"commands\":[{\"action\":\"Fly\"}]}\n```";
+            protocol.Draft="飞到月球";await protocol.Send();
+            if(handler.Calls!=5||executed!=6||!protocol.Store.Messages(protocol.Session!.Id).Last().Content.Contains("暂时做不了",StringComparison.Ordinal)||protocol.Store.Messages(protocol.Session.Id).Last().Content.Contains("forme-actions",StringComparison.Ordinal))
+                throw new Exception("Unsupported action was not safely rejected with a character-voice response");
             handler.Reply="我们可以聊聊你今天的感受。";protocol.Store.Set("ai-consent-v3-productivity",protocol.Preferences.Endpoint);protocol.Draft="谢谢你";await ChatRequests.Send(protocol);
-            if(handler.Calls!=4||executed!=5||!protocol.Store.Messages(protocol.Session!.Id).Last().Content.Contains("我们可以聊聊",StringComparison.Ordinal)||protocol.Store.Get<string>("ai-consent-v3-productivity")!=protocol.Preferences.Endpoint)throw new Exception("Productivity consent did not preserve ordinary chat");
-            protocol.Draft="取消";await ChatRequests.Send(protocol);if(handler.Calls!=4||executed!=6||protocol.ActionResults.Single().Code!=ActionResultCode.Completed)throw new Exception("Local cancel fast path called the AI service");
-            protocol.Draft="回来";await ChatRequests.Send(protocol);if(handler.Calls!=4||executed!=7||protocol.ActionResults.Single().Code!=ActionResultCode.Completed)throw new Exception("Local recall fast path called the AI service");
+            if(handler.Calls!=6||executed!=6||!protocol.Store.Messages(protocol.Session!.Id).Last().Content.Contains("我们可以聊聊",StringComparison.Ordinal)||protocol.Store.Get<string>("ai-consent-v3-productivity")!=protocol.Preferences.Endpoint)throw new Exception("Productivity consent did not preserve ordinary chat");
+            protocol.Draft="取消";await ChatRequests.Send(protocol);if(handler.Calls!=6||executed!=7||protocol.ActionResults.Single().Code!=ActionResultCode.Completed)throw new Exception("Local cancel fast path called the AI service");
+            protocol.Draft="回来";await ChatRequests.Send(protocol);if(handler.Calls!=6||executed!=8||protocol.ActionResults.Single().Code!=ActionResultCode.Completed)throw new Exception("Local recall fast path called the AI service");
             protocol.SavePreferences(protocol.Preferences with{LocalActionRules=true});protocol.SaveRules(new ActionRules(1,[new(["专属快捷回到我身边"],[new("recall")])]).Serialize());protocol.Draft="专属快捷回到我身边";await ChatRequests.Send(protocol);
-            if(handler.Calls!=4||executed!=8||protocol.ActionResults.Single().Code!=ActionResultCode.Completed)throw new Exception("Explicit custom shortcut was not handled locally");
+            if(handler.Calls!=6||executed!=9||protocol.ActionResults.Single().Code!=ActionResultCode.Completed)throw new Exception("Explicit custom shortcut was not handled locally");
             var productivityHandler=new OfflineReplyHandler{Reply="```forme-productivity\n[{\"intent\":\"CreateNote\",\"title\":\"本地隐私样例\",\"content\":\"只应保存在本机的正文\",\"tags\":[\"smoke\"]}]\n```"};
             using(var productivity=new Controller(Path.Combine(c.Store.DirectoryPath,"productivity-protocol"),new AiClient(productivityHandler)))
             {
@@ -330,7 +339,7 @@ internal static class CompanionChecks
             var beforeWalk=room.PetPosition;
             protocol.CurrentScene=()=>house.CompanionScene;
             protocol.CommandHandler=cmd=>{if(cmd.Action=="dance"&&(room.PetMoving||room.PetPosition==beforeWalk))throw new Exception("Pat began before arrival");return host.ExecuteCompanionCommand(cmd);};
-            protocol.CommandWaiter=house.WaitCreation;protocol.Draft="走两步再跳舞";await protocol.Send();if(!protocol.ChatStatus.Contains("伙伴动作"))throw new Exception("Actual sequential action failed: "+protocol.ChatStatus);
+            protocol.CommandWaiter=house.WaitCreation;protocol.Draft="走两步再跳舞";await protocol.Send();var actionReply=protocol.Store.Messages(protocol.Session!.Id).Last().Content;if(!actionReply.Contains("我",StringComparison.Ordinal)||actionReply.Contains("伙伴动作已完成",StringComparison.Ordinal)||actionReply.Contains(CompanionCommands.Marker,StringComparison.Ordinal))throw new Exception("Actual sequential action did not return a truthful in-character result: "+protocol.ChatStatus);
         }
         c.Store.SaveWorld(original);c.SavePreferences(before);house.Navigate("home");room.ConfigureBoat(originalBoat);
         File.WriteAllText("artifacts/ai-creation-smoke-result.txt","PASS: bounded context; AI layout preview, collision rejection without draft mutation, manual save/cancel; eligible life discovery; hide/stop; boat color/leaf/start/name; manual interrupt; permission-scoped context; natural stroll and furniture destination; offline streamed reply sequential execution, cancellation, interrupted sequence, local failure report; actual stroll-arrive-pat order. No external API calls.\n");

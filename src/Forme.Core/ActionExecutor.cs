@@ -36,15 +36,7 @@ public static class ActionExecutor
                         else
                         {
                             linked.Token.ThrowIfCancellationRequested();
-                            string message = command.Action switch
-                            {
-                                "go" => $"已经到{TargetCatalog.Find(command.Value)?.Name}啦。",
-                                "stroll" when command.Value=="lap1" => "桌面伙伴已绕屏幕完成一圈。",
-                                "stroll" when command.Value=="lap2" => "桌面伙伴已绕屏幕完成两圈。",
-                                "stroll" when command.Value=="run" => "伙伴已完成当前场景的奔跑动作。",
-                                "stroll" => "伙伴已完成当前场景的散步动作。",
-                                _ => "伙伴动作已完成。"
-                            };
+                            string message = SuccessMessage(command);
                             result = new(ActionResultCode.Completed,command.Action,command.Value,message,watch.Elapsed);
                         }
                     }
@@ -60,4 +52,42 @@ public static class ActionExecutor
         }
         return results;
     }
+    public static string SuccessMessage(CompanionCommand command)=>command.Action switch
+    {
+        "go"=>$"我到{TargetCatalog.Find(command.Value)?.Name??"那里"}啦，来看看～",
+        "stroll" when command.Value=="lap1"=>"好呀～我在屏幕上绕了一圈，回来啦！",
+        "stroll" when command.Value=="lap2"=>"好呀～我在屏幕上绕了两圈，回来啦！",
+        "stroll" when command.Value=="run"=>"我跑了一会儿，感觉真畅快～",
+        "stroll"=>"我散步回来啦，感觉真不错～",
+        "dance" when command.Value=="spin"=>"转完一圈啦～还想看我跳什么吗？",
+        "dance" when command.Value=="hop"=>"蹦蹦跳跳完成啦～好开心！",
+        "dance"=>"我摇摆了一会儿，怎么样～",
+        "pat" or "rub"=>"好舒服呀，谢谢你摸摸我～",
+        "recall"=>"我回来啦～",
+        "stop"=>"我停下来啦～",
+        "scene" when command.Value=="indoor"=>"我回到小屋啦～",
+        "scene"=>"我到户外啦，一起看看吧～",
+        "weather"=>"天气换好啦，陪我看看现在的景色吧～",
+        "light" when command.Value=="on"=>"灯亮起来啦，小屋暖和多啦～",
+        "light"=>"灯关好啦～",
+        "fireplace" when command.Value=="on"=>"壁炉点起来啦，好暖和～",
+        "fireplace"=>"壁炉关好啦～",
+        "interact"=>$"我和{TargetCatalog.Find(command.Value)?.Name??"它"}玩了一下，真有意思～",
+        "idle" when command.Value=="sleep"=>"我睡一会儿啦，记得叫醒我哦～",
+        "idle" when command.Value=="walk"=>"我开始自由走动啦，陪你待一会儿～",
+        "idle" when command.Value=="run"=>"我开始自由跑动啦，活力满满～",
+        "idle"=>"我乖乖待在这里陪你～",
+        "model"=>"新样子换好啦，快看看我～",
+        "toy" or "throw"=>"玩具准备好啦，来陪我玩吧～",
+        "layout"=>"布置调整好啦，看看小屋是不是更舒服了～",
+        "furniture"=>"家具预览好啦，看看这个位置合不合适～",
+        "life"=>"好呀，我们开始这个小活动吧～",
+        "hide"=>"好呀，藏物游戏开始啦～",
+        "boat" when command.Value=="pause"=>"纸船先停一下，需要时我们再继续～",
+        "boat" when command.Value=="retrieve"=>"纸船回来啦～",
+        "boat"=>"纸船准备好啦，一起出发吧～",
+        "boat-shape" or "boat-color" or "boat-wind" or "boat-leaf" or "boat-name"=>"纸船调整好啦，看看这次的样子～",
+        "move"=>"我挪到新位置啦～",
+        _=>"好呀，我已经帮你做好啦～"
+    };
 }

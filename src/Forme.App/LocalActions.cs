@@ -79,12 +79,24 @@ internal sealed partial class Controller
                 var final=reply with{Content=text,Status="local"};
                 try{Store.SaveMessage(final);}catch(Exception ex) when(OperationErrors.Expected(ex)){PendingChatSave=final;Notice?.Invoke("本地动作反馈暂存，可重试保存。");}
             }
-            ChatStatus=ActionResults.LastOrDefault()?.UserMessage??text;
+            ChatStatus=text;
         }
         finally{_localExecuting=false;_request=null;request.Dispose();LiveReply="";SyncTimer();Changed?.Invoke();}
         return true;
     }
-    private static string ResultText(IReadOnlyList<ActionResult> results)=>string.Join("\n",results.Select(x=>x.UserMessage));
+    private string ResultText(IReadOnlyList<ActionResult> results)=>string.Join("\n",results.Select(x=>x.Code==ActionResultCode.Completed
+        ?ActionExecutor.SuccessMessage(new(x.Action,x.Target))
+        :x.Code switch
+        {
+            ActionResultCode.NotRecognized=>"抱歉，这个动作我暂时做不了，换种说法让我再试试吧～",
+            ActionResultCode.Unauthorized=>"我暂时做不了这个动作，可以先到设置里检查对应权限哦～",
+            ActionResultCode.TargetUnavailable or ActionResultCode.SceneUnavailable=>"我暂时到不了那里，换个目标让我试试吧～",
+            ActionResultCode.PathBlocked=>"这条路暂时走不通，我先停下啦，换个地方试试吧～",
+            ActionResultCode.Interrupted or ActionResultCode.Cancelled=>"我停下来啦，这次没能完成；想继续的话再叫我哦～",
+            ActionResultCode.Timeout=>"我暂时没能完成这个动作，等一下我们再试试吧～",
+            ActionResultCode.Failed=>"我暂时没能完成这个动作："+x.UserMessage.Replace("动作没有完成：","",StringComparison.Ordinal)+"。换个方式让我再试试吧～",
+            _=>"抱歉，我暂时做不了这个动作，换种说法让我再试试吧～"
+        }));
     private async Task<IReadOnlyList<ActionResult>> ExecuteIntents(IReadOnlyList<CompanionIntent> intents,CancellationToken token,ChatCapabilitySnapshot? issued=null)
     {
         try
