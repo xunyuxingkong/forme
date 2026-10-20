@@ -106,10 +106,26 @@ public sealed class GoalTests
             store.StartGoalStep(source.Id,0,DateTimeOffset.Now);store.ApplyGoalWork(source.Id,0,plan.Steps[0].Work!,DateTimeOffset.Now);
             store.RecoverGoals();var run=store.Goal(source.Id)!;
             Assert.AreEqual(GoalRunState.Interrupted,run.State);Assert.AreEqual(GoalStepState.Uncertain,run.Steps[0].State);Assert.AreEqual(GoalStepState.Skipped,run.Steps[1].State);
+            Assert.IsTrue(store.CanReconcileGoalArtifact(run,run.Steps[0]));
+            Assert.IsTrue(store.ReconcileGoalArtifact(source.Id,0,DateTimeOffset.Now));
+            run=store.Goal(source.Id)!;Assert.AreEqual(GoalRunState.Interrupted,run.State);Assert.AreEqual(GoalStepState.Completed,run.Steps[0].State);
+            Assert.AreEqual("recovered-artifact",run.Steps[0].Evidence);Assert.AreEqual(GoalStepState.Skipped,run.Steps[1].State);
+            Assert.IsFalse(store.CanReconcileGoalArtifact(run,run.Steps[0]));Assert.IsFalse(store.ReconcileGoalArtifact(source.Id,0,DateTimeOffset.Now));
             Assert.Throws<OperationFailureException>(()=>store.StartGoalStep(source.Id,0,DateTimeOffset.Now));
             Assert.Throws<OperationFailureException>(()=>store.BeginGoal(source.Id,source.Session,plan,DateTimeOffset.Now));
             store.RecoverGoals();Assert.AreEqual(1,store.UserNotes().Count);
             store.DeleteSession(source.Session);Assert.AreEqual(0,store.GoalRuns().Count);Assert.AreEqual(1,store.UserNotes().Count);
+        });
+    }
+    [TestMethod]
+    public void InterruptedWriteWithoutItsArtifactCannotBeConfirmed()
+    {
+        WithStore(store=>{
+            var source=Source(store);var plan=Plan();store.BeginGoal(source.Id,source.Session,plan,DateTimeOffset.Now);
+            store.StartGoalStep(source.Id,0,DateTimeOffset.Now);store.RecoverGoals();var run=store.Goal(source.Id)!;
+            Assert.IsFalse(store.CanReconcileGoalArtifact(run,run.Steps[0]));
+            Assert.IsFalse(store.ReconcileGoalArtifact(source.Id,0,DateTimeOffset.Now));
+            Assert.AreEqual(GoalStepState.Uncertain,store.Goal(source.Id)!.Steps[0].State);Assert.AreEqual(0,store.UserNotes().Count);
         });
     }
     [TestMethod]

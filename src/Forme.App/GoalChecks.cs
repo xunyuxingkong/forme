@@ -94,7 +94,7 @@ internal static class GoalChecks
                 throw new Exception("Protocol or work body appeared in assistant transcript: "+scenario);
         }
         await Native();
-        File.WriteAllText("artifacts/goal-smoke-result.txt","PASS: 16 isolated fake-service scenarios; mixed note/motion/task, whole-plan rejection, partial failure/cancel/revoke, one user-triggered first-step movement replan, stale and between-step actor changes, deleted session, truncation, mixed protocols, attachments, own-view continuity, local query receipts, no replay request or later work-data leakage. Native HWND movement plus real note/task persistence; aggregate WPF goal history present and opt-in defaults off. No external AI requests.\n");
+        File.WriteAllText("artifacts/goal-smoke-result.txt","PASS: 16 isolated fake-service scenarios; mixed note/motion/task, whole-plan rejection, partial failure/cancel/revoke, one user-triggered first-step movement replan, stale and between-step actor changes, deleted session, truncation, mixed protocols, attachments, own-view continuity, local query receipts, no replay request or later work-data leakage. Native HWND movement, real note/task persistence, and manual interrupted-artifact reconciliation from WPF goal history; opt-in defaults off. No external AI requests.\n");
     }
     private static async Task<bool> WaitForCancel(CancellationToken token){await Task.Delay(Timeout.Infinite,token);return false;}
     private static async Task Native()
@@ -110,11 +110,20 @@ internal static class GoalChecks
         var pet=host.Pet!;var before=Position(pet);c.Draft="记下准备开会，在桌面走几步，再创建确认会议待办";await c.Send();
         if(c.Store.GoalRuns().Single().State!=GoalRunState.Completed||c.Store.UserNotes().Count!=1||c.Store.UserTasks().Count!=1||Position(pet)==before)
             throw new Exception("Real motion and productivity did not complete: "+c.ChatStatus);
+        var session=c.Session??throw new Exception("Chat session missing");var now=DateTimeOffset.Now;string recoveryId=Guid.NewGuid().ToString("N");
+        c.Store.SaveMessage(new(recoveryId,session.Id,"user","创建恢复测试记事","complete",now));
+        var recoveryPlan=GoalProtocol.Parse("[{\"intent\":\"CreateNote\",\"title\":\"恢复核对\",\"content\":\"saved before crash\"}]","创建恢复测试记事",SceneKind.Indoor);
+        c.Store.BeginGoal(recoveryId,session.Id,recoveryPlan,now);c.Store.StartGoalStep(recoveryId,0,now);c.Store.ApplyGoalWork(recoveryId,0,recoveryPlan.Steps[0].Work!,now);c.Store.RecoverGoals();c.Refresh();
         host.House!.UpdateLayout();
         var management=Descendants(host.House).OfType<Expander>().Single(x=>Equals(x.Header,"聊天记录管理 · 会话、记忆与搜索"));
         management.IsExpanded=true;host.House.UpdateLayout();
         if(!Descendants(host.House).OfType<Expander>().Any(x=>Equals(x.Header,"目标执行记录 · 本机")))throw new Exception("Goal history not available");
         var history=Descendants(host.House).OfType<Expander>().Single(x=>Equals(x.Header,"目标执行记录 · 本机"));history.IsExpanded=true;
+        host.House.UpdateLayout();var reconcile=Descendants(host.House).OfType<Button>().SingleOrDefault(x=>Equals(x.Content,"核对并确认此步已保存"));
+        if(reconcile is null)throw new Exception("Interrupted persisted artifact had no manual reconciliation action");
+        reconcile.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        if(c.Store.Goal(recoveryId)?.State!=GoalRunState.Completed||c.Store.Goal(recoveryId)?.Steps[0].Evidence!="recovered-artifact"||c.Store.UserNotes().Count!=2)
+            throw new Exception("Manual artifact reconciliation did not confirm the saved local result");
         host.House.Width=1200;host.House.Height=850;host.House.UpdateLayout();history.BringIntoView();await Task.Delay(100);
         var bitmap=new RenderTargetBitmap((int)host.House.ActualWidth,(int)host.House.ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(host.House);
         var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));Directory.CreateDirectory("artifacts/screenshots");

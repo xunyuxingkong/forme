@@ -73,9 +73,27 @@ public sealed partial class Store
     }
     public bool GoalArtifactExists(GoalStepRecord step)
     {
+        return GoalArtifactExists(step,null);
+    }
+    public bool CanReconcileGoalArtifact(GoalRun run,GoalStepRecord step)=>
+        run.State==GoalRunState.Interrupted&&step.State==GoalStepState.Uncertain&&GoalArtifactExists(step);
+    public bool ReconcileGoalArtifact(string id,int index,DateTimeOffset now)
+    {
+        using var tx=_db.BeginTransaction();var run=ReadGoal(id,tx);
+        if(run is null||run.State!=GoalRunState.Interrupted||index<0||index>=run.Steps.Count)return false;
+        var step=run.Steps[index];
+        if(step.State!=GoalStepState.Uncertain||!GoalArtifactExists(step,tx))return false;
+        var steps=run.Steps.ToArray();steps[index]=step with{State=GoalStepState.Completed,Evidence="recovered-artifact"};
+        var state=steps.All(x=>x.State==GoalStepState.Completed)?GoalRunState.Completed:GoalRunState.Interrupted;
+        WriteGoal(run with{State=state,Steps=steps,Updated=now},tx);tx.Commit();return true;
+    }
+    private bool GoalArtifactExists(GoalStepRecord step,SqliteTransaction? tx)
+    {
         if(step.ArtifactId is not {} id)return false;
         string? table=step.Capability switch{"CreateNote"=>"user_notes","CreateTask"=>"user_tasks","CreateReminder"=>"user_reminders",_=>null};
-        return table is not null&&Convert.ToInt64(Scalar("SELECT count(*) FROM "+table+" WHERE id=$0",id))==1;
+        if(table is null)return false;
+        using var command=Command("SELECT count(*) FROM "+table+" WHERE id=$0",tx,id);
+        return Convert.ToInt64(command.ExecuteScalar())==1;
     }
     public string ApplyGoalWork(string id,int index,ProductivityIntent work,DateTimeOffset now)
     {

@@ -112,6 +112,6 @@ internal sealed partial class Controller
         if(evidence?.StartsWith("play:boat:",StringComparison.Ordinal)==true&&evidence!="play:boat:waiting")return " · 实际抵达"+PaperBoat.DockName(evidence[10..]);
         if(evidence?.StartsWith("found:",StringComparison.Ordinal)==true&&int.TryParse(evidence[6..],out int count))return $" · 找到 {count} 条";
         if(evidence?.StartsWith("today:",StringComparison.Ordinal)==true&&int.TryParse(evidence[6..],out int today))return $" · 今日 {today} 条";
-        return evidence=="saved"?" · 已在本机保存":evidence?.StartsWith("preflight:",StringComparison.Ordinal)==true?" · 整体预检未通过":"";
+        return evidence=="saved"?" · 已在本机保存":evidence=="recovered-artifact"?" · 本机产物已核对，未重放":evidence?.StartsWith("preflight:",StringComparison.Ordinal)==true?" · 整体预检未通过":"";
     }
 }
