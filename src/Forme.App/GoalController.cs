@@ -9,11 +9,12 @@ internal sealed partial class Controller
     internal void PrepareGoalReplan(string id)
     {
         if(Busy||!Preferences.AllowGoalPlans)throw new OperationFailureException("请先停止当前任务，并在设置中开启跨组件目标计划。");
-        var run=Store.Goal(id);if(run is null||!CanPrepareGoalReplan(run))throw new OperationFailureException("该目标状态不支持重规划；只有首个移动步骤明确因路径阻挡而失败时，才可请求一次调整。");
+        var run=Store.Goal(id);if(run is null||!CanPrepareGoalReplan(run))throw new OperationFailureException("该目标状态不支持重规划；只有没有步骤执行、且首个移动步骤明确遇到路径阻挡或目标不可用时，才可请求一次调整。");
         string source=Store.GoalSource(run)??throw new OperationFailureException("找不到原目标消息，无法安全重规划。");
         if(!Store.BeginGoalReplan(id,DateTimeOffset.Now))throw new OperationFailureException("该目标的重规划额度已用完或状态已改变。");
         if(source.Length>2000)source=source[..2000];
-        Draft=$"请为以下未完成目标重新规划一次。之前没有步骤完成；首个移动步骤收到本机回执“路径被阻挡”，其余步骤均未执行。请结合这条信息重新判断可行方案，只给出最多三步的新计划；不要声称已经执行或完成。\n原目标：{source}";
+        string failure=run.Steps[0].Evidence?.EndsWith("TargetUnavailable",StringComparison.Ordinal)==true?"目标当前不可用":"路径被阻挡";
+        Draft=$"请为以下未完成目标重新规划一次。之前没有步骤执行；首个移动步骤收到本机回执“{failure}”，其余步骤均未执行。请结合这条信息重新判断可行方案，只给出最多三步的新计划；不要声称已经执行或完成。\n原目标：{source}";
         ChatStatus="AI重规划草稿已准备；请检查后手动发送。不会自动请求或执行。";Changed?.Invoke();
     }
     private async Task<string> ExecuteGoalPlan(GoalPlan plan,ChatMessage user,ChatCapabilitySnapshot issued,CancellationToken cancellation)

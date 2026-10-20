@@ -47,9 +47,11 @@ public sealed class GoalTests
             Assert.IsTrue(store.BeginGoalReplan(source.Id,DateTimeOffset.Now));Assert.AreEqual(1,store.Goal(source.Id)!.Replans);
             Assert.IsFalse(store.BeginGoalReplan(source.Id,DateTimeOffset.Now));
 
+            foreach(string evidence in new[]{ActionResultCode.TargetUnavailable.ToString(),"preflight:"+ActionResultCode.PathBlocked,"preflight:"+ActionResultCode.TargetUnavailable})
+                Assert.IsTrue(GoalProtocol.CanReplan(failed with{Replans=0,Steps=[failed.Steps[0] with{Evidence=evidence},failed.Steps[1]]}),evidence);
             var completedEarlier=failed with{Steps=[failed.Steps[0] with{State=GoalStepState.Completed},failed.Steps[1] with{State=GoalStepState.Failed,Evidence=ActionResultCode.PathBlocked.ToString()}]};
             Assert.IsFalse(GoalProtocol.CanReplan(completedEarlier));
-            Assert.IsFalse(GoalProtocol.CanReplan(failed with{Steps=[failed.Steps[0] with{Evidence=ActionResultCode.TargetUnavailable.ToString()},failed.Steps[1]]}));
+            Assert.IsFalse(GoalProtocol.CanReplan(failed with{Steps=[failed.Steps[0] with{Evidence="preflight:"+ActionResultCode.Unauthorized},failed.Steps[1]]}));
             Assert.IsFalse(GoalProtocol.CanReplan(failed with{Steps=[failed.Steps[0] with{State=GoalStepState.Uncertain},failed.Steps[1]]}));
             Assert.IsFalse(GoalProtocol.CanReplan(failed with{State=GoalRunState.Cancelled}));
         });
