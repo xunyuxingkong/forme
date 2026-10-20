@@ -22,7 +22,7 @@ public static class AiIntentProtocol
         if(start<0)return false;
         if(response.IndexOf(CompanionCommands.Marker,start+CompanionCommands.Marker.Length,StringComparison.Ordinal)>=0)throw new ActionFailureException(ActionResultCode.NotRecognized,"AI返回了多个动作计划，没有执行。");
         int end=response.IndexOf("```",start+CompanionCommands.Marker.Length,StringComparison.Ordinal);
-        if(end<0||!string.IsNullOrWhiteSpace(response[..start])||!string.IsNullOrWhiteSpace(response[(end+3)..]))throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
+        if(end<0)throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
         json=response[(start+CompanionCommands.Marker.Length)..end].Trim();
         return true;
     }

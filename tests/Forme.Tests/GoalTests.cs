@@ -64,7 +64,8 @@ public sealed class GoalTests
         Assert.AreEqual("",ConversationText.Visible(response));Assert.AreEqual("",CompanionCommands.ContextText(response));
         for(int i=3;i<=GoalProtocol.Marker.Length;i++)Assert.AreEqual("",CompanionCommands.VisibleText(GoalProtocol.Marker[..i]));
         Assert.Throws<InvalidDataException>(()=>GoalProtocol.TryExtract(response[..^3],out _));
-        Assert.Throws<InvalidDataException>(()=>GoalProtocol.TryExtract("说明"+response,out _));
+        Assert.IsTrue(GoalProtocol.TryExtract("好的，我来安排。\n"+response+"\n计划完成后告诉你。",out var wrapped));Assert.AreEqual(Mixed,wrapped);
+        Assert.Throws<InvalidDataException>(()=>GoalProtocol.TryExtract("说明"+response+response,out _));
         Assert.AreEqual("",CompanionCommands.VisibleText(ProductivityIntentProtocol.Marker+"\nprivate"));
     }
     [TestMethod]

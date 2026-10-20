@@ -29,8 +29,7 @@ public static class GoalProtocol
     {
         json="";int start=response.IndexOf(Marker,StringComparison.Ordinal);if(start<0)return false;
         int end=response.IndexOf("```",start+Marker.Length,StringComparison.Ordinal);
-        if(end<0||response.IndexOf(Marker,start+Marker.Length,StringComparison.Ordinal)>=0||
-            !string.IsNullOrWhiteSpace(response[..start])||!string.IsNullOrWhiteSpace(response[(end+3)..]))
+        if(end<0||response.IndexOf(Marker,start+Marker.Length,StringComparison.Ordinal)>=0)
             throw new InvalidDataException("目标计划格式不完整，没有执行。");
         json=response[(start+Marker.Length)..end].Trim();return true;
     }

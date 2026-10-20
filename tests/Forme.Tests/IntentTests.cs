@@ -71,7 +71,9 @@ public sealed class IntentTests
         Assert.IsTrue(AiIntentProtocol.TryExtractActions(response,out string json));
         var intents=AiIntentProtocol.Parse(json,phrase);
         CollectionAssert.AreEqual(new[]{CompanionIntentType.ChangeScene,CompanionIntentType.Stroll,CompanionIntentType.GoTo},intents.Select(x=>x.Type).ToArray());
-        Assert.ThrowsExactly<ActionFailureException>(()=>AiIntentProtocol.TryExtractActions("说明\n"+response,out _));
+        Assert.IsTrue(AiIntentProtocol.TryExtractActions("好的，我来安排。\n"+response+"\n动作完成后我会告诉你。",out var wrapped));
+        Assert.AreEqual(json,wrapped);
+        Assert.ThrowsExactly<ActionFailureException>(()=>AiIntentProtocol.TryExtractActions("说明\n"+response+"\n"+response,out _));
     }
     [TestMethod]
     public async Task MissingPermissionsAndMissingTargetPreventEverySideEffect()
