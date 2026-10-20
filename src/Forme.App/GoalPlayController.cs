@@ -72,7 +72,8 @@ internal sealed partial class Controller
         {if(observation.Round.Length>0)GoalPlayWorld?.StopGoalPlay(observation);cancellation.ThrowIfCancellationRequested();}
         if(observation.Subject.Length==0||observation.Round.Length==0||observation.Phase is GoalPlayPhase.Cancelled or GoalPlayPhase.Unavailable)
             throw new OperationFailureException("未确认玩法已经开始，结果需核对。");
-        Store.AwaitGoalPlay(id,index,"play:"+kind+":waiting",DateTimeOffset.Now);
+        string evidence=kind=="boat"?"play:boat:waiting:"+observation.Round:"play:hide:waiting";
+        Store.AwaitGoalPlay(id,index,evidence,DateTimeOffset.Now);
         _goalPlay=new(id,observation,observation.Phase);
         if(cancellation.IsCancellationRequested){StopWaitingGoalPlay();cancellation.ThrowIfCancellationRequested();}
         ReconcileGoalPlay();

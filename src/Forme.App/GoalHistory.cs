@@ -30,6 +30,10 @@ internal sealed partial class MainWindow
                     else Ui.Error("执行记录或本机产物状态已变化，请刷新后核对。");
                 }));
             }
+            if(_c.CanReconcileGoalBoat(run))text.Children.Add(Ui.Button("核对并确认纸船本局已到岸",()=>
+            {
+                try{_c.ReconcileGoalBoat(run.Id);}catch(Exception ex) when(OperationErrors.Expected(ex)){Ui.Error(OperationErrors.Message(ex));}
+            }));
             if(!cooperative&&_c.CanPrepareGoalReplan(run))text.Children.Add(Ui.Button("准备AI重规划草稿",()=>_c.PrepareGoalReplan(run.Id)));
             var delete=Ui.Button("删除执行记录，保留产物",()=>{if(Ui.Confirm(cooperative?"删除本条合作执行记录？游戏作品保留，不会重新执行。":"删除本条执行记录？已生成的记事和待办保留；原消息不会重新执行。")){_c.Store.DeleteGoal(run.Id);_c.Refresh();}});
             delete.IsEnabled=!_c.Busy&&run.State is not (GoalRunState.Ready or GoalRunState.Running or GoalRunState.WaitingForPlay or GoalRunState.WaitingForUser);text.Children.Add(delete);entries.Children.Add(Ui.Card(text));

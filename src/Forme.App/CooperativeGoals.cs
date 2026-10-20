@@ -83,7 +83,8 @@ internal sealed partial class Controller
         if(run.Origin!=GoalOrigin.Cooperative||run.Steps[0].Capability!="ProposeBoat")return;
         bool complete=run.State==GoalRunState.Completed;
         string? actualEvidence=run.Steps[^1].Evidence;string? targetEvidence=run.Steps[0].Evidence;
-        string? actual=complete&&actualEvidence?.StartsWith("play:boat:",StringComparison.Ordinal)==true?actualEvidence![10..]:null;
+        string? actual=complete&&actualEvidence?.StartsWith("recovered-play:boat:",StringComparison.Ordinal)==true?actualEvidence["recovered-play:boat:".Length..]:
+            complete&&actualEvidence?.StartsWith("play:boat:",StringComparison.Ordinal)==true?actualEvidence[10..]:null;
         string? target=null;
         if(targetEvidence?.StartsWith("proposed:",StringComparison.Ordinal)==true)
         {
@@ -99,6 +100,6 @@ internal sealed partial class Controller
         _cooperativeStatus=complete?"共同纸船实际抵达"+PaperBoat.DockName(actual)+"。"+(_boatExperiment is null?"":"可以让AI结合这次实测结果再比较一轮。"):
             "共同纸船已停止或中断，请核对本局。";
         if(SelectedActivityId==run.Id){SelectedActivityState=complete?CompanionActivityState.Completed:CompanionActivityState.Cancelled;CompanionLifeStatus=_cooperativeStatus;}
-        if(complete)RecordExperience("cooperative-boat","boat",run.Steps[^1].Evidence![10..],SceneKind.Indoor);
+        if(complete&&actual is not null)RecordExperience("cooperative-boat","boat",actual,SceneKind.Indoor);
     }
 }

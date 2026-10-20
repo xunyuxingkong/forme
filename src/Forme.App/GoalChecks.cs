@@ -105,7 +105,7 @@ internal static class GoalChecks
                 throw new Exception("Protocol or work body appeared in assistant transcript: "+scenario);
         }
         await Native();
-        File.WriteAllText("artifacts/goal-smoke-result.txt","PASS: 18 isolated fake-service scenarios; mixed note/motion/task, whole-plan rejection, partial failure/cancel/revoke, user-triggered first-move replan for blocked paths and unavailable targets including whole-plan preflight failure, stale and between-step actor changes, deleted session, truncation, mixed protocols, attachments, own-view continuity, local query receipts, no replay request or later work-data leakage. Native HWND movement plus real note/task persistence; aggregate WPF goal history present and opt-in defaults off. No external AI requests.\n");
+        File.WriteAllText("artifacts/goal-smoke-result.txt","PASS: 18 isolated fake-service scenarios; mixed note/motion/task, whole-plan rejection, partial failure/cancel/revoke, user-triggered first-move replan for blocked paths and unavailable targets including whole-plan preflight failure, stale and between-step actor changes, deleted session, truncation, mixed protocols, attachments, own-view continuity, local query receipts, no replay request or later work-data leakage. Native HWND movement plus real note/task persistence; aggregate WPF goal history and manual exact-round boat result reconciliation present; opt-in defaults off. No external AI requests.\n");
     }
     private static async Task<bool> WaitForCancel(CancellationToken token){await Task.Delay(Timeout.Infinite,token);return false;}
     private static async Task Native()
@@ -139,6 +139,17 @@ internal static class GoalChecks
         var bitmap=new RenderTargetBitmap((int)host.House.ActualWidth,(int)host.House.ActualHeight,96,96,PixelFormats.Pbgra32);bitmap.Render(host.House);
         var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));Directory.CreateDirectory("artifacts/screenshots");
         using var screenshot=File.Create("artifacts/screenshots/goal-ledger.png");encoder.Save(screenshot);
+        string coopRound=Guid.NewGuid().ToString("N");var coop=c.Store.BeginCooperativeGoal("boat",c.Preferences.Endpoint,c.Preferences.Model,now);
+        c.Store.StartGoalStep(coop.Id,0,now);c.Store.ReserveCooperativeRequest(coop.Id,c.Preferences.Endpoint,c.Preferences.Model,now);
+        c.Store.FinishGoalStep(coop.Id,0,GoalStepState.Completed,"proposed:bridge",now);c.Store.AwaitGoalConfirmation(coop.Id,now);
+        c.Store.StartGoalStep(coop.Id,1,now);c.Store.AwaitGoalPlay(coop.Id,1,"play:boat:waiting:"+coopRound,now);
+        c.Store.SaveBoatPlayReceipt(coopRound,"bridge",now);c.Store.RecoverGoals();host.House.Navigate("boat");host.House.UpdateLayout();
+        var coopHistory=Descendants(host.House).OfType<Expander>().Single(x=>Equals(x.Header,"合作玩法执行记录 · 本机"));coopHistory.IsExpanded=true;host.House.UpdateLayout();
+        var boatReconcile=Descendants(host.House).OfType<Button>().SingleOrDefault(x=>Equals(x.Content,"核对并确认纸船本局已到岸"));
+        if(boatReconcile is null)throw new Exception("Interrupted boat goal with a matching local receipt had no manual reconciliation action");
+        boatReconcile.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        if(c.Store.Goal(coop.Id)?.State!=GoalRunState.Completed||c.Store.Goal(coop.Id)?.Steps[^1].Evidence!="recovered-play:boat:bridge"||c.Store.Goal(coop.Id)?.Requests!=1)
+            throw new Exception("Manual boat reconciliation did not settle the exact local round without another AI request");
     }
     private static System.Drawing.Point Position(PetWindow pet)
     {if(!ScreenCoordinateService.TryGetWindowRect(new WindowInteropHelper(pet).Handle,out var rect))throw new Exception("Pet HWND unavailable");return rect.Location;}

@@ -6,6 +6,13 @@ internal sealed partial class Controller
 {
     private bool _goalExecuting;
     internal bool CanPrepareGoalReplan(GoalRun run)=>!Busy&&Preferences.AllowGoalPlans&&Session?.Id==run.SessionId&&GoalProtocol.CanReplan(run);
+    internal bool CanReconcileGoalBoat(GoalRun run)=>!Busy&&Store.CanReconcileGoalBoat(run);
+    internal void ReconcileGoalBoat(string id)
+    {
+        if(Busy||!Store.ReconcileGoalBoat(id,DateTimeOffset.Now))throw new OperationFailureException("没有找到与该目标局次一致的到岸回执，请刷新后核对。");
+        if(Store.Goal(id) is {} run){ChatStatus=GoalSummary(run);CooperativeBoatResolved(run);}
+        Changed?.Invoke();
+    }
     internal void PrepareGoalReplan(string id)
     {
         if(Busy||!Preferences.AllowGoalPlans)throw new OperationFailureException("请先停止当前任务，并在设置中开启跨组件目标计划。");
@@ -110,6 +117,7 @@ internal sealed partial class Controller
         if(evidence=="no-proposal")return " · 没有可执行建议";
         if(evidence?.StartsWith("proposed:",StringComparison.Ordinal)==true)return " · "+(evidence[9..].Contains(':')?"目标"+PaperBoat.DockName(evidence[9..].Split(':',2)[0])+"，":"")+"预计抵达"+PaperBoat.DockName(evidence[9..].Split(':',2)[^1])+"，尚未采用";
         if(evidence=="play:hide:found")return " · 本局找到小球";
+        if(evidence?.StartsWith("recovered-play:boat:",StringComparison.Ordinal)==true)return " · 已核对本局到岸："+PaperBoat.DockName(evidence[20..]);
         if(evidence?.StartsWith("play:boat:",StringComparison.Ordinal)==true&&evidence!="play:boat:waiting")return " · 实际抵达"+PaperBoat.DockName(evidence[10..]);
         if(evidence?.StartsWith("found:",StringComparison.Ordinal)==true&&int.TryParse(evidence[6..],out int count))return $" · 找到 {count} 条";
         if(evidence?.StartsWith("today:",StringComparison.Ordinal)==true&&int.TryParse(evidence[6..],out int today))return $" · 今日 {today} 条";

@@ -44,10 +44,44 @@ public sealed class CooperativeGoalTests
             store.StartGoalStep(boat.Id,1,Now);
             Assert.Throws<OperationFailureException>(()=>store.StartGoalStep(boat.Id,1,Now));
             Assert.Throws<OperationFailureException>(()=>store.FinishGoalStep(boat.Id,1,GoalStepState.Completed,"Completed",Now));
-            store.AwaitGoalPlay(boat.Id,1,"play:boat:waiting",Now);
+            string round=Guid.NewGuid().ToString("N");
+            store.AwaitGoalPlay(boat.Id,1,"play:boat:waiting:"+round,Now);
             Assert.IsTrue(store.ResolveGoalPlay(boat.Id,GoalStepState.Completed,"play:boat:bridge",Now));
             Assert.IsFalse(store.ResolveGoalPlay(boat.Id,GoalStepState.Completed,"play:boat:bridge",Now));
             Assert.AreEqual(GoalRunState.Completed,store.Goal(boat.Id)!.State);Assert.AreEqual(1,store.Goal(boat.Id)!.Requests);
+        });
+    }
+    [TestMethod]
+    public void InterruptedBoatCanBeManuallyReconciledFromItsExactPersistedRoundReceipt()
+    {
+        WithStore(store=>{
+            var boat=Begin(store,"boat");store.ReserveCooperativeRequest(boat.Id,Endpoint,"test-model",Now);
+            store.FinishGoalStep(boat.Id,0,GoalStepState.Completed,"proposed:bridge",Now);store.AwaitGoalConfirmation(boat.Id,Now);
+            store.StartGoalStep(boat.Id,1,Now);string round=Guid.NewGuid().ToString("N");
+            store.AwaitGoalPlay(boat.Id,1,"play:boat:waiting:"+round,Now);
+            Assert.Throws<InvalidDataException>(()=>store.SaveBoatPlayReceipt("not-a-round","bridge",Now));
+            Assert.Throws<InvalidDataException>(()=>store.SaveBoatPlayReceipt(Guid.NewGuid().ToString("N"),"unknown",Now));
+            store.SaveBoatPlayReceipt(round,"bridge",Now);
+            store.RecoverGoals();var interrupted=store.Goal(boat.Id)!;
+            Assert.AreEqual(GoalRunState.Interrupted,interrupted.State);
+            Assert.AreEqual(GoalStepState.Uncertain,interrupted.Steps[^1].State);
+            Assert.IsTrue(store.CanReconcileGoalBoat(interrupted));
+            Assert.IsTrue(store.ReconcileGoalBoat(boat.Id,Now.AddMinutes(1)));
+            var recovered=store.Goal(boat.Id)!;
+            Assert.AreEqual(GoalRunState.Completed,recovered.State);
+            Assert.AreEqual(GoalStepState.Completed,recovered.Steps[^1].State);
+            Assert.AreEqual("recovered-play:boat:bridge",recovered.Steps[^1].Evidence);
+            Assert.IsFalse(store.ReconcileGoalBoat(boat.Id,Now.AddMinutes(2)));
+            Assert.IsFalse(store.CanReconcileGoalBoat(recovered));
+            Assert.AreEqual(1,recovered.Requests);
+        });
+        WithStore(store=>{
+            var boat=Begin(store,"boat");store.ReserveCooperativeRequest(boat.Id,Endpoint,"test-model",Now);
+            store.FinishGoalStep(boat.Id,0,GoalStepState.Completed,"proposed:bridge",Now);store.AwaitGoalConfirmation(boat.Id,Now);
+            store.StartGoalStep(boat.Id,1,Now);string round=Guid.NewGuid().ToString("N");store.AwaitGoalPlay(boat.Id,1,"play:boat:waiting:"+round,Now);
+            store.SaveBoatPlayReceipt(Guid.NewGuid().ToString("N"),"lily",Now);store.RecoverGoals();
+            Assert.IsFalse(store.CanReconcileGoalBoat(store.Goal(boat.Id)!));
+            Assert.IsFalse(store.ReconcileGoalBoat(boat.Id,Now));
         });
     }
     [TestMethod]
