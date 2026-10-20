@@ -186,7 +186,9 @@ internal sealed partial class Controller : IDisposable
                 try
                 {
                     string completedReply=pending.Snapshot();
-                    if(new[]{CompanionCommands.Marker,ProductivityIntentProtocol.Marker,GoalProtocol.Marker}.Count(marker=>completedReply.Contains(marker,StringComparison.Ordinal))>1)throw new InvalidDataException("AI返回了多种操作协议，整组没有执行。");
+                    int protocolCount=new[]{CompanionCommands.Marker,ProductivityIntentProtocol.Marker,GoalProtocol.Marker}.Count(marker=>completedReply.Contains(marker,StringComparison.Ordinal));
+                    if(CompanionCommands.TryExtractLegacyActionPlan(completedReply,out _))protocolCount++;
+                    if(protocolCount>1)throw new InvalidDataException("AI返回了多种操作协议，整组没有执行。");
                     if(GoalProtocol.TryExtract(completedReply,out string goalJson))
                     {
                         var plan=GoalProtocol.Parse(goalJson,input,capabilitySnapshot!.InitialScene);

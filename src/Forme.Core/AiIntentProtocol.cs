@@ -19,7 +19,8 @@ public static class AiIntentProtocol
     public static bool TryExtractActions(string response,out string json)
     {
         json="";int start=response.IndexOf(CompanionCommands.Marker,StringComparison.Ordinal);
-        if(start<0)return false;
+        if(start<0)return CompanionCommands.TryExtractLegacyActionPlan(response,out json);
+        if(CompanionCommands.TryExtractLegacyActionPlan(response,out _))throw new ActionFailureException(ActionResultCode.NotRecognized,"AI返回了多个动作计划，没有执行。");
         if(response.IndexOf(CompanionCommands.Marker,start+CompanionCommands.Marker.Length,StringComparison.Ordinal)>=0)throw new ActionFailureException(ActionResultCode.NotRecognized,"AI返回了多个动作计划，没有执行。");
         int end=response.IndexOf("```",start+CompanionCommands.Marker.Length,StringComparison.Ordinal);
         if(end<0)throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");

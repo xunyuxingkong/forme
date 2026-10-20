@@ -67,13 +67,55 @@ public static class CompanionCommands
     private static bool IsLegacyActionObject(JsonElement root)
     {
         if(root.ValueKind!=JsonValueKind.Object)return false;
-        bool isAction=false,hasActions=false;
+        bool isAction=false,hasActions=false,isFormeActions=false,hasAction=false;
         foreach(var property in root.EnumerateObject())
         {
-            if(property.Name.Equals("type",StringComparison.OrdinalIgnoreCase))isAction=property.Value.ValueKind==JsonValueKind.String&&property.Value.GetString()?.Equals("action",StringComparison.OrdinalIgnoreCase)==true;
+            if(property.Name.Equals("type",StringComparison.OrdinalIgnoreCase))
+            {
+                isAction=property.Value.ValueKind==JsonValueKind.String&&property.Value.GetString()?.Equals("action",StringComparison.OrdinalIgnoreCase)==true;
+                isFormeActions=property.Value.ValueKind==JsonValueKind.String&&property.Value.GetString()?.Equals("forme-actions",StringComparison.OrdinalIgnoreCase)==true;
+            }
             else if(property.Name.Equals("actions",StringComparison.OrdinalIgnoreCase))hasActions=property.Value.ValueKind==JsonValueKind.Array;
+            else if(property.Name.Equals("action",StringComparison.OrdinalIgnoreCase))hasAction=property.Value.ValueKind==JsonValueKind.String;
         }
-        return isAction&&hasActions;
+        return isAction&&hasActions||isFormeActions&&hasAction;
+    }
+    public static bool TryExtractLegacyActionPlan(string response,out string json)
+    {
+        json="";bool found=false;int offset=0;
+        while((offset=response.IndexOf("```",offset,StringComparison.Ordinal))>=0)
+        {
+            int headerStart=offset+3,headerEnd=response.IndexOf('\n',headerStart);
+            if(headerEnd<0)break;
+            string language=response[headerStart..headerEnd].Trim();int bodyEnd=response.IndexOf("```",headerEnd+1,StringComparison.Ordinal);
+            if(bodyEnd<0)break;
+            string body=response[(headerEnd+1)..bodyEnd];offset=bodyEnd+3;
+            if(!language.Equals("json",StringComparison.OrdinalIgnoreCase)||!IsLegacyFormeAction(body))continue;
+            if(found)throw new ActionFailureException(ActionResultCode.NotRecognized,"AI返回了多个动作计划，没有执行。");
+            json=NormalizeLegacyFormeAction(body);found=true;
+        }
+        return found;
+    }
+    private static bool IsLegacyFormeAction(string body)
+    {
+        try
+        {
+            if(body.Length>8192)return false;
+            using var document=JsonDocument.Parse(body,new(){MaxDepth=4});var root=document.RootElement;
+            return root.ValueKind==JsonValueKind.Object&&root.TryGetProperty("type",out var type)&&type.ValueKind==JsonValueKind.String&&type.GetString()?.Equals("forme-actions",StringComparison.OrdinalIgnoreCase)==true;
+        }
+        catch(JsonException){return false;}
+    }
+    private static string NormalizeLegacyFormeAction(string body)
+    {
+        using var document=JsonDocument.Parse(body,new(){MaxDepth=4});var root=document.RootElement;
+        var fields=root.EnumerateObject().ToArray();
+        if(fields.Any(x=>x.Name is not ("type" or "action" or "target" or "mode" or "count" or "view"))||fields.Select(x=>x.Name).Distinct().Count()!=fields.Length||
+            !root.TryGetProperty("action",out var action)||action.ValueKind!=JsonValueKind.String)
+            throw new ActionFailureException(ActionResultCode.NotRecognized,"AI动作计划格式不完整，没有执行。");
+        var normalized=new Dictionary<string,object?>{{"type",action.GetString()}};
+        foreach(string key in new[]{"target","mode","count","view"})if(root.TryGetProperty(key,out var value))normalized[key]=value.Clone();
+        return JsonSerializer.Serialize(new[]{normalized});
     }
     public static string ContextText(string text)
     {int report=text.IndexOf(ReportMarker,StringComparison.Ordinal);return VisibleText(report>=0?text[..report]:text);}
