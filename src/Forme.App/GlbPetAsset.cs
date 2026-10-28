@@ -11,7 +11,10 @@ namespace Forme.App;
 internal sealed class GlbPetAsset
 {
     public Dictionary<(int Joint,int Material),PetMeshBatch> Batches {get;}=[];
+    public List<PetSkinnedBatch> SkinnedBatches {get;}=[];
     public Dictionary<int,GlbPetJoint> Joints {get;}=[];
+    public Dictionary<int,PetSkin> Skins {get;}=[];
+    public Dictionary<int,string> HumanoidBones {get;}=[];
     public Dictionary<string,GlbPetClip> Clips {get;}=new(StringComparer.OrdinalIgnoreCase);
     public PetMaterial[] Materials {get;private set;}=[];
     public static Material Fallback {get;}=new DiffuseMaterial(Brushes.White);
@@ -19,13 +22,29 @@ internal sealed class GlbPetAsset
     public static GlbPetAsset Read(string resourceName,string? excludedNodeName=null)
     {
         using Stream stream=Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName)??throw new InvalidDataException($"Embedded model resource is missing: {resourceName}");using var memory=new MemoryStream();stream.CopyTo(memory);byte[] data=memory.ToArray();
+        return ReadData(data,resourceName,excludedNodeName);
+    }
+    public static GlbPetAsset ReadFile(string path)=>ReadData(File.ReadAllBytes(path),path,null);
+    private static GlbPetAsset ReadData(byte[] data,string resourceName,string? excludedNodeName)
+    {
         if(data.Length<20||BinaryPrimitives.ReadUInt32LittleEndian(data)!=0x46546C67||BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(4))!=2||BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(8))!=data.Length)throw new InvalidDataException($"Invalid GLB header: {resourceName}");
         JsonDocument? document=null;byte[]? binary=null;int offset=12;
         while(offset+8<=data.Length){int length=checked((int)BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset)));uint type=BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(offset+4));offset+=8;if(length<0||offset+length>data.Length)throw new InvalidDataException("Invalid GLB chunk.");if(type==0x4E4F534A)document=JsonDocument.Parse(data.AsMemory(offset,length));else if(type==0x004E4942)binary=data.AsSpan(offset,length).ToArray();offset+=length;}
         using(document)
         {
             if(document is null||binary is null)throw new InvalidDataException("GLB requires JSON and binary chunks.");JsonElement root=document.RootElement;var result=new GlbPetAsset();result.Materials=LoadMaterials(root,binary);JsonElement nodes=root.GetProperty("nodes"),meshes=root.GetProperty("meshes"),accessors=root.GetProperty("accessors"),views=root.GetProperty("bufferViews");int scene=root.TryGetProperty("scene",out var sceneIndex)?sceneIndex.GetInt32():0;
-            var animatedNodes=new HashSet<int>();
+            if(root.TryGetProperty("extensions",out var extensions)&&extensions.TryGetProperty("VRM",out var vrm)&&vrm.TryGetProperty("humanoid",out var humanoid)&&humanoid.TryGetProperty("humanBones",out var humanBones))
+                foreach(var bone in humanBones.EnumerateArray())result.HumanoidBones[bone.GetProperty("node").GetInt32()]=bone.GetProperty("bone").GetString()!;
+            if(root.TryGetProperty("skins",out var skinDefs))
+            foreach(var skinDef in skinDefs.EnumerateArray())
+            {
+                int id=result.Skins.Count;int[] joints=skinDef.GetProperty("joints").EnumerateArray().Select(x=>x.GetInt32()).ToArray();
+                Matrix4x4[] inverseBind=skinDef.TryGetProperty("inverseBindMatrices",out var inverseBindAccessor)?ReadMatrices(inverseBindAccessor.GetInt32()):Enumerable.Repeat(Matrix4x4.Identity,joints.Length).ToArray();
+                if(inverseBind.Length!=joints.Length)throw new InvalidDataException("Skin joint and inverse-bind counts do not match.");
+                result.Skins.Add(id,new(id,joints,inverseBind));
+            }
+            var animatedNodes=new HashSet<int>();var skinJointNodes=new HashSet<int>();
+            if(root.TryGetProperty("skins",out var rigSkins))foreach(var rigSkin in rigSkins.EnumerateArray())foreach(var joint in rigSkin.GetProperty("joints").EnumerateArray())skinJointNodes.Add(joint.GetInt32());
             if(root.TryGetProperty("animations",out var animations))
             foreach(var animation in animations.EnumerateArray())
             {
@@ -45,25 +64,37 @@ internal sealed class GlbPetAsset
                 result.Clips.Add(animation.GetProperty("name").GetString()!,new(tracks.ToArray()));
             }
             foreach(var item in root.GetProperty("scenes")[scene].GetProperty("nodes").EnumerateArray())Visit(item.GetInt32(),Matrix4x4.Identity,-1);
-            if(result.Batches.Count==0)throw new InvalidDataException("GLB has no triangle meshes.");return result;
+            if(result.Batches.Count==0&&result.SkinnedBatches.Count==0)throw new InvalidDataException("GLB has no triangle meshes.");return result;
 
             void Visit(int index,Matrix4x4 parent,int joint)
             {
                 JsonElement node=nodes[index];if(excludedNodeName is not null&&node.TryGetProperty("name",out var name)&&name.GetString()==excludedNodeName)return;
                 Matrix4x4 local=Local(node),world=local*parent;
-                if(animatedNodes.Contains(index))
+                if(animatedNodes.Contains(index)||skinJointNodes.Contains(index))
                 {
                     if(!Matrix4x4.Decompose(local,out var scale,out var rotation,out var translation))throw new InvalidDataException("Invalid animated node transform.");
-                    var restWorld=world*(joint<0?Matrix4x4.Identity:result.Joints[joint].RestWorld);
-                    result.Joints.Add(index,new(index,joint,scale,rotation,translation,parent,restWorld));joint=index;world=Matrix4x4.Identity;
+                    var restWorld=world*(joint<0?Matrix4x4.Identity:result.Joints[joint].RestWorld);string jointName=node.TryGetProperty("name",out var jointNameElement)?jointNameElement.GetString()??index.ToString():index.ToString();
+                    result.Joints.Add(index,new(index,joint,jointName,scale,rotation,translation,parent,restWorld));joint=index;world=Matrix4x4.Identity;
                 }
                 if(node.TryGetProperty("mesh",out var meshIndex))foreach(var primitive in meshes[meshIndex.GetInt32()].GetProperty("primitives").EnumerateArray())
                 {
-                    if(primitive.TryGetProperty("mode",out var mode)&&mode.GetInt32()!=4)continue;int mat=primitive.TryGetProperty("material",out var m)?m.GetInt32():-1;var batchKey=(joint,mat);if(!result.Batches.TryGetValue(batchKey,out var batch))result.Batches[batchKey]=batch=new();
-                    JsonElement attrs=primitive.GetProperty("attributes");var positions=ReadVectors(attrs.GetProperty("POSITION").GetInt32(),3);int start=batch.Positions.Count;int normalId=attrs.TryGetProperty("NORMAL",out var normalElement)?normalElement.GetInt32():-1;var normals=normalId>=0?ReadVectors(normalId,3):Array.Empty<Vector3>();int uvId=attrs.TryGetProperty("TEXCOORD_0",out var uvElement)?uvElement.GetInt32():-1;var uvs=uvId>=0?ReadVectors(uvId,2):Array.Empty<Vector3>();
+                    if(primitive.TryGetProperty("mode",out var mode)&&mode.GetInt32()!=4)continue;int mat=primitive.TryGetProperty("material",out var m)?m.GetInt32():-1;
+                    JsonElement attrs=primitive.GetProperty("attributes");var positions=ReadVectors(attrs.GetProperty("POSITION").GetInt32(),3);int normalId=attrs.TryGetProperty("NORMAL",out var normalElement)?normalElement.GetInt32():-1;var normals=normalId>=0?ReadVectors(normalId,3):Array.Empty<Vector3>();int uvId=attrs.TryGetProperty("TEXCOORD_0",out var uvElement)?uvElement.GetInt32():-1;var uvs=uvId>=0?ReadVectors(uvId,2):Array.Empty<Vector3>();int[] indices=primitive.TryGetProperty("indices",out var indexElement)?ReadIndices(indexElement.GetInt32()):Enumerable.Range(0,positions.Length).ToArray();
+                    if(node.TryGetProperty("skin",out var skinElement)&&attrs.TryGetProperty("JOINTS_0",out var jointElement)&&attrs.TryGetProperty("WEIGHTS_0",out var weightElement))
+                    {
+                        int[] jointIndices=ReadJoints(jointElement.GetInt32());Vector4[] weights=ReadVector4(weightElement.GetInt32());
+                        if(jointIndices.Length!=positions.Length*4||weights.Length!=positions.Length)throw new InvalidDataException("Invalid skinned pet vertex attributes.");
+                        // VRM primitives often share a full POSITION accessor. Skin only
+                        // vertices referenced by this primitive, rather than duplicating
+                        // the entire character for every material (Hu Tao: 209016 -> 18176).
+                        var used=indices.Distinct().ToArray();if(used.Any(i=>(uint)i>=(uint)positions.Length))throw new InvalidDataException("Invalid skinned mesh indices.");
+                        var remap=used.Select((old,index)=>(old,index)).ToDictionary(x=>x.old,x=>x.index);
+                        result.SkinnedBatches.Add(new(skinElement.GetInt32(),mat,world,used.Select(i=>positions[i]).ToArray(),used.Select(i=>i<normals.Length?normals[i]:Vector3.UnitY).ToArray(),used.Select(i=>i<uvs.Length?new Vector2(uvs[i].X,uvs[i].Y):Vector2.Zero).ToArray(),indices.Select(i=>remap[i]).ToArray(),used.SelectMany(i=>jointIndices.Skip(i*4).Take(4)).ToArray(),used.Select(i=>weights[i]).ToArray()));continue;
+                    }
+                    var batchKey=(joint,mat);if(!result.Batches.TryGetValue(batchKey,out var batch))result.Batches[batchKey]=batch=new();int start=batch.Positions.Count;
                     if(!Matrix4x4.Invert(world,out var inverse))throw new InvalidDataException("Invalid pet mesh transform.");var normalMatrix=Matrix4x4.Transpose(inverse);
                     foreach(var p in positions)batch.Positions.Add(Vector3.Transform(p,world));if(normals.Length==positions.Length)foreach(var normal in normals){var n=Vector3.TransformNormal(normal,normalMatrix);batch.Normals.Add(n.LengthSquared()>0?Vector3.Normalize(n):Vector3.UnitY);}else batch.Normals.AddRange(Enumerable.Repeat(Vector3.UnitY,positions.Length));if(uvs.Length==positions.Length)foreach(var uv in uvs)batch.Uvs.Add(new(uv.X,uv.Y));else batch.Uvs.AddRange(Enumerable.Repeat(Vector2.Zero,positions.Length));
-                    if(primitive.TryGetProperty("indices",out var indexElement)){foreach(int triangleIndex in ReadIndices(indexElement.GetInt32()))batch.Indices.Add(start+triangleIndex);}else for(int i=0;i+2<positions.Length;i+=3){batch.Indices.Add(start+i);batch.Indices.Add(start+i+1);batch.Indices.Add(start+i+2);}
+                    foreach(int triangleIndex in indices)batch.Indices.Add(start+triangleIndex);
                 }
                 if(node.TryGetProperty("children",out var children))foreach(var child in children.EnumerateArray())Visit(child.GetInt32(),world,joint);
             }
@@ -73,6 +104,22 @@ internal sealed class GlbPetAsset
                 if(accessor.GetProperty("componentType").GetInt32()!=5126)throw new InvalidDataException("Animation keys must be float values.");
                 int count=accessor.GetProperty("count").GetInt32(),stride=view.TryGetProperty("byteStride",out var s)?s.GetInt32():4*components,begin=(view.TryGetProperty("byteOffset",out var v)?v.GetInt32():0)+(accessor.TryGetProperty("byteOffset",out var a)?a.GetInt32():0);var values=new float[count*components];
                 for(int i=0;i<count;i++)for(int c=0;c<components;c++)values[i*components+c]=BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(binary.AsSpan(begin+i*stride+c*4)));return values;
+            }
+            Matrix4x4[] ReadMatrices(int accessorIndex)
+            {
+                float[] values=ReadFloats(accessorIndex,16);var matrices=new Matrix4x4[values.Length/16];
+                for(int i=0;i<matrices.Length;i++){int at=i*16;matrices[i]=new(values[at],values[at+1],values[at+2],values[at+3],values[at+4],values[at+5],values[at+6],values[at+7],values[at+8],values[at+9],values[at+10],values[at+11],values[at+12],values[at+13],values[at+14],values[at+15]);}
+                return matrices;
+            }
+            int[] ReadJoints(int accessorIndex)
+            {
+                JsonElement accessor=accessors[accessorIndex],view=views[accessor.GetProperty("bufferView").GetInt32()];int count=accessor.GetProperty("count").GetInt32(),component=accessor.GetProperty("componentType").GetInt32(),size=component switch{5121=>1,5123=>2,_=>throw new InvalidDataException("Unsupported skin joint component.")},stride=view.TryGetProperty("byteStride",out var s)?s.GetInt32():size*4,begin=(view.TryGetProperty("byteOffset",out var v)?v.GetInt32():0)+(accessor.TryGetProperty("byteOffset",out var a)?a.GetInt32():0);var output=new int[count*4];
+                for(int i=0;i<count;i++)for(int c=0;c<4;c++){int at=begin+i*stride+c*size;output[i*4+c]=component==5121?binary[at]:BinaryPrimitives.ReadUInt16LittleEndian(binary.AsSpan(at));}return output;
+            }
+            Vector4[] ReadVector4(int accessorIndex)
+            {
+                JsonElement accessor=accessors[accessorIndex],view=views[accessor.GetProperty("bufferView").GetInt32()];if(accessor.GetProperty("componentType").GetInt32()!=5126)throw new InvalidDataException("Skin weights must be float values.");int count=accessor.GetProperty("count").GetInt32(),stride=view.TryGetProperty("byteStride",out var s)?s.GetInt32():16,begin=(view.TryGetProperty("byteOffset",out var v)?v.GetInt32():0)+(accessor.TryGetProperty("byteOffset",out var a)?a.GetInt32():0);var output=new Vector4[count];
+                for(int i=0;i<count;i++){int at=begin+i*stride;output[i]=new(BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(binary.AsSpan(at))),BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(binary.AsSpan(at+4))),BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(binary.AsSpan(at+8))),BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(binary.AsSpan(at+12))));}return output;
             }
             Vector3[] ReadVectors(int accessorIndex,int components)
             {
@@ -107,7 +154,7 @@ internal sealed class GlbPetAsset
     }
     private static PetMaterial[] LoadMaterials(JsonElement root,byte[] binary)
     {
-        JsonElement defs=root.GetProperty("materials"),textures=root.GetProperty("textures"),images=root.GetProperty("images"),views=root.GetProperty("bufferViews");var cache=new ImageTexture?[images.GetArrayLength()];var output=new PetMaterial[defs.GetArrayLength()];int i=0;
+        JsonElement defs=root.TryGetProperty("materials",out var materialDefs)?materialDefs:default,textures=root.TryGetProperty("textures",out var textureDefs)?textureDefs:default,images=root.TryGetProperty("images",out var imageDefs)?imageDefs:default,views=root.GetProperty("bufferViews");var cache=new ImageTexture?[images.ValueKind==JsonValueKind.Array?images.GetArrayLength():0];var output=new PetMaterial[defs.ValueKind==JsonValueKind.Array?defs.GetArrayLength():0];int i=0;
         foreach(var definition in defs.EnumerateArray())
         {
             JsonElement pbr=definition.GetProperty("pbrMetallicRoughness");float metallic=pbr.TryGetProperty("metallicFactor",out var mf)?mf.GetSingle():1,roughness=pbr.TryGetProperty("roughnessFactor",out var rf)?rf.GetSingle():1,alpha=1;float red=1,green=1,blue=1;if(pbr.TryGetProperty("baseColorFactor",out var color)){red=color[0].GetSingle();green=color[1].GetSingle();blue=color[2].GetSingle();alpha=color[3].GetSingle();}
@@ -115,7 +162,7 @@ internal sealed class GlbPetAsset
             Brush diffuse=baseColor is null?new SolidColorBrush(Color.FromArgb(Byte(alpha),Byte(red),Byte(green),Byte(blue))):new ImageBrush(baseColor.Bitmap){Stretch=Stretch.Fill,Opacity=alpha,Viewport=new System.Windows.Rect(0,0,1,1),Viewbox=new System.Windows.Rect(0,0,1,1)};diffuse.Freeze();var surface=new MaterialGroup();surface.Children.Add(new DiffuseMaterial(diffuse));float meanRough=roughness;if(mr is not null)meanRough*=mr.MeanGreen;double specularPower=2+Math.Pow(1-Math.Clamp(meanRough,0,1),2)*126;Brush specBrush=mr is null?new SolidColorBrush(Color.FromRgb(Byte(metallic*.8f+.04f),Byte(metallic*.8f+.04f),Byte(metallic*.8f+.04f))):new ImageBrush(SpecularMap(mr,metallic,roughness)){Stretch=Stretch.Fill,Viewport=new System.Windows.Rect(0,0,1,1),Viewbox=new System.Windows.Rect(0,0,1,1)};specBrush.Freeze();surface.Children.Add(new SpecularMaterial(specBrush,specularPower));surface.Freeze();output[i++]=new(surface,normal,normalScale);
         }
         return output;
-        ImageTexture Texture(int textureIndex){int imageIndex=textures[textureIndex].GetProperty("source").GetInt32();if(cache[imageIndex] is {} found)return found;JsonElement view=views[images[imageIndex].GetProperty("bufferView").GetInt32()];int start=view.GetProperty("byteOffset").GetInt32(),length=view.GetProperty("byteLength").GetInt32();using var input=new MemoryStream(binary,start,length,false);var decoder=new BitmapImage();decoder.BeginInit();decoder.CacheOption=BitmapCacheOption.OnLoad;decoder.StreamSource=input;decoder.EndInit();decoder.Freeze();var converted=new FormatConvertedBitmap(decoder,PixelFormats.Bgra32,null,0);converted.Freeze();var pixels=new byte[converted.PixelWidth*converted.PixelHeight*4];converted.CopyPixels(pixels,converted.PixelWidth*4,0);return cache[imageIndex]=new(converted,pixels);}
+        ImageTexture Texture(int textureIndex){if(textures.ValueKind!=JsonValueKind.Array||images.ValueKind!=JsonValueKind.Array)throw new InvalidDataException("GLB material references missing texture data.");int imageIndex=textures[textureIndex].GetProperty("source").GetInt32();if(cache[imageIndex] is {} found)return found;JsonElement view=views[images[imageIndex].GetProperty("bufferView").GetInt32()];int start=view.GetProperty("byteOffset").GetInt32(),length=view.GetProperty("byteLength").GetInt32();using var input=new MemoryStream(binary,start,length,false);var decoder=new BitmapImage();decoder.BeginInit();decoder.CacheOption=BitmapCacheOption.OnLoad;decoder.StreamSource=input;decoder.EndInit();decoder.Freeze();var converted=new FormatConvertedBitmap(decoder,PixelFormats.Bgra32,null,0);converted.Freeze();var pixels=new byte[converted.PixelWidth*converted.PixelHeight*4];converted.CopyPixels(pixels,converted.PixelWidth*4,0);return cache[imageIndex]=new(converted,pixels);}
     }
     private static BitmapSource SpecularMap(ImageTexture mr,float metallic,float roughness)
     {
@@ -128,9 +175,11 @@ internal sealed class PetMeshBatch
 {
     public List<Vector3> Positions {get;}=[];public List<Vector3> Normals {get;}=[];public List<Vector2> Uvs {get;}=[];public List<int> Indices {get;}=[];
 }
-internal sealed record GlbPetJoint(int Id,int Parent,Vector3 Scale,System.Numerics.Quaternion Rotation,Vector3 Translation,Matrix4x4 FixedParent,Matrix4x4 RestWorld)
+internal sealed record PetSkin(int Id,int[] Joints,Matrix4x4[] InverseBindMatrices);
+internal sealed record PetSkinnedBatch(int Skin,int Material,Matrix4x4 MeshTransform,Vector3[] Positions,Vector3[] Normals,Vector2[] Uvs,int[] Indices,int[] Joints,Vector4[] Weights);
+internal sealed record GlbPetJoint(int Id,int Parent,string Name,Vector3 Scale,System.Numerics.Quaternion Rotation,Vector3 Translation,Matrix4x4 FixedParent,Matrix4x4 RestWorld)
 {
-    public Matrix4x4 Pose(GlbPetClip? clip,double seconds)
+    public Matrix4x4 Pose(GlbPetClip? clip,double seconds,double rotationOffset=0,Vector3 eulerOffsetDegrees=default)
     {
         var scale=Scale;var rotation=Rotation;var translation=Translation;
         if(clip is not null&&clip.Tracks.TryGetValue(Id,out var tracks))
@@ -144,6 +193,8 @@ internal sealed record GlbPetJoint(int Id,int Parent,Vector3 Scale,System.Numeri
                 case "scale":scale=new(key.X,key.Y,key.Z);break;
             }
         }
+        if(rotationOffset!=0)rotation=System.Numerics.Quaternion.Normalize(rotation*System.Numerics.Quaternion.CreateFromAxisAngle(Vector3.UnitZ,(float)(rotationOffset*Math.PI/180)));
+        if(eulerOffsetDegrees!=Vector3.Zero)rotation=System.Numerics.Quaternion.Normalize(rotation*System.Numerics.Quaternion.CreateFromYawPitchRoll((float)(eulerOffsetDegrees.Y*Math.PI/180),(float)(eulerOffsetDegrees.X*Math.PI/180),(float)(eulerOffsetDegrees.Z*Math.PI/180)));
         return Matrix4x4.CreateScale(scale)*Matrix4x4.CreateFromQuaternion(rotation)*Matrix4x4.CreateTranslation(translation)*FixedParent;
     }
 }

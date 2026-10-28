@@ -2,6 +2,7 @@ namespace Forme.Core;
 
 public static class ActionPlanner
 {
+    private const int MaxExpandedSteps=6;
     public static CompanionIntent FromCommand(CompanionCommand command) => command.Action switch
     {
         "go" => new(CompanionIntentType.GoTo, command.Value, command.Motion, Source:"rule",View:command.View),
@@ -60,14 +61,14 @@ public static class ActionPlanner
             {
                 steps.Add(command);
                 if(command.Action == "scene") scene = command.Value == "outdoor" ? SceneKind.Outdoor : SceneKind.Indoor;
-                if(steps.Count > 3) throw new ActionFailureException(ActionResultCode.NotRecognized,"包含重复动作后超过三步，请分开请求。");
+                if(steps.Count > MaxExpandedSteps) throw new ActionFailureException(ActionResultCode.NotRecognized,"展开后的动作超过六步，请分开请求。");
             }
         }
         return ActionSurface.Bind(new(steps),initialScene);
     }
     public static ActionResult? Preflight(ActionPlan plan, Preferences preferences, Func<ActionPlan,ActionResult?>? availability = null)
     {
-        if(plan.Steps.Count is <1 or >3) return ActionResult.Failure(ActionResultCode.NotRecognized,"动作计划必须为一至三步。");
+        if(plan.Steps.Count is <1 or >MaxExpandedSteps) return ActionResult.Failure(ActionResultCode.NotRecognized,"动作计划必须为一至六步。");
         if(plan.Steps.Any(x=>x.Action is "layout" or "furniture")&&plan.Steps.Any(x=>x.Action is not ("layout" or "furniture")))return ActionResult.Failure(ActionResultCode.NotRecognized,"家具预览请单独请求，整组未执行。");
         if(plan.Steps.Any(x=>x.Action=="hide")&&plan.Steps.Count>1)return ActionResult.Failure(ActionResultCode.NotRecognized,"藏物玩法请单独请求，整组未执行。");
         if(plan.Steps.Any(x=>x.Action.StartsWith("boat",StringComparison.Ordinal))&&plan.Steps.Any(x=>!x.Action.StartsWith("boat",StringComparison.Ordinal)))return ActionResult.Failure(ActionResultCode.NotRecognized,"纸船玩法请单独请求，整组未执行。");

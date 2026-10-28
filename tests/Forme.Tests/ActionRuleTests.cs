@@ -32,7 +32,9 @@ public sealed class ActionRuleTests
     [TestMethod]
     public void DefaultUpgradePreservesCustomRules()
     {
-        var current=ActionRules.Default();
+        var defaults=ActionRules.Default();
+        var current=defaults with{BuiltinRevision=4,Rules=defaults.Rules.Where(r=>r.Commands[0].Value!="genshin-hu-tao").ToArray()};
+        Assert.AreEqual("genshin-hu-tao",current.UpgradeDefaults().Match("换成胡桃")![0].Value);
         var old=current with{Rules=current.Rules.Select(r=>r.Commands[0]==new CompanionCommand("dance","spin")?r with{Phrases=["转圈舞"]}:r).ToArray()};
         Assert.AreEqual("spin",old.UpgradeDefaults().Match("转一圈看看")![0].Value);
         var older=old with{Rules=old.Rules.Where(r=>r.Commands[0].Value is not ("lap1" or "lap2")).ToArray()};

@@ -1,7 +1,7 @@
 namespace Forme.Core;
 
 // Normalized pose: no mesh coordinates, renderer types, or model names.
-public readonly record struct PetPose(double ScaleX,double ScaleY,double Lift,double Yaw,double Lean,bool Blink,string Expression,double Stride=0,double Reach=0,string Locomotion="",double LocomotionSeconds=0)
+public readonly record struct PetPose(double ScaleX,double ScaleY,double Lift,double Yaw,double Lean,bool Blink,string Expression,double Stride=0,double Reach=0,string Locomotion="",double LocomotionSeconds=0,double LeftArm=0,double RightArm=0,double LeftElbow=0,double RightElbow=0,double HeadTilt=0)
 {
     public static PetPose Neutral(string expression="idle")=>new(1,1,0,0,0,false,expression);
 }
@@ -44,17 +44,17 @@ public sealed class PetMotion
                 double envelope=Math.Sin(Math.PI*t),wave=Math.Sin(t*Math.PI*4)*envelope;
                 return action switch
                 {
-                    PetAction.Pat=>new(1+.045*wave,1-.07*wave,.055*Math.Pow(envelope,2),9*wave,5*wave,false,"happy"),
-                    PetAction.Rub=>new(1+.07*envelope,1-.10*envelope,0,5*wave,4*wave,true,"happy"),
-                    PetAction.DanceSway=>new(1,1,0,8*Math.Sin(t*Math.PI*12)*envelope,7*Math.Sin(t*Math.PI*12)*envelope,false,"happy",Math.Sin(t*Math.PI*12)*envelope),
-                    PetAction.DanceHop=>new(1+.04*wave,1-.06*wave,.075*Math.Abs(Math.Sin(t*Math.PI*16))*envelope,6*wave,3*wave,false,"happy",wave),
-                    PetAction.DanceSpin=>new(1,1,.025*envelope,360*(3*t-Math.Sin(6*Math.PI*t)/(6*Math.PI)),4*wave,false,"happy",wave),
+                    PetAction.Pat=>new(1+.045*wave,1-.07*wave,.055*Math.Pow(envelope,2),9*wave,5*wave,false,"happy",LeftArm:-24*envelope,RightArm:-10*wave,HeadTilt:8*wave),
+                    PetAction.Rub=>new(1+.07*envelope,1-.10*envelope,0,5*wave,4*wave,true,"happy",LeftArm:-18*envelope,RightArm:-18*envelope,HeadTilt:5*wave),
+                    PetAction.DanceSway=>new(1,1,0,8*Math.Sin(t*Math.PI*12)*envelope,7*Math.Sin(t*Math.PI*12)*envelope,false,"happy",Math.Sin(t*Math.PI*12)*envelope,LeftArm:-42*Math.Sin(t*Math.PI*12)*envelope,RightArm:42*Math.Sin(t*Math.PI*12)*envelope),
+                    PetAction.DanceHop=>new(1+.04*wave,1-.06*wave,.075*Math.Abs(Math.Sin(t*Math.PI*16))*envelope,6*wave,3*wave,false,"happy",wave,LeftArm:-68*envelope,RightArm:-68*envelope,LeftElbow:18*envelope,RightElbow:-18*envelope),
+                    PetAction.DanceSpin=>new(1,1,.025*envelope,360*(3*t-Math.Sin(6*Math.PI*t)/(6*Math.PI)),4*wave,false,"happy",wave,LeftArm:-58*envelope,RightArm:58*envelope),
                     PetAction.Eat=>new(1+.018*Math.Sin(t*Math.PI*20)*envelope,1-.014*Math.Sin(t*Math.PI*20)*envelope,0,0,3*envelope,t%.2<.06,"happy"),
                     PetAction.Read=>new(1,1-.02*envelope,0,3*wave,-2*envelope,true,"focus"),
                     PetAction.Rest=>new(1+.05*envelope,1-.10*envelope+.004*Math.Sin(t*Math.PI*8),0,0,4*envelope,true,"rest"),
                     PetAction.Look=>new(1,1,0,7*Math.Sin(t*Math.PI*4)*envelope,0,false,"thinking"),
-                    PetAction.Launch=>new(1,1-.04*envelope,0,0,-5*envelope,false,"happy",0,envelope),
-                    PetAction.Cheer=>new(1,1,.045*Math.Abs(Math.Sin(t*Math.PI*8))*envelope,6*wave,5*wave,false,"happy",0,.65*envelope),
+                    PetAction.Launch=>new(1,1-.04*envelope,0,0,-5*envelope,false,"happy",0,envelope,LeftArm:-12*envelope,RightArm:-52*envelope),
+                    PetAction.Cheer=>new(1,1,.045*Math.Abs(Math.Sin(t*Math.PI*8))*envelope,6*wave,5*wave,false,"happy",0,.65*envelope,LeftArm:-70*envelope,RightArm:-70*envelope),
                     _=>new(1+.065*envelope,1-.08*envelope,0,0,3*wave,false,State)
                 };
             }

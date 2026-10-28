@@ -72,14 +72,17 @@ public sealed class GoalTests
     public void OptInPromptAndFullSnapshotStillFitDefaultBudget()
     {
         var p=new Preferences{AllowGoalPlans=true,AllowPetControl=true,AllowSceneControl=true,AllowPlayControl=true,AllowLayoutPreview=true,ShareChatState=true,ChatStateEndpoint="https://api.deepseek.com"};
-        var actors=new[]{CompanionView.Room,CompanionView.Desktop}.Select(view=>new ActivityObservation(view,"local-id",1,view==CompanionView.Room?SceneKind.Indoor:SceneKind.Desktop,
-            "sprout","clear",true,true,"idle",ActivitySelection.Options(view,view==CompanionView.Room?SceneKind.Indoor:SceneKind.Desktop,"sprout",p,_=>null)){Visible=true}).ToArray();
-        var snapshot=ChatCapabilitySnapshot.Capture(p,SceneKind.Indoor,actors);
-        string prompt=AiIntentProtocol.RoutingInstructions(snapshot);StringAssert.Contains(prompt,GoalProtocol.Marker);
-        var turns=AiClient.BuildContext(p with{ContextBudget=8192},[],"记下准备开会，然后在桌面走几步",out _,additionalSystemInstruction:prompt);
-        Assert.IsTrue(turns.Sum(AiClient.Estimate)<=4096,"实际字节："+turns.Sum(AiClient.Estimate));
-        AiClient.BuildContext(p,[],"记下准备开会，然后在桌面走几步",out _,additionalSystemInstruction:prompt);
-        Assert.IsFalse(AiIntentProtocol.RoutingInstructions(snapshot with{GoalPlans=false}).Contains(GoalProtocol.Marker));
+        foreach(string model in new[]{"sprout","genshin-hu-tao"})
+        {
+            var actors=new[]{CompanionView.Room,CompanionView.Desktop}.Select(view=>new ActivityObservation(view,"local-id",1,view==CompanionView.Room?SceneKind.Indoor:SceneKind.Desktop,
+                model,"clear",true,true,"idle",ActivitySelection.Options(view,view==CompanionView.Room?SceneKind.Indoor:SceneKind.Desktop,model,p,_=>null)){Visible=true}).ToArray();
+            var snapshot=ChatCapabilitySnapshot.Capture(p,SceneKind.Indoor,actors);
+            string prompt=AiIntentProtocol.RoutingInstructions(snapshot);StringAssert.Contains(prompt,GoalProtocol.Marker);
+            var turns=AiClient.BuildContext(p with{ContextBudget=8192},[],"记下准备开会，然后在桌面走几步",out _,additionalSystemInstruction:prompt);
+            Assert.IsTrue(turns.Sum(AiClient.Estimate)<=4096,"实际字节："+turns.Sum(AiClient.Estimate));
+            AiClient.BuildContext(p,[],"记下准备开会，然后在桌面走几步",out _,additionalSystemInstruction:prompt);
+            Assert.IsFalse(AiIntentProtocol.RoutingInstructions(snapshot with{GoalPlans=false}).Contains(GoalProtocol.Marker));
+        }
     }
     [TestMethod]
     public void LedgerOrdersStepsAndPreventsRewritingCommittedArtifact()

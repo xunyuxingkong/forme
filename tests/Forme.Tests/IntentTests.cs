@@ -53,8 +53,11 @@ public sealed class IntentTests
         CollectionAssert.AreEqual(new[]{"scene","go","interact"},plan.Steps.Select(x=>x.Action).ToArray());
         Assert.AreEqual(1,ActionPlanner.Build([new(CompanionIntentType.GoTo,"pond")],SceneKind.Outdoor).Steps.Count);
         Assert.AreEqual(2,ActionPlanner.Build(IntentResolver.Resolve("出去走一圈再回来").Intents,SceneKind.Desktop).Steps.Count);
+        var twoDanceMoves=ActionPlanner.Build([new(CompanionIntentType.Dance,Mode:"hop",Count:2),new(CompanionIntentType.Dance,Mode:"spin",Count:2)],SceneKind.Desktop);
+        CollectionAssert.AreEqual(new[]{"hop","hop","spin","spin"},twoDanceMoves.Steps.Select(x=>x.Value).ToArray());
         Assert.AreEqual("run",ActionPlanner.Build([ActionPlanner.FromCommand(new("go","pond",Motion:"run"))],SceneKind.Outdoor).Steps.Single().Motion);
-        Assert.ThrowsExactly<ActionFailureException>(()=>ActionPlanner.Build([new(CompanionIntentType.GoTo,"pond"),new(CompanionIntentType.GoTo,"book")],SceneKind.Indoor));
+        Assert.AreEqual(4,ActionPlanner.Build([new(CompanionIntentType.GoTo,"pond"),new(CompanionIntentType.GoTo,"book")],SceneKind.Indoor).Steps.Count);
+        Assert.ThrowsExactly<ActionFailureException>(()=>ActionPlanner.Build([new(CompanionIntentType.Dance,Mode:"hop",Count:3),new(CompanionIntentType.Dance,Mode:"spin",Count:3),new(CompanionIntentType.Dance,Mode:"sway",Count:1)],SceneKind.Desktop));
     }
     [TestMethod]
     public void AiRoutingReplacesPhraseGatesAndAcceptsOnlyMarkedActionPlans()
@@ -84,10 +87,18 @@ public sealed class IntentTests
         var commandIntent=AiIntentProtocol.Parse(commandJson,"在屏幕上跑2圈看看").Single();
         Assert.AreEqual(CompanionIntentType.Stroll,commandIntent.Type);Assert.AreEqual("run",commandIntent.Mode);Assert.AreEqual(2,commandIntent.Count);
         Assert.AreEqual("",ConversationText.Visible(providerCommands));
+        const string repeatedDanceCommands="```json\n{\"type\":\"forme-actions\",\"commands\":[{\"action\":\"Dance\",\"mode\":\"hop\",\"count\":2},{\"action\":\"Dance\",\"mode\":\"spin\",\"count\":2}]}\n```";
+        Assert.IsTrue(AiIntentProtocol.TryExtractActions(repeatedDanceCommands,out var repeatedDanceJson));
+        var repeatedDanceIntents=AiIntentProtocol.Parse(repeatedDanceJson,"在原地跳2下，再转2圈");
+        CollectionAssert.AreEqual(new[]{"hop","hop","spin","spin"},ActionPlanner.Build(repeatedDanceIntents,SceneKind.Desktop).Steps.Select(x=>x.Value).ToArray());
         const string oldProviderFormat="```json\n[{\"type\":\"action\",\"actions\":[{\"command\":\"Dance\",\"params\":{\"mode\":\"spin\",\"count\":1}}]}]\n```";
         Assert.IsTrue(AiIntentProtocol.TryExtractActions(oldProviderFormat,out var oldProviderJson));
         var oldProviderIntent=AiIntentProtocol.Parse(oldProviderJson,"转一圈看看").Single();
         Assert.AreEqual(CompanionIntentType.Dance,oldProviderIntent.Type);Assert.AreEqual("spin",oldProviderIntent.Mode);Assert.AreEqual(1,oldProviderIntent.Count);
+        const string partialProviderFormat="说明\n```json\n{\"type\":\"forme-actions\",\"commands\":[{\"action\":\"Dance\",\"mode\":\"hop\",\"count\":2}";
+        Assert.AreEqual("说明",ConversationText.Visible(partialProviderFormat));
+        const string ordinaryPartialJson="普通 JSON： ```json\n{\"type\":\"settings\",\"mode\":\"compact\"}";
+        Assert.AreEqual(ordinaryPartialJson,ConversationText.Visible(ordinaryPartialJson));
         Assert.ThrowsExactly<ActionFailureException>(()=>AiIntentProtocol.TryExtractActions(oldProviderFormat.Replace("\"count\":1","\"script\":\"bad\"",StringComparison.Ordinal),out _));
         Assert.ThrowsExactly<ActionFailureException>(()=>AiIntentProtocol.TryExtractActions("```json\n{\"type\":\"forme-actions\",\"action\":\"Dance\",\"script\":\"bad\"}\n```",out _));
     }

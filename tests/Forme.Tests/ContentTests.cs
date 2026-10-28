@@ -53,8 +53,8 @@ public sealed class ContentTests
     public void RevisionMetadataDoesNotOverwriteCustomRules()
     {
         var current=ActionRules.Default();Assert.AreEqual(ActionRules.CurrentBuiltinRevision,current.BuiltinRevision);
-        string legacy=current.Serialize().Replace("\"builtinRevision\": 4","\"builtinRevision\": 0",StringComparison.Ordinal);
-        Assert.AreEqual(4,ActionRules.Parse(legacy).UpgradeDefaults().BuiltinRevision);
+        string legacy=(current with{BuiltinRevision=0}).Serialize();
+        Assert.AreEqual(ActionRules.CurrentBuiltinRevision,ActionRules.Parse(legacy).UpgradeDefaults().BuiltinRevision);
         var edited=current with{Rules=[new(["来玩吧"],[new("boat","open")])]};Assert.AreSame(edited,edited.UpgradeDefaults());
     }
 }

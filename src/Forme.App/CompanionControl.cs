@@ -16,6 +16,7 @@ internal sealed partial class DesktopHost
     internal ActionResult? PreflightActions(ActionPlan plan)
     {
         if(_exit||_c.AnimationSuspended)return ActionResult.Failure(ActionResultCode.SceneUnavailable,"应用正在暂停，整组未执行。");
+        if(plan.Steps.Any(x=>x.Action=="model"&&x.Value==LocalPetModels.HuTaoId)&&!LocalPetModels.HuTaoAvailable)return ActionResult.Failure(ActionResultCode.TargetUnavailable,"胡桃模型尚未导入或文件已损坏，请到设置中的伙伴模型处导入；整组未执行。");
         foreach(var command in plan.Steps.Where(ActionSurface.IsBodyAction))
         {
             if(ActionView(command)==CompanionView.Desktop&&(_pet is not {IsVisible:true}||_c.Preferences.DisplayMode=="edge"))
@@ -63,7 +64,7 @@ internal sealed partial class DesktopHost
             case "interact":if(House is null)ShowHouse("chat");_actionHouse=House;return House!.InteractWorld(command.Value!);
             case "stroll":if(roomAction){if(House is null)throw new ActionFailureException(ActionResultCode.SceneUnavailable,"小屋伙伴未显示，动作未执行。");return House.MoveNaturally(command);}if(_pet is not {IsVisible:true})throw new OperationFailureException("桌面伙伴已隐藏");return command.Value is "lap1" or "lap2"?_pet.StartScreenLaps(command.Value=="lap1"?1:2):_pet.StartStep(command.Value=="run");
             case "go":if(House is null)ShowHouse("chat");_actionHouse=House;return House!.MoveNaturally(command);
-            case "model":_c.SavePreferences(_c.Preferences with{PetModel=command.Value!});return "已切换伙伴模型";
+            case "model":LocalPetModels.RequireAvailable(command.Value);_c.SavePreferences(_c.Preferences with{PetModel=command.Value!});return "已切换伙伴模型";
             case "stop":House?.StopCompanion();_pet?.SetAiIdleMode("idle");return "已停止当前活动和剩余动作";
             case "recall":if(!roomAction){_pet?.SetAiIdleMode("idle");return "桌面伙伴已停下，留在你身边";}if(House is null)throw new ActionFailureException(ActionResultCode.SceneUnavailable,"小屋伙伴未显示。");House.RecallCompanion();return "已叫回小屋伙伴";
             case "life":case "hide":case "throw":case "toy":case "layout":case "furniture":

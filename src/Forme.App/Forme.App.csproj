@@ -27,6 +27,15 @@
   <ItemGroup>
     <EmbeddedResource Include="Assets/forme.ico" LogicalName="Forme.Icon" />
     <EmbeddedResource Include="Assets/PetModels/space-marine.glb" LogicalName="Forme.SpaceMarine.glb" />
+    <EmbeddedResource Include="Assets/PetModels/rpg-ranger.glb" LogicalName="Forme.Pet.Ranger.glb" />
+    <EmbeddedResource Include="Assets/PetModels/rpg-cleric.glb" LogicalName="Forme.Pet.Cleric.glb" />
+    <EmbeddedResource Include="Assets/PetModels/rpg-warrior.glb" LogicalName="Forme.Pet.Warrior.glb" />
+    <EmbeddedResource Include="Assets/PetModels/umw-adventurer.glb" LogicalName="Forme.Pet.Women.Adventurer.glb" />
+    <EmbeddedResource Include="Assets/PetModels/umw-casual.glb" LogicalName="Forme.Pet.Women.Casual.glb" />
+    <EmbeddedResource Include="Assets/PetModels/umw-formal.glb" LogicalName="Forme.Pet.Women.Formal.glb" />
+    <EmbeddedResource Include="Assets/PetModels/anime-rose.vrm" LogicalName="Forme.Pet.Anime.Rose.vrm" />
+    <EmbeddedResource Include="Assets/PetModels/anime-olivia.vrm" LogicalName="Forme.Pet.Anime.Olivia.vrm" />
+    <EmbeddedResource Include="Assets/PetModels/anime-kate.vrm" LogicalName="Forme.Pet.Anime.Kate.vrm" />
   </ItemGroup>
   <ItemGroup><Using Include="System"/><Using Include="System.IO"/><Using Include="System.Linq"/><Using Include="System.Collections.Generic"/><Using Include="System.Threading"/><Using Include="System.Threading.Tasks"/></ItemGroup>
 </Project>

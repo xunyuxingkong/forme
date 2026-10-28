@@ -6,8 +6,8 @@ namespace Forme.App;
 
 internal static class PetModels
 {
-    public static readonly (string Id,string Name)[] Catalog=[("sprout","团团 · 芽芽伙伴"),("cat","奶糖 · 小猫"),("fox","栗子 · 小狐狸"),("penguin","雪球 · 小企鹅"),("space-marine","星际战士 · 原版行走与奔跑")];
-    public static IPetModelFactory For(string id)=>id switch{"sprout"=>new SproutPetFactory(),"space-marine"=>new SpaceMarinePetFactory(),_=>new CreatureFactory(id)};
+    public static readonly (string Id,string Name)[] Catalog=[("sprout","团团 · 芽芽伙伴"),("cat","奶糖 · 小猫"),("fox","栗子 · 小狐狸"),("penguin","雪球 · 小企鹅"),("space-marine","星际战士 · 原版行走与奔跑"),("vesna","巡林游侠 · Quaternius"),("vodyanitsa","星辉牧师 · Quaternius"),("odette","守誓战士 · Quaternius"),("umw-adventurer","星旅冒险家 · Quaternius"),("umw-casual","轻装少女 · Quaternius"),("umw-formal","典雅女士 · Quaternius"),("anime-rose","玫瑰女巫 · CC0 动漫风"),("anime-olivia","奥莉薇亚 · CC0 动漫风"),("anime-kate","凯特 · CC0 动漫风"),(LocalPetModels.HuTaoId,"胡桃 · 原神（本地导入）")];
+    public static IPetModelFactory For(string id)=>id switch{"sprout"=>new SproutPetFactory(),"space-marine"=>new SpaceMarinePetFactory(),LocalPetModels.HuTaoId=>LocalPetModels.HuTaoAvailable?new ImportedPetModelFactory(id):new SproutPetFactory(),"vesna" or "vodyanitsa" or "odette" or "umw-adventurer" or "umw-casual" or "umw-formal" or "anime-rose" or "anime-olivia" or "anime-kate"=>new ImportedPetModelFactory(id),_=>new CreatureFactory(id)};
     private sealed class CreatureFactory(string id):IPetModelFactory {public IPetModel Create()=>new CreaturePetModel(id);}
 }
 

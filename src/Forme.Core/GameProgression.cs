@@ -39,7 +39,7 @@ public static class GameProgression
     public static bool IsAchievementRecord(string id)
     {
         if(AchievementsCatalog.Any(x=>x.Id==id))return true;
-        if(id.StartsWith("model-used-",StringComparison.Ordinal))return new[]{"sprout","cat","fox","penguin","space-marine"}.Contains(id[11..],StringComparer.Ordinal);
+        if(id.StartsWith("model-used-",StringComparison.Ordinal))return PetModelIds.Contains(id[11..]);
         if(id.StartsWith("toy-used-",StringComparison.Ordinal))return Catalog.Any(x=>x.Kind=="toy"&&x.Id==id[9..]);
         return false;
     }

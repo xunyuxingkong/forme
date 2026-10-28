@@ -34,6 +34,7 @@ internal static class Program
 #endif
         if(testing)data=Path.GetFullPath(Path.Combine("artifacts","ui-test-data",Guid.NewGuid().ToString("N")));
         int dataArg=Array.IndexOf(args,"--data-dir");if(dataArg>=0&&dataArg+1<args.Length)data=Path.GetFullPath(args[dataArg+1]);
+        LocalPetModels.DirectoryPath=Path.Combine(data,"Models");
         string name="Forme-"+Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(data)))[..16];
         using var mutex=new Mutex(false,"Local\\"+name);bool locked=false;
         try{locked=mutex.WaitOne(0);}catch(AbandonedMutexException){locked=true;}
@@ -47,7 +48,9 @@ internal static class Program
         try
         {
             PreparedImport.CleanupAbandoned();
-            controller=new Controller(data);host=new DesktopHost(app,controller,name,testing);
+            controller=new Controller(data);
+            if(controller.Preferences.PetModel==LocalPetModels.HuTaoId&&!LocalPetModels.HuTaoAvailable)controller.SavePreferences(controller.Preferences with{PetModel="sprout"});
+            host=new DesktopHost(app,controller,name,testing);
             app.DispatcherUnhandledException+=(_,e)=>
             {
                 CrashDiagnostics.Write(data,e.Exception);
@@ -234,6 +237,7 @@ internal static class Smoke
         try
         {
             Directory.CreateDirectory("artifacts/screenshots");
+            if(Environment.GetCommandLineArgs().Contains("--genshin-only")){await CompanionChecks.Genshin(host,c);Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--mcp-web-only")){await McpWebSourceChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--web-sources-only")){await WebProjectSourceChecks.Run();Environment.ExitCode=0;await host.Exit();return;}
             if(Environment.GetCommandLineArgs().Contains("--travel-only")){c.SavePreferences(new Preferences{Onboarded=true});host.ShowHouse("home");await Task.Delay(300);await CheckTravel(host,Descendants(host.House!).OfType<Room3DView>().Single(),c);Environment.ExitCode=0;await host.Exit();return;}

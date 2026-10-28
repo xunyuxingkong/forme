@@ -34,12 +34,18 @@ internal sealed partial class MainWindow
         var startup=Ui.Check("登录 Windows 时启动",StartupLink.Exists);
         content.Children.Add(Ui.Card(Ui.Stack(Ui.Text("伙伴与显示",17,null,true),Ui.Text("伙伴名字"),name,Ui.Text("你的称呼（可选）"),user,Ui.Text("伙伴大小"),scale,Ui.Text("软件背景色"),backgroundChoice,backgroundHex,backgroundSample,quiet,reduced,top,sound,timerSound,notifications,greetings,new Expander{Header="主动招呼时段（本地时间）",Content=Ui.Stack(Ui.Text("开始小时 0–23"),from,Ui.Text("结束小时 1–24"),until)},startup)));
         content.Children.Add(Ui.Card(Ui.Stack(Ui.Text("专注与休息",17,null,true),Ui.Text("默认专注时长 · 分钟"),focus,Ui.Text("默认休息时长 · 分钟"),rest)));
-        content.Children.Add(Ui.Card(Ui.Stack(Ui.Text("伙伴模型与资源占用",17,null,true),appearance,performance,Ui.Text("5种3D模型共用基础动作与寻路；星际战士保留原模型的走路、跑步关节动作，桌面与小屋显示均已放大，伙伴大小同时调整两处。平衡待机10FPS，省电待机5FPS；睡眠2FPS。网格与贴图共享，隐藏窗口和减少动效时停止动画。",12,Ui.Muted))));
+        var localStatus=Ui.Text(LocalPetModels.HuTaoAvailable?"胡桃已导入本机，可从上方选择。":"胡桃尚未导入：选择已适配的 VRM 文件后即可使用。",12,Ui.Muted);
+        content.Children.Add(Ui.Card(Ui.Stack(Ui.Text("伙伴模型与资源占用",17,null,true),appearance,performance,Ui.Text("模型共用基础动作与寻路；人体角色驱动骨骼动作，伙伴大小同时调整桌面与小屋显示。平衡待机10FPS，省电待机5FPS；睡眠2FPS。隐藏窗口和减少动效时停止动画。",12,Ui.Muted),localStatus,Ui.Row(Ui.Button("导入并使用胡桃 VRM",()=>
+        {
+            var dialog=new Microsoft.Win32.OpenFileDialog{Title="选择已适配的胡桃 VRM",Filter="胡桃 VRM 模型|*.vrm",CheckFileExists=true};if(dialog.ShowDialog(this)!=true)return;
+            LocalPetModels.InstallHuTao(dialog.FileName);appearance.SelectedIndex=Array.FindIndex(PetModels.Catalog,x=>x.Id==LocalPetModels.HuTaoId);
+            _c.SavePreferences(_c.Preferences with{PetModel=LocalPetModels.HuTaoId});localStatus.Text="胡桃已导入本机，可从上方选择。";Toast("已导入并使用胡桃，小屋与桌面形象已同步。");
+        }),Ui.Button("查看模型来源",()=>Process.Start(new ProcessStartInfo(LocalPetModels.HuTaoSource){UseShellExecute=true}))),Ui.Text("胡桃 VRM 转换作者：Impmagik；角色权利归原权利人。文件标注禁止再分发，因此仅保存在本机，不随安装包、导出或 GitHub 分发。导入不联网、不上传文件；当前仅适配说明中的资源版本。",11,Ui.Muted))));
         content.Children.Add(Ui.Button("保存偏好",()=>
         {
             if(!int.TryParse(from.Text,out int start)||!int.TryParse(until.Text,out int end))throw new OperationFailureException("请输入有效小时。");
             var next=_c.Preferences with{PetName=name.Text.Trim(),UserName=user.Text.Trim(),AppBackground=backgroundHex.Text.Trim().ToUpperInvariant(),Quiet=quiet.IsChecked==true,ReducedMotion=reduced.IsChecked==true,Topmost=top.IsChecked==true,Sounds=sound.IsChecked==true,TimerSounds=timerSound.IsChecked==true,Notifications=notifications.IsChecked==true,Greetings=greetings.IsChecked==true,GreetingStart=start,GreetingEnd=end,PetScale=scale.SelectedIndex==0?.8:scale.SelectedIndex==2?1.3:1,FocusMinutes=ReadMinutes(focus),RestMinutes=ReadMinutes(rest)};
-            next=next with{PetModel=PetModels.Catalog[appearance.SelectedIndex].Id,PerformanceMode=performance.SelectedIndex==1?"economy":"balanced"};next.Validate();StartupLink.Set(startup.IsChecked==true);_c.SavePreferences(next);Toast("偏好已保存，伙伴模型已同步。");
+            next=next with{PetModel=PetModels.Catalog[appearance.SelectedIndex].Id,PerformanceMode=performance.SelectedIndex==1?"economy":"balanced"};LocalPetModels.RequireAvailable(next.PetModel);next.Validate();StartupLink.Set(startup.IsChecked==true);_c.SavePreferences(next);Toast("偏好已保存，伙伴模型已同步。");
         },true));
         content.Children.Add(Ui.Button("恢复常用偏好默认值",()=>
         {

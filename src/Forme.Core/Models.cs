@@ -1,5 +1,11 @@
 namespace Forme.Core;
 
+public static class PetModelIds
+{
+    public static IReadOnlyList<string> All {get;}=["sprout","cat","fox","penguin","space-marine","vesna","vodyanitsa","odette","umw-adventurer","umw-casual","umw-formal","anime-rose","anime-olivia","anime-kate","genshin-hu-tao"];
+    public static bool Contains(string? id)=>id is not null&&All.Contains(id,StringComparer.Ordinal);
+}
+
 public sealed record Preferences
 {
     public string PetName { get; set; } = "团团";
@@ -68,7 +74,7 @@ public sealed record Preferences
         if(ZhipuReasoningEffort is not ("low" or "high" or "max"))throw new InvalidDataException("智谱思考强度请选择低、较高或最高。");
         if (string.IsNullOrWhiteSpace(PetName)||UserName is null||ReplyStyle is null||RoleDescription is null||PetName.Length is < 1 or > 20 || UserName.Length > 30 || ReplyStyle.Length > 400 || RoleDescription.Length > 1200)
             throw new InvalidDataException("名字或回复偏好过长。");
-        if(!new[]{"sprout","cat","fox","penguin","space-marine"}.Contains(PetModel)||!new[]{"balanced","economy"}.Contains(PerformanceMode)||!new[]{"clear","rain","snow"}.Contains(Weather)||
+        if(!PetModelIds.Contains(PetModel)||!new[]{"balanced","economy"}.Contains(PerformanceMode)||!new[]{"clear","rain","snow"}.Contains(Weather)||
             !new[]{"companion","focus","story","custom"}.Contains(CharacterPreset)||ContextBudget is not (2048 or 4096 or 8192 or 16384 or 32768 or 65536)||MaxReplyTokens is <128 or >1024||!double.IsFinite(Temperature)||Temperature is <0 or >1)
             throw new InvalidDataException("模型、场景或 AI 个性参数无效。");
         if (FocusMinutes is < 1 or > 180 || RestMinutes is < 1 or > 180 ||

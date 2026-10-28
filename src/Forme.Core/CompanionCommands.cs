@@ -41,7 +41,12 @@ public static class CompanionCommands
             if(headerEnd<0)break;
             string language=text[headerStart..headerEnd].Trim();
             int bodyEnd=text.IndexOf(fence,headerEnd+1,StringComparison.Ordinal);
-            if(bodyEnd<0)break;
+            if(bodyEnd<0)
+            {
+                if(language.Equals("json",StringComparison.OrdinalIgnoreCase)&&LooksLikeLegacyActionPrefix(text[(headerEnd+1)..]))
+                    text=text[..offset];
+                break;
+            }
             int after=bodyEnd+fence.Length;
             if(language.Equals("json",StringComparison.OrdinalIgnoreCase)&&IsLegacyActionPayload(text[(headerEnd+1)..bodyEnd]))
             {
@@ -51,6 +56,14 @@ public static class CompanionCommands
             else offset=after;
         }
         return text;
+    }
+    private static bool LooksLikeLegacyActionPrefix(string body)
+    {
+        if(body.Length>8192)return false;
+        return System.Text.RegularExpressions.Regex.IsMatch(body,
+            "^\\s*(?:\\[\\s*)?\\{\\s*\"type\"\\s*:\\s*\"(?:forme-actions|action)\"",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase|System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(50));
     }
     private static bool IsLegacyActionPayload(string body)
     {
@@ -211,7 +224,7 @@ public static class CompanionCommands
         "weather"=>preferences.AllowSceneControl&&command.Value is "clear" or "rain" or "snow"&&command.X is null&&command.Z is null,
         "light" or "fireplace"=>preferences.AllowSceneControl&&command.Value is "on" or "off"&&command.X is null&&command.Z is null,
         "interact"=>preferences.AllowSceneControl&&TargetCatalog.Supports(command.Value,TargetCapabilities.Interact)&&command.X is null&&command.Z is null,
-        "model"=>preferences.AllowPetControl&&command.Value is "sprout" or "cat" or "fox" or "penguin" or "space-marine"&&command.X is null&&command.Z is null,
+        "model"=>preferences.AllowPetControl&&PetModelIds.Contains(command.Value)&&command.X is null&&command.Z is null,
         "stop" or "recall"=> (preferences.AllowPetControl||preferences.AllowPlayControl)&&command.Value is null&&command.X is null&&command.Z is null,
         "life"=>preferences.AllowPlayControl&&LifeRules.Ids.Contains(command.Value)&&command.X is null&&command.Z is null,
         "hide"=>preferences.AllowPlayControl&&command.Value is "pet-hides" or "pet-seeks"&&command.X is null&&command.Z is null,

@@ -59,7 +59,7 @@ public sealed record BoatAlbum(List<BoatSouvenir> Entries,string? DisplayedId)
     public static BoatAlbum Empty()=>new([],null);
     public void Validate()
     {
-        if(Entries is null||Entries.Count>60||Entries.Any(e=>e is null||!Guid.TryParseExact(e.Id,"N",out _)||string.IsNullOrWhiteSpace(e.Title)||e.Title.Length>40||e.Layout is null||e.Dock is not ("willow" or "lily" or "bridge")||e.PetModel is not ("sprout" or "cat" or "fox" or "penguin" or "space-marine"))||Entries.Select(e=>e.Id).Distinct().Count()!=Entries.Count||DisplayedId is not null&&!Entries.Any(e=>e.Id==DisplayedId))
+        if(Entries is null||Entries.Count>60||Entries.Any(e=>e is null||!Guid.TryParseExact(e.Id,"N",out _)||string.IsNullOrWhiteSpace(e.Title)||e.Title.Length>40||e.Layout is null||e.Dock is not ("willow" or "lily" or "bridge")||!PetModelIds.Contains(e.PetModel))||Entries.Select(e=>e.Id).Distinct().Count()!=Entries.Count||DisplayedId is not null&&!Entries.Any(e=>e.Id==DisplayedId))
             throw new InvalidDataException("纪念船记录无效，最多收藏60次旅行。");
         foreach(var entry in Entries)entry.Layout.Validate();
     }

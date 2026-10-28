@@ -10,7 +10,7 @@ public sealed record ActionRules(int Version,ActionRule[] Rules)
     // Version remains readable by old files; schema and built-in content evolve independently.
     public int SchemaVersion {get;init;}=1;
     public int BuiltinRevision {get;init;}
-    public const int CurrentBuiltinRevision=4;
+    public const int CurrentBuiltinRevision=5;
     private static readonly JsonSerializerOptions Json=new(){WriteIndented=true,Encoder=System.Text.Encodings.Web.JavaScriptEncoder.Create(System.Text.Unicode.UnicodeRanges.All),PropertyNamingPolicy=JsonNamingPolicy.CamelCase,PropertyNameCaseInsensitive=true,UnmappedMemberHandling=JsonUnmappedMemberHandling.Disallow,MaxDepth=8};
     public static ActionRules Default()=>new(1,[
         new(["走两步","走几步","散散步"],[new("stroll","walk")]),
@@ -25,7 +25,7 @@ public sealed record ActionRules(int Version,ActionRule[] Rules)
         new(["随机走动","自由走动"],[new("idle","walk")]),new(["随机奔跑","自由奔跑"],[new("idle","run")]),
         new(["去书架旁","去书架那边"],[new("go","book")]),new(["去窗边"],[new("go","window")]),
         new(["去小窝旁"],[new("go","sleep")]),new(["去鱼缸旁"],[new("go","fish")]),
-        new(["换成小猫","切换为小猫"],[new("model","cat")]),new(["换成芽芽"],[new("model","sprout")]),
+        new(["换成小猫","切换为小猫"],[new("model","cat")]),new(["换成芽芽"],[new("model","sprout")]),new(["换成胡桃","切换为胡桃"],[new("model","genshin-hu-tao")]),
         new(["玩藏物","陪我玩藏物","你藏我找"],[new("hide","pet-hides")]),new(["我藏你找"],[new("hide","pet-seeks")]),
         new(["玩纸船","陪我玩纸船"],[new("boat","open")]),new(["放船","开始纸船旅行"],[new("boat","start")]),
         new(["暂停纸船"],[new("boat","pause")]),new(["继续纸船"],[new("boat","resume")]),

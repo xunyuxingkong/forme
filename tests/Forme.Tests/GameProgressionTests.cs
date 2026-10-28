@@ -84,7 +84,8 @@ public sealed class GameProgressionTests
             Assert.IsFalse(store.ClearGameSlot("bad-slot"));
 
             Assert.IsTrue(store.RecordToyPlay(firstDay,"ball-yellow"));
-            store.RecordPetModels("sprout","cat",firstDay);store.RecordPetModels("cat","fox",firstDay);store.RecordPetModels("fox","penguin",firstDay);store.RecordPetModels("penguin","space-marine",firstDay);
+            var petModels=PetModelIds.All.ToArray();
+            for(int i=1;i<petModels.Length;i++)store.RecordPetModels(petModels[i-1],petModels[i],firstDay);
             Assert.IsTrue(store.GameAchievements().Any(x=>x.Id=="toy-first"));
             Assert.IsTrue(store.GameAchievements().Any(x=>x.Id=="pet-all"));
             Store.ValidateExport(store.Export(false,false,false,true));

@@ -45,7 +45,7 @@ public static class CapabilityCatalog
         CompanionIntentType.Recall or CompanionIntentType.Stop=>"-",
         CompanionIntentType.ChangeScene=>"target=indoor/outdoor",
         CompanionIntentType.ChangeWeather=>"mode=clear/rain/snow",
-        CompanionIntentType.ChangeModel=>"target=sprout/cat/fox/penguin/space-marine",
+        CompanionIntentType.ChangeModel=>"target=sprout/cat/fox/penguin/space-marine/vesna/vodyanitsa/odette/umw-adventurer/umw-casual/umw-formal/anime-rose/anime-olivia/anime-kate/genshin-hu-tao(胡桃)",
         CompanionIntentType.ToggleDevice=>"target=light/fireplace,mode=on/off",
         CompanionIntentType.Touch=>"mode=pat/rub",
         CompanionIntentType.UseToy=>"target",

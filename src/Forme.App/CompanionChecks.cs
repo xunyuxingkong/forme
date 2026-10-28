@@ -14,6 +14,35 @@ namespace Forme.App;
 
 internal static class CompanionChecks
 {
+    public static async Task Genshin(DesktopHost host,Controller c)
+    {
+        c.SavePreferences(new Preferences{Onboarded=true,AllowPetControl=true,ShowHome3D=true,Quiet=false,ReducedMotion=false});
+        var command=new CompanionCommand("model",LocalPetModels.HuTaoId);
+        if(LocalPetModels.HuTaoAvailable||host.PreflightActions(new ActionPlan([command]))?.Code!=ActionResultCode.TargetUnavailable)throw new Exception("Missing local model was not preflighted");
+        try{host.ExecuteCompanionCommand(command);throw new Exception("Missing local model reported success");}catch(ActionFailureException error)when(error.Code==ActionResultCode.TargetUnavailable){}
+        if(c.Preferences.PetModel!="sprout")throw new Exception("Failed local model selection changed preferences");
+        try{LocalPetModels.InstallHuTao("src/Forme.App/Assets/PetModels/anime-rose.vrm");throw new Exception("Wrong VRM version accepted");}catch(OperationFailureException){}
+        LocalPetModels.InstallHuTao("artifacts/genshin-sources/hu-tao.vrm");
+        if(!LocalPetModels.HuTaoAvailable)throw new Exception("Local Hu Tao import failed");
+        using(var rig=(ImportedPetModel)PetModels.For(LocalPetModels.HuTaoId).Create())
+        {
+            int vertices=Shapes(rig.Root).OfType<GeometryModel3D>().Sum(x=>((MeshGeometry3D)x.Geometry).Positions.Count);
+            if(vertices!=18176||rig.MeshCount!=25)throw new Exception($"Hu Tao primitive compaction lost geometry: {vertices}, {rig.MeshCount}");
+            await AnimeAnimation(rig,LocalPetModels.HuTaoId);
+            foreach(var action in Enum.GetValues<PetAction>())
+            {
+                var motion=new PetMotion();motion.Play(action,0);
+                foreach(double time in new[]{.2,.7,1.2}){rig.Apply(motion.Sample(time));if(rig.Root.Bounds.IsEmpty||!double.IsFinite(rig.Root.Bounds.SizeY))throw new Exception("Invalid Hu Tao pose: "+action);}
+            }
+        }
+        host.ExecuteCompanionCommand(command);host.ShowHouse("home");await Task.Delay(150);Image(host.House!,"genshin-hu-tao-house");
+        if(c.Preferences.PetModel!=LocalPetModels.HuTaoId)throw new Exception("Hu Tao switch did not persist");
+        host.ShowPet();await Task.Delay(150);var view=Descendants(host.Pet!).OfType<Pet3DView>().Single();
+        if(!view.CharacterFits())throw new Exception("Hu Tao was clipped in desktop view");Image(host.Pet!,"genshin-hu-tao-desktop");
+        host.House!.Navigate("settings");host.House.UpdateLayout();
+        if(!Descendants(host.House).OfType<ComboBox>().Any(x=>x.SelectedItem?.ToString()?.StartsWith("胡桃")==true))throw new Exception("Hu Tao is not selectable in settings");
+        File.WriteAllText("artifacts/genshin-smoke-result.txt","PASS: known VRM checksum/import; wrong-file rejection; missing model preflight/fallback; VRM semantic humanoid rig; front/Walk/Run/gesture screenshots; all 12 local actions finite; 18176 animated vertices, 20632 triangles, 25 primitives; settings persistence, house and desktop projection fit. Offline; no AI calls.\n");
+    }
     public static async Task ChatCleanup(DesktopHost host,Controller c)
     {
         c.NewSession();var now=DateTimeOffset.Now;
@@ -363,8 +392,12 @@ internal static class CompanionChecks
                 if(bounds.SizeY<3.0||bounds.SizeY>3.3||triangles!=260314)throw new Exception($"Embedded Space Marine geometry, rifle or doubled size are invalid: {bounds}, {triangles}");
                 await MarineAnimation((SpaceMarinePetModel)rig);
             }
+            if(model.Id.StartsWith("anime-",StringComparison.Ordinal))await AnimeAnimation((ImportedPetModel)rig,model.Id);
             for(int i=0;i<1000;i++)rig.Apply(new PetMotion{State=i%2==0?"idle":"sleep"}.Sample(i*.02));
-            if(!ReferenceEquals(body,rig.Root.Children[0])||(model.Id=="space-marine"?!Shapes(rig.Root).All(x=>x.IsFrozen):!body.IsFrozen)||!Shapes(rig.Root).All(rig.Contains))throw new Exception("Model pose cache or hit ownership failed: "+model.Id);
+            bool imported=rig is ImportedPetModel;
+            if(!ReferenceEquals(body,rig.Root.Children[0])||(model.Id=="space-marine"?!Shapes(rig.Root).All(x=>x.IsFrozen):imported?body.IsFrozen:!body.IsFrozen)||!Shapes(rig.Root).All(rig.Contains))throw new Exception("Model pose cache or hit ownership failed: "+model.Id);
+            if((model.Id is "vesna" or "vodyanitsa" or "odette")&&((ImportedPetModel)rig).MeshCount<=3)throw new Exception("Imported open model has no character geometry: "+model.Id);
+            if(model.Id.StartsWith("anime-",StringComparison.Ordinal)&&((ImportedPetModel)rig).ActiveClip!="Procedural")throw new Exception("Anime VRM did not use its procedural pose adapter: "+model.Id);
             c.SavePreferences(c.Preferences with{PetModel=model.Id});host.House!.Navigate("home");await Task.Delay(100);Image(host.House,"companion-"+model.Id);
         }
         await MarineSize(host,c,room);
@@ -396,7 +429,7 @@ internal static class CompanionChecks
         Descendants(host.House).OfType<TextBox>().Single(x=>AutomationProperties.GetName(x)=="会话摘要").Text="我们约好去池塘看看。";Click(host.House,"保存会话摘要");
         if(c.Store.Note(c.Session!.Id)?.Content!="我们约好去池塘看看。")throw new Exception("Session note UI failed");
         c.SavePreferences(original);room.SwitchScene(false);host.House.Navigate("home");
-        File.WriteAllText("artifacts/companion-smoke-result.txt","PASS: 5 interchangeable models; complete Space Marine with rifle, original Walk/Run clips, doubled desktop/house size, front-facing idle, independent joints and shared frozen meshes; indoor/outdoor interactions, lamp toggle, watering deduplication, 100 scene switches with cache <=2, authorized/disabled AI control, persona, memory and session note UI. Offline; no AI API calls.\n");
+        File.WriteAllText("artifacts/companion-smoke-result.txt","PASS: 8 interchangeable models; three original high-fantasy anime humanoids with articulated arms, elbows, legs and knees, semantic facial expressions and blinking; complete Space Marine with rifle and original Walk/Run clips; indoor/outdoor interactions, lamp toggle, watering deduplication, 100 scene switches with cache <=2, authorized/disabled AI control, persona, memory and session note UI. Offline; no AI API calls.\n");
     }
     private static async Task MarineAnimation(SpaceMarinePetModel marine)
     {
@@ -428,6 +461,28 @@ internal static class CompanionChecks
         if(other.ActiveClip!="walk")throw new Exception("Desktop wander did not select the imported Walk clip");running=true;await Task.Delay(150);
         if(other.ActiveClip!="run")throw new Exception("Desktop wander did not select the imported Run clip");animator.Configure("idle",false,false,false,false);
         if(animator.Running||other.ActiveClip.Length!=0||!other.JointMatrices.SequenceEqual(idle))throw new Exception("Hidden marine continued animating");
+    }
+    private static async Task AnimeAnimation(ImportedPetModel rig,string id)
+    {
+        var neutral=rig.JointMatrices;
+        var viewport=new Viewport3D{Camera=new PerspectiveCamera(new(0,1.05,4.5),new(0,-.05,-4.5),new(0,1,0),31)};
+        var visual=new ModelVisual3D{Content=rig.Root};viewport.Children.Add(visual);
+        var window=new Window{Title="Forme 动画验收",Width=360,Height=440,ShowActivated=false,ShowInTaskbar=false,Content=viewport,Background=Ui.Brush("#F7F5EE")};
+        try
+        {
+            window.Show();await Task.Delay(80);Image(window,$"{id}-front-neutral");
+            if(rig.FacingTransform.M33>-.99)throw new Exception("Anime VRM is not corrected to face +Z: "+id);
+            foreach(var pose in new[]{
+                PetPose.Neutral() with{Locomotion="walk",LocomotionSeconds=.17},
+                PetPose.Neutral() with{Locomotion="run",LocomotionSeconds=.17},
+                PetPose.Neutral() with{LeftArm=-68,RightArm=-68,LeftElbow=18,RightElbow=-18,Stride=.7,Reach=.5}
+            })
+            {
+                rig.Apply(pose);await Task.Delay(50);Image(window,$"{id}-{(pose.Locomotion.Length>0?pose.Locomotion:"gesture")}");
+                if(neutral.SequenceEqual(rig.JointMatrices))throw new Exception("Anime VRM procedural pose did not move its rig joints: "+id);
+            }
+        }
+        finally{visual.Content=null;window.Close();rig.Apply(PetPose.Neutral());}
     }
     private static async Task MarineSize(DesktopHost host,Controller c,Room3DView room)
     {
